@@ -841,12 +841,29 @@ const storage = {
     const { clientName, asOfDate } = parseKey(key);
     const parsed = JSON.parse(value);
     const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString() };
-    const url = SUPABASE_URL + '/rest/v1/balance_sheets';
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { ...supaHeaders(), 'Prefer': 'resolution=merge-duplicates,return=representation' },
-      body: JSON.stringify(body)
-    });
+
+    // Check if record already exists
+    const checkUrl = SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + '&limit=1';
+    const checkResp = await fetch(checkUrl, { headers: supaHeaders() });
+    const existing = checkResp.ok ? await checkResp.json() : [];
+
+    let resp;
+    if (existing.length > 0) {
+      // Record exists — update with PATCH
+      resp = await fetch(checkUrl, {
+        method: 'PATCH',
+        headers: supaHeaders(),
+        body: JSON.stringify({ data: parsed, saved_at: new Date().toISOString() })
+      });
+    } else {
+      // New record — insert with POST
+      resp = await fetch(SUPABASE_URL + '/rest/v1/balance_sheets', {
+        method: 'POST',
+        headers: supaHeaders(),
+        body: JSON.stringify(body)
+      });
+    }
     if (!resp.ok) {
       const err = await resp.text();
       throw new Error('Database error (' + resp.status + '): ' + err);
@@ -916,10 +933,27 @@ export default function BalanceSheet() {
   };
   useEffect(() => { loadSavedList(); }, []);
 
+  const [confirmSave, setConfirmSave] = useState(null); // null | { key, label }
+
   const saveSheet = async () => {
     if (!data.clientName) return;
-    setSaveStatus("saving");
     const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
+    // Check if a record already exists for this client + date
+    try {
+      const existing = await storage.get(key);
+      if (existing) {
+        // Ask user if they want to overwrite
+        setConfirmSave({ key, label: data.clientName + " — " + data.asOfDate });
+        return;
+      }
+    } catch {}
+    // No existing record — save directly
+    await doSave(key);
+  };
+
+  const doSave = async (key) => {
+    setSaveStatus("saving");
+    setConfirmSave(null);
     try {
       await storage.set(key, JSON.stringify({ ...data, _savedAt: new Date().toISOString() }));
       setSaveStatus("saved");
@@ -1875,6 +1909,32 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
+
+      {/* ── Overwrite Confirmation Modal ── */}
+      {confirmSave && (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"white",borderRadius:12,padding:32,maxWidth:420,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,.2)"}}>
+            <div style={{fontSize:"1.1rem",fontWeight:700,color:"#1a1a1a",marginBottom:12}}>
+              Update Existing Balance Sheet?
+            </div>
+            <div style={{fontSize:".9rem",color:"#555",marginBottom:24,lineHeight:1.6}}>
+              A balance sheet for <strong>{confirmSave.label}</strong> is already saved.
+              Do you want to overwrite it with the current data?
+            </div>
+            <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
+              <button className="btn btn-secondary"
+                onClick={() => setConfirmSave(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-save"
+                onClick={() => doSave(confirmSave.key)}>
+                Yes, Update It
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="top-bar">
         <button onClick={()=>setScreen("home")} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"white",borderRadius:6,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",marginRight:8}}>
           Clients
