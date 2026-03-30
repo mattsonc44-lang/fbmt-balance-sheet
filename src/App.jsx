@@ -1201,14 +1201,16 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 ${blank(data.receivables.filter(r=>r.description||r.amount),2).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}
 <div class="row"><span>Federal Payments:</span><span>${pFmt(data.federalPayments)}</span></div>
 <div class="sec">Farm Products:</div>
-${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}</span><span class="c5">${pFmt(numVal(r.quantity)*numVal(r.pricePerUnit))}</span></div>`).join("")}
+<div class="trow th"><span class="c1">Qty/Unit</span><span class="c2">Kind</span><span class="c3">Price/Unit</span><span class="c5">Total Value</span></div>
+${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(numVal(r.quantity)*numVal(r.pricePerUnit))}</span></div>`).join("")}
 <div class="sec">Growing Crops:</div>
 ${blank(data.cropInvestment.filter(r=>r.cropType),2).map(r=>`<div class="trow"><span class="c1">${r.cropType||""}</span><span class="c2">${r.acres?" acres: "+r.acres:""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="subtot"><span>TOTAL CURRENT ASSETS:</span><span>${pFmt(totalCurrentAssets)||"$0"}</span></div>
 <div class="sec">Breeding Stock:</div>
 ${blank(data.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
 <div class="sec">Real Estate:</div>
-${blank(data.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
+<div class="trow th"><span class="c1">Acres</span><span class="c2">Type</span><span class="c3">$/Acre</span><span class="c5">Total Value</span></div>
+${blank(data.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="sec">Titled Vehicles:</div>
 ${blank(data.vehicles.filter(r=>r.make),2).map(r=>`<div class="trow"><span class="c1">${[r.year,r.make].filter(Boolean).join(" ")}</span><span class="c2">${r.vin||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
 <div class="sec">Machinery:</div>
