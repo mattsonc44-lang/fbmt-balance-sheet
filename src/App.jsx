@@ -312,10 +312,10 @@ function emptyData() {
     otherAssets:[{description:"",amount:""}],
     operatingNotes:[{creditor:"",dueDate:"",pmt:"",balance:"",security:""}],
     accountsDue:[{creditor:"",amount:""}],
-    intermediatDebt:[{creditor:"",security:"",dueDate:"",annualPmt:"",principal:""}],
-    reCurrent:[{creditor:"",annualPmt:""}],
+    intermediatDebt:[{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:""}],
+    reCurrent:[{creditor:"",annualPmt:"",rate:""}],
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
-    reMortgages:[{lienHolder:"",terms:"",principal:""}],
+    reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
     otherLiabilities:[{description:"",balance:""}],
     budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:""}],
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
@@ -330,7 +330,7 @@ function Inp({ label, value, onChange, placeholder, prefix }) {
     <div className="input-group">
       {label && <label>{label}</label>}
       <div className="input-wrap">
-        {prefix && <span className="prefix">{prefix || "$"}</span>}
+        {prefix && <span className="prefix">{prefix}</span>}
         <input type="text" value={value} placeholder={placeholder || "0"}
           onChange={e => onChange(e.target.value.replace(/[^0-9.]/g, ""))} />
       </div>
@@ -1224,13 +1224,13 @@ ${blank(data.operatingNotes.filter(r=>r.creditor),4).map(r=>`<div class="trow"><
 ${blank(data.accountsDue.filter(r=>r.creditor),2).map(r=>`<div class="row"><span>${r.creditor||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}
 <div class="sec">Intermediate Term Debt:</div>
 <div class="trow th"><span class="c1">Creditor</span><span class="c2">Security</span><span class="c4">Ann.Pmt</span><span class="c5">Principal</span></div>
-${blank(data.intermediatDebt.filter(r=>r.creditor),4).map(r=>`<div class="trow"><span class="c1">${r.creditor||""}</span><span class="c2">${r.security||""}</span><span class="c4">${pFmt(r.annualPmt)}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
+${blank(data.intermediatDebt.filter(r=>r.creditor),4).map(r=>`<div class="trow"><span class="c1">${r.creditor||""}</span><span class="c2">${r.security||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c4">${pFmt(r.annualPmt)}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
 <div class="sec">Current RE Mortgage Portion:</div>
 ${blank(data.reCurrent.filter(r=>r.creditor),2).map(r=>`<div class="row"><span>${r.creditor||""}</span><span>${pFmt(r.annualPmt)}</span></div>`).join("")}
 <div class="row"><span>Income Taxes Due:</span><span>${pFmt(data.taxesDue)}</span></div>
 <div class="subtot"><span>TOTAL CURRENT LIABILITIES:</span><span>${pFmt(totalCurrentLiab)||"$0"}</span></div>
 <div class="sec">RE Mortgages (long-term):</div>
-${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
+${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
 <div class="tot"><span>TOTAL LIABILITIES</span><span>${pFmt(totalLiabilities)||"$0"}</span></div>
 <div class="net"><span>WORKING CAPITAL</span><span>${pFmt(workingCapital)||"$0"}</span></div>
 <div class="net"><span>NET WORTH</span><span>${pFmt(netWorth)||"$0"}</span></div>
@@ -1717,10 +1717,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("intermediatDebt",i,"dueDate",v)} placeholder="mm/dd/yy" />
               <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
               <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
               <button className="remove-btn" onClick={()=>removeRow("intermediatDebt",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:""})}>+ Add Loan</button>
+          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:""})}>+ Add Loan</button>
           <div className="subtotal-row"><span>Total Intermediate Debt</span><strong className="red">{fmt(intermedTotal)}</strong></div>
         </div>
       );
@@ -1732,10 +1733,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("reCurrent",i,"creditor",v)} placeholder="Mortgage holder" />
               <Inp label="Annual Payment" prefix="$" value={r.annualPmt} onChange={v=>setArr("reCurrent",i,"annualPmt",v)} />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reCurrent",i,"rate",v)} />
               <button className="remove-btn" onClick={()=>removeRow("reCurrent",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:""})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:"",rate:""})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total Current RE Portion</span><strong className="red">{fmt(reCurrentTotal)}</strong></div>
         </div>
       );
@@ -1769,12 +1771,13 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             <div key={i} className="row-entry">
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
-              <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr at 4.5%" />
+              <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reMortgages",i,"rate",v)} />
               <Inp label="Principal (beyond 12 mo)" prefix="$" value={r.principal} onChange={v=>setArr("reMortgages",i,"principal",v)} />
               <button className="remove-btn" onClick={()=>removeRow("reMortgages",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:""})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:""})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total RE Mortgages (LT)</span><strong className="red">{fmt(reMortTotal)}</strong></div>
         </div>
       );
