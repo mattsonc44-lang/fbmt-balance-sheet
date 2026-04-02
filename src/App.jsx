@@ -301,7 +301,7 @@ function emptyData() {
     receivables:[{description:"",amount:""}], receivablesSecured:"",
     federalPayments:"",
     livestockMarket:[{number:"",kind:"",value:""}],
-    farmProducts:[{quantity:"",kind:"",pricePerUnit:"",unit:"bu"}],
+    farmProducts:[{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100"}],
     cropInvestment:[{cropType:"",acres:"",valuePerAcre:""}],
     supplies:[{description:"",value:""}], otherCurrent:[{description:"",amount:""}],
     breedingStock:[{number:"",kind:"",value:""}],
@@ -317,7 +317,7 @@ function emptyData() {
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
     reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
     otherLiabilities:[{description:"",balance:""}],
-    budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:""}],
+    budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100"}],
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
@@ -403,11 +403,13 @@ function BudgetView({
             <span className="bg-col-label" style={{width:90}}>Yield/Acre</span>
             <span className="bg-col-label" style={{width:65}}>Unit</span>
             <span className="bg-col-label" style={{width:100}}>Price</span>
-            <span className="bg-col-label" style={{width:115}}>Value</span>
+            <span className="bg-col-label" style={{width:70}}>Share %</span>
+            <span className="bg-col-label" style={{width:115}}>Your Value</span>
             <span style={{width:32}}></span>
           </div>
           {data.budgetCrops.map((r, i) => {
-            const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(r.price);
+            const share = numVal(r.share || "100");
+            const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(r.price) * (share / 100);
             return (
               <div key={i} className="bg-row">
                 <span className="row-num">{i+1}</span>
@@ -442,13 +444,20 @@ function BudgetView({
                       onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
+                <div className="input-group" style={{width:70,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.share ?? "100"} placeholder="100"
+                      onChange={e => setArr("budgetCrops",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
               </div>
             );
           })}
           <button className="add-btn"
-            onClick={() => addRow("budgetCrops",{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:""})}>
+            onClick={() => addRow("budgetCrops",{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100"})}>
             + Add Crop
           </button>
           <div className="budget-subtotal">
@@ -985,7 +994,7 @@ export default function BalanceSheet() {
   const recTotal = data.receivables.reduce((s,r)=>s+n(r.amount),0);
   const fedPay = n(data.federalPayments);
   const lsMktTotal = data.livestockMarket.reduce((s,r)=>s+n(r.value),0);
-  const farmProdTotal = data.farmProducts.reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit),0);
+  const farmProdTotal = data.farmProducts.reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||"100")/100),0);
   const cropInv = data.cropInvestment.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const suppliesTotal = data.supplies.reduce((s,r)=>s+n(r.value),0);
   const otherCurTotal = data.otherCurrent.reduce((s,r)=>s+n(r.amount),0);
@@ -1012,7 +1021,7 @@ export default function BalanceSheet() {
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
   // Budget calcs
-  const budgetCropTotal = data.budgetCrops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price),0);
+  const budgetCropTotal = data.budgetCrops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||"100")/100),0);
   const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
@@ -1041,7 +1050,7 @@ export default function BalanceSheet() {
     const m = numVal;
     const cash = m(d.cashGlacier) + (d.cashOther||[]).reduce((s,r)=>s+m(r.amount),0);
     const rec = (d.receivables||[]).reduce((s,r)=>s+m(r.amount),0);
-    const fp = (d.farmProducts||[]).reduce((s,r)=>s+m(r.quantity)*m(r.pricePerUnit),0);
+    const fp = (d.farmProducts||[]).reduce((s,r)=>s+m(r.quantity)*m(r.pricePerUnit)*(m(r.share||"100")/100),0);
     const ci = (d.cropInvestment||[]).reduce((s,r)=>s+m(r.acres)*m(r.valuePerAcre),0);
     const ls = (d.livestockMarket||[]).reduce((s,r)=>s+m(r.value),0);
     const sup = (d.supplies||[]).reduce((s,r)=>s+m(r.value),0);
@@ -1202,7 +1211,7 @@ ${blank(data.receivables.filter(r=>r.description||r.amount),2).map(r=>`<div clas
 <div class="row"><span>Federal Payments:</span><span>${pFmt(data.federalPayments)}</span></div>
 <div class="sec">Farm Products:</div>
 <div class="trow th"><span class="c1">Qty/Unit</span><span class="c2">Kind</span><span class="c3">Price/Unit</span><span class="c5">Total Value</span></div>
-${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(numVal(r.quantity)*numVal(r.pricePerUnit))}</span></div>`).join("")}
+${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>{const sh=numVal(r.share||"100");const val=numVal(r.quantity)*numVal(r.pricePerUnit)*(sh/100);return`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}${sh<100?" ("+sh+"% share)":""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(val)}</span></div>`;}).join("")}
 <div class="sec">Growing Crops:</div>
 ${blank(data.cropInvestment.filter(r=>r.cropType),2).map(r=>`<div class="trow"><span class="c1">${r.cropType||""}</span><span class="c2">${r.acres?" acres: "+r.acres:""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="subtot"><span>TOTAL CURRENT ASSETS:</span><span>${pFmt(totalCurrentAssets)||"$0"}</span></div>
@@ -1348,11 +1357,13 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             <span className="fp-col-label" style={{width:72}}>Unit</span>
             <span className="fp-col-label" style={{flex:1}}>Kind</span>
             <span className="fp-col-label" style={{width:105}}>Price/Unit</span>
-            <span className="fp-col-label" style={{width:115}}>Total</span>
+            <span className="fp-col-label" style={{width:75}}>Share %</span>
+            <span className="fp-col-label" style={{width:115}}>Your Value</span>
             <span style={{width:32}}></span>
           </div>
           {data.farmProducts.map((r,i) => {
-            const rv = numVal(r.quantity) * numVal(r.pricePerUnit);
+            const share = numVal(r.share || "100");
+            const rv = numVal(r.quantity) * numVal(r.pricePerUnit) * (share / 100);
             return (
               <div key={i} className="fp-row">
                 <span className="row-num">{i+1}</span>
@@ -1380,12 +1391,19 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                       onChange={e=>setArr("farmProducts",i,"pricePerUnit",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
+                <div className="input-group" style={{width:75,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.share ?? "100"} placeholder="100"
+                      onChange={e=>setArr("farmProducts",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={()=>removeRow("farmProducts",i)}>x</button>
               </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("farmProducts",{quantity:"",kind:"",pricePerUnit:"",unit:"bu"})}>+ Add Farm Product</button>
+          <button className="add-btn" onClick={()=>addRow("farmProducts",{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100"})}>+ Add Farm Product</button>
           <div className="subtotal-row total"><span>Total Farm Products</span><strong>{fmt(farmProdTotal)}</strong></div>
         </div>
       );
