@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const FBMT_CSS_B64 = [
   "KiwqOjpiZWZvcmUsKjo6YWZ0ZXJ7Ym94LXNpemluZzpib3JkZXItYm94O21hcmdpbjowO3BhZGRpbmc6MDt9CmJvZHl7Zm9udC1m",
@@ -411,7 +411,7 @@ function BudgetView({
             const share = numVal(r.share || "100");
             const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(r.price) * (share / 100);
             return (
-              <div key={i} className="bg-row">
+              <div key={i} className="bg-row" data-rowkey={`budgetCrops-${i}`}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:75,flexShrink:0}}>
                   <div className="input-wrap">
@@ -478,7 +478,7 @@ function BudgetView({
           {data.budgetLivestock.map((r, i) => {
             const rv = numVal(r.head) * numVal(r.lbs) * numVal(r.price);
             return (
-              <div key={i} className="bg-row">
+              <div key={i} className="bg-row" data-rowkey={`budgetLivestock-${i}`}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:80,flexShrink:0}}>
                   <div className="input-wrap">
@@ -520,7 +520,7 @@ function BudgetView({
         <div className="budget-subsection">
           <div className="budget-sub-label">Miscellaneous Income</div>
           {data.budgetMisc.map((r, i) => (
-            <div key={i} className="bg-row">
+            <div key={i} className="bg-row" data-rowkey={`budgetMisc-${i}`}>
               <span className="row-num">{i+1}</span>
               <div className="input-group" style={{flex:1}}>
                 <input className="text-input" type="text" value={r.description}
@@ -559,7 +559,7 @@ function BudgetView({
         <div className="budget-subsection">
           <div className="budget-sub-label">Operating Expenses</div>
           {data.budgetExpenses.map((r, i) => (
-            <div key={i} className="bg-row">
+            <div key={i} className="bg-row" data-rowkey={`budgetExpenses-${i}`}>
               <span className="row-num">{i+1}</span>
               <div className="input-group" style={{flex:1}}>
                 <input className="text-input" type="text" value={r.description}
@@ -917,7 +917,19 @@ export default function BalanceSheet() {
   const setArr = (k, idx, field, v) => setData(d => {
     const arr = [...d[k]]; arr[idx] = { ...arr[idx], [field]: v }; return { ...d, [k]: arr };
   });
-  const addRow = (k, tpl) => setData(d => ({ ...d, [k]: [...d[k], { ...tpl }] }));
+  const addRow = (k, tpl) => {
+    setData(d => {
+      const newArr = [...d[k], { ...tpl }];
+      // Schedule focus on first text field of the new row after render
+      setTimeout(() => {
+        const newIdx = newArr.length - 1;
+        const selector = `[data-rowkey="${k}-${newIdx}"] input, [data-rowkey="${k}-${newIdx}"] select`;
+        const el = document.querySelector(selector);
+        if (el) el.focus();
+      }, 30);
+      return { ...d, [k]: newArr };
+    });
+  };
   const removeRow = (k, idx) => setData(d => ({ ...d, [k]: d[k].filter((_,i) => i !== idx) }));
 
   // ── Storage ────────────────────────────────────────────────────────────────
@@ -1296,7 +1308,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🏧" title="Cash — Other Institutions" subtitle="Accounts at other banks, credit unions, or financial institutions" />
           {data.cashOther.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`cashOther-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Institution" value={r.institution} onChange={v=>setArr("cashOther",i,"institution",v)} placeholder="Bank name" />
               <Inp label="Balance" prefix="$" value={r.amount} onChange={v=>setArr("cashOther",i,"amount",v)} />
@@ -1314,7 +1326,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="📋" title="Current Receivables" subtitle="Money owed to the client, collectible within 1 year" />
           {data.receivables.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`receivables-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("receivables",i,"description",v)} placeholder="Who owes / for what" />
               <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("receivables",i,"amount",v)} />
@@ -1336,7 +1348,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🐄" title="Market Livestock" subtitle="Livestock intended for sale — not breeding stock" />
           {data.livestockMarket.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`livestockMarket-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Number" value={r.number} onChange={v=>setArr("livestockMarket",i,"number",v)} placeholder="# head" />
               <TxtInp label="Kind and Weight" value={r.kind} onChange={v=>setArr("livestockMarket",i,"kind",v)} placeholder="e.g., 450 lb steers" />
@@ -1365,7 +1377,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             const share = numVal(r.share || "100");
             const rv = numVal(r.quantity) * numVal(r.pricePerUnit) * (share / 100);
             return (
-              <div key={i} className="fp-row">
+              <div key={i} className="fp-row" data-rowkey={`farmProducts-${i}`}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:90,flexShrink:0}}>
                   <div className="input-wrap">
@@ -1421,7 +1433,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           {data.cropInvestment.map((r,i) => {
             const rv = numVal(r.acres) * numVal(r.valuePerAcre);
             return (
-              <div key={i} className="fp-row">
+              <div key={i} className="fp-row" data-rowkey={`cropInvestment-${i}`}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{flex:1}}>
                   <input className="text-input" type="text" value={r.cropType}
@@ -1454,7 +1466,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🛢" title="Supplies on Hand" subtitle="Fuel, chemicals, seed, parts, or other supplies with value" />
           {data.supplies.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`supplies-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("supplies",i,"description",v)} placeholder="e.g., diesel fuel, seed" />
               <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("supplies",i,"value",v)} />
@@ -1469,7 +1481,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="📦" title="Other Current Assets" subtitle="Anything else collectible within 12 months" />
           {data.otherCurrent.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`otherCurrent-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("otherCurrent",i,"description",v)} />
               <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("otherCurrent",i,"amount",v)} />
@@ -1487,7 +1499,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding" />
           <p className="phase-badge">Intermediate and Long-Term Assets</p>
           {data.breedingStock.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`breedingStock-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Number" value={r.number} onChange={v=>setArr("breedingStock",i,"number",v)} placeholder="# head" />
               <TxtInp label="Kind" value={r.kind} onChange={v=>setArr("breedingStock",i,"kind",v)} placeholder="e.g., Angus cows" />
@@ -1514,7 +1526,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           {data.realEstate.map((r,i) => {
             const rv = numVal(r.acres) * numVal(r.valuePerAcre);
             return (
-              <div key={i} className="fp-row">
+              <div key={i} className="fp-row" data-rowkey={`realEstate-${i}`}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:75,flexShrink:0}}>
                   <div className="input-wrap">
@@ -1552,7 +1564,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="📄" title="Real Estate Sale Contracts Receivable" subtitle="Land contracts where the client is the seller" />
           {data.reContracts.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`reContracts-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description / Buyer" value={r.description} onChange={v=>setArr("reContracts",i,"description",v)} />
               <Inp label="Balance Owed" prefix="$" value={r.amount} onChange={v=>setArr("reContracts",i,"amount",v)} />
@@ -1576,7 +1588,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <span style={{width:32}}></span>
             </div>
             {data.vehicles.map((r,i) => (
-              <div key={i} className="mach-row">
+              <div key={i} className="mach-row" data-rowkey={`vehicles-${i}`}>
                 <div className="mach-col" style={{width:62}}>
                   <input className="text-input" type="text" value={r.year} placeholder="2020" maxLength={4}
                     onChange={e=>setArr("vehicles",i,"year",e.target.value.replace(/[^0-9]/g,""))} />
@@ -1626,7 +1638,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <span style={{width:32}}></span>
             </div>
             {data.machinery.map((r,i) => (
-              <div key={i} className="mach-row">
+              <div key={i} className="mach-row" data-rowkey={`machinery-${i}`}>
                 <div className="mach-col" style={{width:62}}>
                   <input className="text-input" type="text" value={r.year} placeholder="2018" maxLength={4}
                     onChange={e=>setArr("machinery",i,"year",e.target.value.replace(/[^0-9]/g,""))} />
@@ -1670,7 +1682,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="💼" title="Other Assets" subtitle="Investments, retirement accounts, life insurance cash value, notes receivable" />
           {data.otherAssets.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`otherAssets-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("otherAssets",i,"description",v)} placeholder="e.g., IRA, stock, bonds" />
               <Inp label="Value" prefix="$" value={r.amount} onChange={v=>setArr("otherAssets",i,"amount",v)} />
@@ -1697,7 +1709,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🏦" title="Operating and Unsecured Notes" subtitle="Operating lines of credit, seasonal loans, and unsecured debts" color="#4a0810" />
           {data.operatingNotes.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`operatingNotes-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("operatingNotes",i,"creditor",v)} placeholder="Lender name" />
               <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("operatingNotes",i,"dueDate",v)} placeholder="mm/dd/yy" />
@@ -1715,7 +1727,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🧾" title="Accounts Due" subtitle="Trade accounts, supplier balances, amounts owed to vendors" color="#4a0810" />
           {data.accountsDue.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`accountsDue-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor / Vendor" value={r.creditor} onChange={v=>setArr("accountsDue",i,"creditor",v)} placeholder="Who is owed" />
               <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("accountsDue",i,"amount",v)} />
@@ -1730,7 +1742,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="📅" title="Intermediate Term and Installment Debt" subtitle="Equipment loans, livestock loans, term notes" color="#4a0810" />
           {data.intermediatDebt.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`intermediatDebt-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("intermediatDebt",i,"creditor",v)} placeholder="Lender" />
               <TxtInp label="Security" value={r.security} onChange={v=>setArr("intermediatDebt",i,"security",v)} placeholder="Collateral" />
@@ -1749,7 +1761,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🏠" title="Current Portion — Real Estate Mortgages" subtitle="Mortgage payments due within the next 12 months" color="#4a0810" />
           {data.reCurrent.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`reCurrent-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("reCurrent",i,"creditor",v)} placeholder="Mortgage holder" />
               <Inp label="Annual Payment" prefix="$" value={r.annualPmt} onChange={v=>setArr("reCurrent",i,"annualPmt",v)} />
@@ -1774,7 +1786,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="📋" title="Other Current Liabilities" subtitle="Any other obligations due within 12 months" color="#4a0810" />
           {data.otherCurrentLiab.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`otherCurrentLiab-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("otherCurrentLiab",i,"description",v)} />
               <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("otherCurrentLiab",i,"amount",v)} />
@@ -1788,7 +1800,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="📜" title="Real Estate Mortgages and Contracts" subtitle="Long-term mortgage balances — principal due beyond 12 months" color="#4a0810" />
           {data.reMortgages.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`reMortgages-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
@@ -1805,7 +1817,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <div className="step-content">
           <SecHdr icon="🔖" title="Other Liabilities" subtitle="Student loans, personal loans, judgments, etc." color="#4a0810" />
           {data.otherLiabilities.map((r,i) => (
-            <div key={i} className="row-entry">
+            <div key={i} className="row-entry" data-rowkey={`otherLiabilities-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("otherLiabilities",i,"description",v)} />
               <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("otherLiabilities",i,"balance",v)} />
