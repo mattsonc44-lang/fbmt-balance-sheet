@@ -1021,14 +1021,16 @@ export default function BalanceSheet() {
   const totalAssets = totalCurrentAssets + totalLTAssets;
   const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
-  const intermedTotal = data.intermediatDebt.reduce((s,r)=>s+n(r.principal),0);
+  const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
+  const intermedLTPortion = data.intermediatDebt.reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
+  const intermedTotal = intermedCurrentPortion; // alias used in summary display
   const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0);
   const taxesDueVal = n(data.taxesDue);
   const otherCLTotal = data.otherCurrentLiab.reduce((s,r)=>s+n(r.amount),0);
-  const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedTotal+reCurrentTotal+taxesDueVal+otherCLTotal;
+  const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
   const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0);
   const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
-  const totalLiabilities = totalCurrentLiab + reMortTotal + otherLiabTotal;
+  const totalLiabilities = totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal;
   const netWorth = totalAssets - totalLiabilities;
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
@@ -1077,13 +1079,14 @@ export default function BalanceSheet() {
     const ta = tc+tlt;
     const on = (d.operatingNotes||[]).reduce((s,r)=>s+m(r.balance),0);
     const ad = (d.accountsDue||[]).reduce((s,r)=>s+m(r.amount),0);
-    const id = (d.intermediatDebt||[]).reduce((s,r)=>s+m(r.principal),0);
+    const id = (d.intermediatDebt||[]).reduce((s,r)=>s+m(r.annualPmt),0);
+    const idLT = (d.intermediatDebt||[]).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
     const rc = (d.reCurrent||[]).reduce((s,r)=>s+m(r.annualPmt),0);
     const ocl = (d.otherCurrentLiab||[]).reduce((s,r)=>s+m(r.amount),0);
     const tcl = on+ad+id+rc+m(d.taxesDue)+ocl;
     const rm = (d.reMortgages||[]).reduce((s,r)=>s+m(r.principal),0);
     const ol = (d.otherLiabilities||[]).reduce((s,r)=>s+m(r.balance),0);
-    const tl = tcl+rm+ol;
+    const tl = tcl+idLT+rm+ol;
     return {
       "Cash & Bank":cash, "Receivables":rec, "Federal Payments":m(d.federalPayments),
       "Market Livestock":ls, "Farm Products":fp, "Crop Investment":ci,
@@ -1092,9 +1095,10 @@ export default function BalanceSheet() {
       "RE Contracts Rec.":(d.reContracts||[]).reduce((s,r)=>s+m(r.amount),0),
       "Titled Vehicles":veh, "Machinery & Equip.":mach, "Other Assets":oa,
       "Total LT Assets":tlt, "TOTAL ASSETS":ta,
-      "Operating Notes":on, "Accounts Due":ad, "Intermediate Debt":id,
+      "Operating Notes":on, "Accounts Due":ad, "Intermediate Debt (current)":id,
       "RE Mortgage (current)":rc, "Income Taxes Due":m(d.taxesDue),
       "Other Current Liab":ocl, "Total Current Liab":tcl,
+      "Intermediate Debt (LT)":idLT,
       "RE Mortgages (LT)":rm, "Other Liabilities":ol,
       "TOTAL LIABILITIES":tl, "WORKING CAPITAL":tc-tcl, "NET WORTH":ta-tl
     };
@@ -1916,13 +1920,14 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 <div className="ss-label">Current Liabilities</div>
                 {opNotesTotal > 0 && <div className="ss-row"><span>Operating Notes</span><span>{fmt(opNotesTotal)}</span></div>}
                 {acctsDueTotal > 0 && <div className="ss-row"><span>Accounts Due</span><span>{fmt(acctsDueTotal)}</span></div>}
-                {intermedTotal > 0 && <div className="ss-row"><span>Intermediate Debt</span><span>{fmt(intermedTotal)}</span></div>}
+                {intermedCurrentPortion > 0 && <div className="ss-row"><span>Intermediate Debt (current portion)</span><span>{fmt(intermedCurrentPortion)}</span></div>}
                 {reCurrentTotal > 0 && <div className="ss-row"><span>RE Mortgage Current</span><span>{fmt(reCurrentTotal)}</span></div>}
                 {taxesDueVal > 0 && <div className="ss-row"><span>Income Taxes Due</span><span>{fmt(taxesDueVal)}</span></div>}
                 <div className="ss-subtotal"><span>Total Current Liabilities</span><span>{fmt(totalCurrentLiab)}</span></div>
               </div>
               <div className="summary-section">
                 <div className="ss-label">Long-Term Liabilities</div>
+                {intermedLTPortion > 0 && <div className="ss-row"><span>Intermediate Debt (LT portion)</span><span>{fmt(intermedLTPortion)}</span></div>}
                 {reMortTotal > 0 && <div className="ss-row"><span>RE Mortgages (LT)</span><span>{fmt(reMortTotal)}</span></div>}
                 {otherLiabTotal > 0 && <div className="ss-row"><span>Other Liabilities</span><span>{fmt(otherLiabTotal)}</span></div>}
                 <div className="ss-subtotal"><span>Total Long-Term</span><span>{fmt(reMortTotal+otherLiabTotal)}</span></div>
