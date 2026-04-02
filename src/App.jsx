@@ -1207,6 +1207,18 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .sig{margin-top:10pt;border-top:1pt solid #000;padding-top:6pt;font-size:7pt;}
 .sig-row{display:flex;gap:20pt;margin-top:8pt;}
 .sig-line{flex:1;border-top:1pt solid #000;padding-top:2pt;}
+.page2{page-break-before:always;padding-top:.2in;}
+.sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
+.sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
+.sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
+.sched-table th.r{text-align:right;}
+.sched-table td{padding:3pt 5pt;border-bottom:.5pt dotted #ccc;vertical-align:top;}
+.sched-table td.r{text-align:right;font-weight:600;}
+.sched-table tr:nth-child(even){background:#f8f8f8;}
+.sched-foot{display:flex;justify-content:flex-end;margin-top:4pt;}
+.sched-total{background:#000;color:#fff;padding:2pt 8pt;font-weight:700;font-size:8pt;}
+.sched-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4pt;}
+.sched-client{font-size:8pt;color:#555;}
 </style></head><body>
 <div class="hdr">
   <div class="logo-box">FIRST<br/>BANK<br/>of Montana<br/><small>www.1stbmt.com</small></div>
@@ -1232,10 +1244,8 @@ ${blank(data.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span 
 <div class="sec">Real Estate:</div>
 <div class="trow th"><span class="c1">Acres</span><span class="c2">Type</span><span class="c3">$/Acre</span><span class="c5">Total Value</span></div>
 ${blank(data.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
-<div class="sec">Titled Vehicles:</div>
-${blank(data.vehicles.filter(r=>r.make),2).map(r=>`<div class="trow"><span class="c1">${[r.year,r.make].filter(Boolean).join(" ")}</span><span class="c2">${r.vin||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
-<div class="sec">Machinery:</div>
-${blank(data.machinery.filter(r=>r.make),3).map(r=>`<div class="trow"><span class="c1">${[r.year,r.make].filter(Boolean).join(" ")}</span><span class="c2">${r.serial||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
+<div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
+<div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
 <div class="tot"><span>TOTAL ASSETS</span><span>${pFmt(totalAssets)||"$0"}</span></div>
 </div>
 <div class="col">
@@ -1270,6 +1280,49 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   <div class="sig-line">Date: ____________________________________________________</div>
 </div>
 </div>
+
+<!-- ═══ PAGE 2 — SCHEDULES ═══════════════════════════════════════════════ -->
+<div class="page2">
+<div class="hdr">
+  <div class="logo-box">FIRST<br/>BANK<br/>of Montana<br/><small>www.1stbmt.com</small></div>
+  <div style="flex:1;padding-left:16pt">
+    <div style="font-size:11pt;font-weight:700;text-decoration:underline;">Balance Sheet Supplement — Schedules</div>
+    <div style="font-size:8pt;margin-top:3pt;">Name: ${data.clientName} &nbsp;&nbsp; As of: ${data.asOfDate}</div>
+  </div>
+</div>
+
+<div class="sched-title">Titled Vehicles Schedule</div>
+<table class="sched-table">
+  <thead><tr>
+    <th style="width:8%">Year</th>
+    <th style="width:32%">Make and Model</th>
+    <th style="width:25%">VIN</th>
+    <th style="width:15%">Condition</th>
+    <th class="r" style="width:20%">Value</th>
+  </tr></thead>
+  <tbody>
+    ${(data.vehicles.length ? data.vehicles : [{year:"",make:"",vin:"",condition:"",value:""}]).map(r=>`<tr><td>${r.year||""}</td><td>${r.make||""}</td><td style="font-size:6.5pt">${r.vin||""}</td><td>${r.condition||""}</td><td class="r">${pFmt(r.value)}</td></tr>`).join("")}
+  </tbody>
+</table>
+<div class="sched-foot"><div class="sched-total">TOTAL TITLED VEHICLES: ${pFmt(vehiclesVal)||"$0"}</div></div>
+
+<div class="sched-title" style="margin-top:18pt">Farm Machinery and Equipment Schedule</div>
+<table class="sched-table">
+  <thead><tr>
+    <th style="width:7%">Year</th>
+    <th style="width:30%">Make and Model</th>
+    <th style="width:12%">Size</th>
+    <th style="width:18%">Serial Number</th>
+    <th style="width:13%">Condition</th>
+    <th class="r" style="width:20%">Value</th>
+  </tr></thead>
+  <tbody>
+    ${(data.machinery.length ? data.machinery : [{year:"",make:"",size:"",serial:"",condition:"",value:""}]).map(r=>`<tr><td>${r.year||""}</td><td>${r.make||""}</td><td>${r.size||""}</td><td style="font-size:6.5pt">${r.serial||""}</td><td>${r.condition||""}</td><td class="r">${pFmt(r.value)}</td></tr>`).join("")}
+  </tbody>
+</table>
+<div class="sched-foot"><div class="sched-total">TOTAL MACHINERY AND EQUIPMENT: ${pFmt(machVal)||"$0"}</div></div>
+</div>
+
 </body></html>`;
     W.document.write(html);
     W.document.close();
