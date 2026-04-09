@@ -969,7 +969,6 @@ export default function BalanceSheet() {
   const [importError, setImportError] = useState("");
   const [importDate, setImportDate] = useState(new Date().toISOString().slice(0,10));
   const [importDragging, setImportDragging] = useState(false);
-  const importFileRef = useRef(); // null | { key, label }
 
   const saveSheet = async () => {
     if (!data.clientName) return;
@@ -1012,7 +1011,9 @@ export default function BalanceSheet() {
   const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); };
 
   // ── Import helpers ─────────────────────────────────────────────────────────
-  function downloadTemplate() {
+  async function downloadTemplate() {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    const XLSX = window.XLSX;
     const rows = [
       ["SECTION","FIELD1","FIELD2","FIELD3","FIELD4","FIELD5","FIELD6","NOTES"],
       ["CLIENT","clientName","asOfDate","","","","","e.g. John Smith, 2024-12-31"],
@@ -1056,7 +1057,21 @@ export default function BalanceSheet() {
     XLSX.writeFile(wb, "FBMT_Balance_Sheet_Import_Template.xlsx");
   }
 
-  function parseImportFile(file) {
+  async function loadScript(src) {
+    if (window.__loadedScripts && window.__loadedScripts[src]) return;
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = () => {
+        if (!window.__loadedScripts) window.__loadedScripts = {};
+        window.__loadedScripts[src] = true;
+        res();
+      };
+      s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function parseImportFile(file) {
     setImportError("");
     setImportData(null);
     const ext = file.name.split(".").pop().toLowerCase();
@@ -1144,26 +1159,32 @@ export default function BalanceSheet() {
       }
     }
 
-    if (ext === "csv") {
-      Papa.parse(file, {
-        complete: (r) => processRows(r.data),
-        error: (e) => setImportError("CSV parse error: " + e.message)
-      });
-    } else if (ext === "xlsx" || ext === "xls") {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const wb = XLSX.read(e.target.result, {type:"array"});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
-          processRows(rows);
-        } catch(err) {
-          setImportError("Excel parse error: " + err.message);
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      setImportError("Unsupported file type. Please use .csv, .xlsx, or .xls");
+    try {
+      if (ext === "csv") {
+        await loadScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js");
+        window.Papa.parse(file, {
+          complete: (r) => processRows(r.data),
+          error: (e) => setImportError("CSV parse error: " + e.message)
+        });
+      } else if (ext === "xlsx" || ext === "xls") {
+        await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const wb = window.XLSX.read(e.target.result, {type:"array"});
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = window.XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
+            processRows(rows);
+          } catch(err) {
+            setImportError("Excel parse error: " + err.message);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        setImportError("Unsupported file type. Please use .csv, .xlsx, or .xls");
+      }
+    } catch(err) {
+      setImportError("Failed to load parser: " + err.message);
     }
   }
 
@@ -2200,21 +2221,27 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                   onDragOver={e=>{e.preventDefault();setImportDragging(true);}}
                   onDragLeave={()=>setImportDragging(false)}
                   onDrop={e=>{e.preventDefault();setImportDragging(false);const f=e.dataTransfer.files[0];if(f)handleImportFile(f);}}
-                  onClick={()=>importFileRef.current.click()}
                   style={{
                     border:"2.5px dashed " + (importDragging ? "#2d5a8e" : "#ccc"),
-                    borderRadius:10,padding:"32px 20px",textAlign:"center",
+                    borderRadius:10,padding:"28px 20px",textAlign:"center",
                     background:importDragging ? "#f0f6ff" : "#fafafa",
-                    cursor:"pointer",transition:"all .15s",marginBottom:16
+                    transition:"all .15s",marginBottom:16
                   }}>
                   <div style={{fontSize:"2rem",marginBottom:8}}>📂</div>
-                  <div style={{fontWeight:600,color:"#333",marginBottom:4}}>
+                  <div style={{fontWeight:600,color:"#333",marginBottom:12}}>
                     {importDragging ? "Drop to import" : "Drag and drop your file here"}
                   </div>
-                  <div style={{fontSize:".8rem",color:"#888"}}>or click to browse — CSV, XLSX, or XLS</div>
-                  <input ref={importFileRef} type="file" accept=".csv,.xlsx,.xls"
-                    style={{display:"none"}}
-                    onChange={e=>handleImportFile(e.target.files[0])} />
+                  <label style={{
+                    display:"inline-block",background:"#2d5a8e",color:"white",
+                    borderRadius:7,padding:"9px 20px",fontSize:".88rem",fontWeight:600,
+                    cursor:"pointer",fontFamily:"inherit"
+                  }}>
+                    Browse for File
+                    <input type="file" accept=".csv,.xlsx,.xls"
+                      style={{display:"none"}}
+                      onChange={e=>{if(e.target.files[0])handleImportFile(e.target.files[0]);}} />
+                  </label>
+                  <div style={{fontSize:".78rem",color:"#aaa",marginTop:10}}>CSV, XLSX, or XLS</div>
                 </div>
 
                 {importError && (
