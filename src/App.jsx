@@ -1078,84 +1078,300 @@ export default function BalanceSheet() {
 
     function processRows(rows) {
       try {
-        const parsed = { clientName: "", asOfDate: importDate };
-        const arrays = {
-          cashOther:[], receivables:[], livestockMarket:[], farmProducts:[],
-          cropInvestment:[], supplies:[], otherCurrent:[], breedingStock:[],
-          realEstate:[], reContracts:[], vehicles:[], machinery:[], otherAssets:[],
-          operatingNotes:[], accountsDue:[], intermediatDebt:[], reCurrent:[],
-          otherCurrentLiab:[], reMortgages:[], otherLiabilities:[]
+        // Helper: safe cell value as string
+        const cell = (row, col) => {
+          if (!row || row[col] === undefined || row[col] === null) return "";
+          const v = row[col];
+          // Skip formula strings
+          if (typeof v === "string" && v.startsWith("=")) return "";
+          if (v instanceof Date) return v.toISOString().slice(0,10);
+          return String(v).trim();
         };
-        let federalPayments = "", taxesDue = "", cashGlacier = "";
+        const num = (row, col) => {
+          const v = cell(row, col);
+          return v ? v.replace(/[^0-9.]/g, "") : "";
+        };
 
-        for (const row of rows) {
-          if (!row || !row[0]) continue;
-          const sec = String(row[0]).trim().toUpperCase();
-          const f = (i) => (row[i] !== undefined && row[i] !== null) ? String(row[i]).trim() : "";
+        // Detect format: FBMT native Excel OR generic section-based CSV/Excel
+        const r0 = rows[0] || [];
+        const r1 = rows[1] || [];
+        const r6 = rows[6] || [];
+        const isFBMT = (cell(r1,2) || "").includes("Balance Sheet") ||
+                       (cell(r6,0) === "Name:" || cell(r6,5) === "As of Date:");
 
-          if (sec === "CLIENT") {
-            if (f(1)) parsed.clientName = f(1);
-            if (f(2)) parsed.asOfDate = f(2);
-          } else if (sec === "CASH_GLACIER") {
-            cashGlacier = f(1);
-          } else if (sec === "CASH_OTHER") {
-            if (f(1)||f(2)) arrays.cashOther.push({institution:f(1),amount:f(2)});
-          } else if (sec === "RECEIVABLES") {
-            if (f(1)||f(2)) arrays.receivables.push({description:f(1),amount:f(2)});
-          } else if (sec === "FEDERAL_PAYMENTS") {
-            federalPayments = f(1);
-          } else if (sec === "LIVESTOCK_MARKET") {
-            if (f(1)||f(2)||f(3)) arrays.livestockMarket.push({number:f(1),kind:f(2),value:f(3)});
-          } else if (sec === "FARM_PRODUCTS") {
-            if (f(1)||f(3)) arrays.farmProducts.push({quantity:f(1),unit:f(2)||"bu",kind:f(3),pricePerUnit:f(4),share:f(5)||"100",contracted:f(6).toLowerCase()==="true"||f(6)==="1"||f(6).toLowerCase()==="yes"});
-          } else if (sec === "CROP_INVESTMENT") {
-            if (f(1)||f(2)) arrays.cropInvestment.push({cropType:f(1),acres:f(2),valuePerAcre:f(3)});
-          } else if (sec === "SUPPLIES") {
-            if (f(1)||f(2)) arrays.supplies.push({description:f(1),value:f(2)});
-          } else if (sec === "OTHER_CURRENT") {
-            if (f(1)||f(2)) arrays.otherCurrent.push({description:f(1),amount:f(2)});
-          } else if (sec === "BREEDING_STOCK") {
-            if (f(1)||f(2)||f(3)) arrays.breedingStock.push({number:f(1),kind:f(2),value:f(3)});
-          } else if (sec === "REAL_ESTATE") {
-            if (f(1)||f(2)) arrays.realEstate.push({acres:f(1),reType:f(2),description:f(3),valuePerAcre:f(4)});
-          } else if (sec === "RE_CONTRACTS") {
-            if (f(1)||f(2)) arrays.reContracts.push({description:f(1),amount:f(2)});
-          } else if (sec === "VEHICLES") {
-            if (f(1)||f(2)) arrays.vehicles.push({year:f(1),make:f(2),vin:f(3),condition:f(4),value:f(5)});
-          } else if (sec === "MACHINERY") {
-            if (f(1)||f(2)) arrays.machinery.push({year:f(1),make:f(2),size:f(3),serial:f(4),condition:f(5),value:f(6)});
-          } else if (sec === "OTHER_ASSETS") {
-            if (f(1)||f(2)) arrays.otherAssets.push({description:f(1),amount:f(2)});
-          } else if (sec === "OPERATING_NOTES") {
-            if (f(1)||f(4)) arrays.operatingNotes.push({creditor:f(1),dueDate:f(2),pmt:f(3),balance:f(4),security:f(5)});
-          } else if (sec === "ACCOUNTS_DUE") {
-            if (f(1)||f(2)) arrays.accountsDue.push({creditor:f(1),amount:f(2)});
-          } else if (sec === "INTERMEDIATE_DEBT") {
-            if (f(1)||f(5)) arrays.intermediatDebt.push({creditor:f(1),security:f(2),dueDate:f(3),annualPmt:f(4),principal:f(5),rate:f(6)});
-          } else if (sec === "RE_CURRENT") {
-            if (f(1)||f(2)) arrays.reCurrent.push({creditor:f(1),annualPmt:f(2),rate:f(3)});
-          } else if (sec === "TAXES_DUE") {
-            taxesDue = f(1);
-          } else if (sec === "OTHER_CURRENT_LIAB") {
-            if (f(1)||f(2)) arrays.otherCurrentLiab.push({description:f(1),amount:f(2)});
-          } else if (sec === "RE_MORTGAGES") {
-            if (f(1)||f(4)) arrays.reMortgages.push({lienHolder:f(1),terms:f(2),rate:f(3),principal:f(4)});
-          } else if (sec === "OTHER_LIABILITIES") {
-            if (f(1)||f(2)) arrays.otherLiabilities.push({description:f(1),balance:f(2)});
+        if (isFBMT) {
+          // ── FBMT Native Excel Format ──────────────────────────────────────
+          const R = (i) => rows[i] || []; // 0-indexed
+
+          // Client info (row 7 = index 6)
+          const clientName = cell(R(6), 1);
+          const rawDate = R(6)[6];
+          const asOfDate = rawDate instanceof Date
+            ? rawDate.toISOString().slice(0,10)
+            : rawDate ? String(rawDate).slice(0,10) : importDate;
+
+          // Cash on Hand (row 10 = index 9, col D = index 3)
+          const cashGlacier = num(R(9), 3);
+
+          // Current Receivables (rows 12-14 = index 11-13, col A=desc, D=value)
+          const receivables = [];
+          for (let i = 11; i <= 13; i++) {
+            const desc = cell(R(i), 0);
+            const val = num(R(i), 3);
+            if (desc && !desc.includes("If Above") && !desc.includes("Federal")) {
+              receivables.push({description: desc, amount: val});
+            }
           }
+
+          // Federal Payments (row 16 = index 15, col D)
+          const federalPayments = num(R(15), 3) || num(R(16), 3);
+
+          // Market Livestock (rows 19-21 = index 18-20, A=num, B=kind, C=value/head)
+          const livestockMarket = [];
+          for (let i = 18; i <= 21; i++) {
+            const n = cell(R(i), 0);
+            const k = cell(R(i), 1);
+            const v = num(R(i), 2);
+            if (k && !k.includes("Kind") && !k.includes("Number")) {
+              const total = n && v ? String(parseFloat(n) * parseFloat(v)) : v;
+              livestockMarket.push({number: n, kind: k, value: total});
+            }
+          }
+
+          // Farm Products (rows 24-33 = index 23-32, A=qty, B=kind, C=price/unit)
+          const farmProducts = [];
+          for (let i = 23; i <= 32; i++) {
+            const qty = cell(R(i), 0);
+            const kind = cell(R(i), 1);
+            const price = cell(R(i), 2);
+            if (kind && !kind.includes("Kind") && !kind.includes("Quantity")) {
+              farmProducts.push({quantity: qty||"", unit:"bu", kind: kind, pricePerUnit: price||"", share:"100", contracted:false});
+            }
+          }
+
+          // Cash Investment / Crops (rows 35 = index 34, A=acres, B=kind, C=value/acre)
+          const cropInvestment = [];
+          for (let i = 34; i <= 35; i++) {
+            const acres = cell(R(i), 0);
+            const kind = cell(R(i), 1);
+            const vpa = cell(R(i), 2);
+            if (kind && acres) {
+              cropInvestment.push({cropType: kind, acres: acres, valuePerAcre: vpa||""});
+            }
+          }
+
+          // Supplies (row 37 = index 36, B=desc, D=value)
+          const supplies = [];
+          for (let i = 36; i <= 37; i++) {
+            const desc = cell(R(i), 1);
+            const val = num(R(i), 3);
+            if (desc && !desc.includes("Supplies")) {
+              supplies.push({description: desc, value: val});
+            }
+          }
+
+          // Other Current Assets / Hay etc (rows 39-41 = index 38-40)
+          const otherCurrent = [];
+          for (let i = 38; i <= 41; i++) {
+            const qty = cell(R(i), 0);
+            const kind = cell(R(i), 1);
+            const price = cell(R(i), 2);
+            if (kind && !kind.includes("Other Current") && !kind.includes("Creditor")) {
+              const val = qty && price ? String(parseFloat(qty||0) * parseFloat(price||0)) : num(R(i),3);
+              otherCurrent.push({description: (qty ? qty + " " : "") + kind, amount: val});
+            }
+          }
+
+          // Breeding Stock (rows 46-52 = index 45-51, A=num, B=kind, C=value/head)
+          const breedingStock = [];
+          for (let i = 45; i <= 52; i++) {
+            const n = cell(R(i), 0);
+            const k = cell(R(i), 1);
+            const v = cell(R(i), 2);
+            if (k && !k.includes("Kind") && !k.includes("Number")) {
+              const total = n && v ? String(parseFloat(n||0) * parseFloat(v||0)) : "";
+              breedingStock.push({number: n, kind: k, value: total});
+            }
+          }
+
+          // Real Estate (from supplement rows 81-86 = index 80-85, A=desc, C=acres, J=value)
+          const realEstate = [];
+          for (let i = 80; i <= 86; i++) {
+            const desc = cell(R(i), 0);
+            const acres = cell(R(i), 2);
+            const val = num(R(i), 9);
+            if (desc && !desc.includes("Description") && !desc.includes("TOTAL")) {
+              const vpa = acres && val && parseFloat(acres) > 0
+                ? String((parseFloat(val) / parseFloat(acres)).toFixed(0)) : "";
+              realEstate.push({acres: acres, reType:"Cropland", description: desc, valuePerAcre: vpa});
+            }
+          }
+
+          // Other Assets (rows 63-66 = index 62-65, B=desc, D=value)
+          const otherAssets = [];
+          for (let i = 62; i <= 66; i++) {
+            const desc = cell(R(i), 1);
+            const val = num(R(i), 3);
+            if (desc) otherAssets.push({description: desc, amount: val});
+          }
+
+          // Operating Notes / Liabilities (rows 12-14 = index 11-13, F=creditor, J=balance)
+          const operatingNotes = [];
+          for (let i = 11; i <= 14; i++) {
+            const cred = cell(R(i), 5);
+            const bal = num(R(i), 9);
+            if (cred && !cred.includes("Operating") && !cred.includes("Unsecured")) {
+              operatingNotes.push({creditor: cred, dueDate:"", pmt:"", balance: bal, security:""});
+            }
+          }
+
+          // Intermediate Term Debt (rows 21 = index 20, F=creditor, G=security, H=due, I=pmt, J=principal)
+          const intermediatDebt = [];
+          for (let i = 20; i <= 25; i++) {
+            const cred = cell(R(i), 5);
+            const sec2 = cell(R(i), 6);
+            const due = cell(R(i), 7);
+            const pmt = num(R(i), 8);
+            const prin = num(R(i), 9);
+            if (cred && !cred.includes("Creditor") && !cred.includes("Intermediate")) {
+              intermediatDebt.push({creditor:cred, security:sec2, dueDate:due, annualPmt:pmt, principal:prin, rate:""});
+            }
+          }
+
+          // Current RE Mortgage (rows 40-42 = index 39-41, F=creditor, J=annual pmt)
+          const reCurrent = [];
+          for (let i = 39; i <= 42; i++) {
+            const cred = cell(R(i), 5);
+            const pmt = num(R(i), 9);
+            if (cred && !cred.includes("Creditor") && !cred.includes("Current Portion") && !cred.includes("Independence - accrued")) {
+              reCurrent.push({creditor: cred, annualPmt: pmt, rate:""});
+            }
+          }
+
+          // Taxes Due (row 43 = index 42)
+          const taxesDue = "";
+
+          // RE Mortgages LT (rows 52-54 = index 51-53, F=lienholder, G=terms, J=principal)
+          const reMortgages = [];
+          for (let i = 51; i <= 56; i++) {
+            const lh = cell(R(i), 5);
+            const terms = cell(R(i), 6);
+            const prin = num(R(i), 9);
+            if (lh && !lh.includes("Lien") && !lh.includes("Real Estate") && lh.trim()) {
+              reMortgages.push({lienHolder: lh, terms: terms, principal: prin, rate:""});
+            }
+          }
+
+          // Other Liabilities (rows 56-58 = index 55-57, F=desc, J=balance)
+          const otherLiabilities = [];
+          for (let i = 55; i <= 58; i++) {
+            const desc = cell(R(i), 5);
+            const bal = num(R(i), 9);
+            if (desc && !desc.includes("Other Liabilities")) {
+              otherLiabilities.push({description: desc, balance: bal});
+            }
+          }
+
+          // Vehicles (from supplement rows 112-121 = index 111-120)
+          const vehicles = [];
+          for (let i = 111; i <= 121; i++) {
+            const yr = cell(R(i), 1);
+            const make = cell(R(i), 2);
+            const model = cell(R(i), 5);
+            const item = cell(R(i), 6);
+            const cond = cell(R(i), 8);
+            const val = num(R(i), 9);
+            const fullMake = [make, model || item].filter(Boolean).join(" ");
+            if (fullMake && val) {
+              vehicles.push({year: yr, make: fullMake, vin:"", condition: cond, value: val});
+            }
+          }
+
+          // Machinery (from supplement rows 126-141 = index 125-140)
+          const machinery = [];
+          for (let i = 125; i <= 141; i++) {
+            const yr = cell(R(i), 1);
+            const make = cell(R(i), 2);
+            const size = cell(R(i), 3);
+            const model = cell(R(i), 5);
+            const item = cell(R(i), 6);
+            const serial = cell(R(i), 7);
+            const cond = cell(R(i), 8);
+            const val = num(R(i), 9);
+            const fullMake = [make, model || item].filter(Boolean).join(" ");
+            if (fullMake && val) {
+              machinery.push({year: yr, make: fullMake, size: size||"", serial: serial||"", condition: cond||"", value: val});
+            }
+          }
+
+          const fill = (arr, key) => arr.length ? arr : emptyData()[key];
+          const result = {
+            ...emptyData(),
+            clientName, asOfDate, cashGlacier, federalPayments, taxesDue,
+            receivables: fill(receivables,"receivables"),
+            livestockMarket: fill(livestockMarket,"livestockMarket"),
+            farmProducts: fill(farmProducts,"farmProducts"),
+            cropInvestment: fill(cropInvestment,"cropInvestment"),
+            supplies: fill(supplies,"supplies"),
+            otherCurrent: fill(otherCurrent,"otherCurrent"),
+            breedingStock: fill(breedingStock,"breedingStock"),
+            realEstate: fill(realEstate,"realEstate"),
+            otherAssets: fill(otherAssets,"otherAssets"),
+            operatingNotes: fill(operatingNotes,"operatingNotes"),
+            intermediatDebt: fill(intermediatDebt,"intermediatDebt"),
+            reCurrent: fill(reCurrent,"reCurrent"),
+            reMortgages: fill(reMortgages,"reMortgages"),
+            otherLiabilities: fill(otherLiabilities,"otherLiabilities"),
+            vehicles: fill(vehicles,"vehicles"),
+            machinery: fill(machinery,"machinery"),
+          };
+          setImportData(result);
+
+        } else {
+          // ── Generic Section-Based Format (original template) ──────────────
+          const arrays = {
+            cashOther:[], receivables:[], livestockMarket:[], farmProducts:[],
+            cropInvestment:[], supplies:[], otherCurrent:[], breedingStock:[],
+            realEstate:[], reContracts:[], vehicles:[], machinery:[], otherAssets:[],
+            operatingNotes:[], accountsDue:[], intermediatDebt:[], reCurrent:[],
+            otherCurrentLiab:[], reMortgages:[], otherLiabilities:[]
+          };
+          let federalPayments = "", taxesDue = "", cashGlacier = "", clientName = "", asOfDate = importDate;
+
+          for (const row of rows) {
+            if (!row || !row[0]) continue;
+            const sec = String(row[0]).trim().toUpperCase();
+            const f = (i) => (row[i] !== undefined && row[i] !== null) ? String(row[i]).trim() : "";
+            if (sec === "CLIENT") { if (f(1)) clientName=f(1); if (f(2)) asOfDate=f(2); }
+            else if (sec === "CASH_GLACIER") { cashGlacier = f(1); }
+            else if (sec === "CASH_OTHER" && (f(1)||f(2))) arrays.cashOther.push({institution:f(1),amount:f(2)});
+            else if (sec === "RECEIVABLES" && (f(1)||f(2))) arrays.receivables.push({description:f(1),amount:f(2)});
+            else if (sec === "FEDERAL_PAYMENTS") { federalPayments = f(1); }
+            else if (sec === "LIVESTOCK_MARKET" && (f(1)||f(2)||f(3))) arrays.livestockMarket.push({number:f(1),kind:f(2),value:f(3)});
+            else if (sec === "FARM_PRODUCTS" && (f(1)||f(3))) arrays.farmProducts.push({quantity:f(1),unit:f(2)||"bu",kind:f(3),pricePerUnit:f(4),share:f(5)||"100",contracted:f(6).toLowerCase()==="true"||f(6)==="1"||f(6).toLowerCase()==="yes"});
+            else if (sec === "CROP_INVESTMENT" && (f(1)||f(2))) arrays.cropInvestment.push({cropType:f(1),acres:f(2),valuePerAcre:f(3)});
+            else if (sec === "SUPPLIES" && (f(1)||f(2))) arrays.supplies.push({description:f(1),value:f(2)});
+            else if (sec === "OTHER_CURRENT" && (f(1)||f(2))) arrays.otherCurrent.push({description:f(1),amount:f(2)});
+            else if (sec === "BREEDING_STOCK" && (f(1)||f(2)||f(3))) arrays.breedingStock.push({number:f(1),kind:f(2),value:f(3)});
+            else if (sec === "REAL_ESTATE" && (f(1)||f(2))) arrays.realEstate.push({acres:f(1),reType:f(2),description:f(3),valuePerAcre:f(4)});
+            else if (sec === "RE_CONTRACTS" && (f(1)||f(2))) arrays.reContracts.push({description:f(1),amount:f(2)});
+            else if (sec === "VEHICLES" && (f(1)||f(2))) arrays.vehicles.push({year:f(1),make:f(2),vin:f(3),condition:f(4),value:f(5)});
+            else if (sec === "MACHINERY" && (f(1)||f(2))) arrays.machinery.push({year:f(1),make:f(2),size:f(3),serial:f(4),condition:f(5),value:f(6)});
+            else if (sec === "OTHER_ASSETS" && (f(1)||f(2))) arrays.otherAssets.push({description:f(1),amount:f(2)});
+            else if (sec === "OPERATING_NOTES" && (f(1)||f(4))) arrays.operatingNotes.push({creditor:f(1),dueDate:f(2),pmt:f(3),balance:f(4),security:f(5)});
+            else if (sec === "ACCOUNTS_DUE" && (f(1)||f(2))) arrays.accountsDue.push({creditor:f(1),amount:f(2)});
+            else if (sec === "INTERMEDIATE_DEBT" && (f(1)||f(5))) arrays.intermediatDebt.push({creditor:f(1),security:f(2),dueDate:f(3),annualPmt:f(4),principal:f(5),rate:f(6)});
+            else if (sec === "RE_CURRENT" && (f(1)||f(2))) arrays.reCurrent.push({creditor:f(1),annualPmt:f(2),rate:f(3)});
+            else if (sec === "TAXES_DUE") { taxesDue = f(1); }
+            else if (sec === "OTHER_CURRENT_LIAB" && (f(1)||f(2))) arrays.otherCurrentLiab.push({description:f(1),amount:f(2)});
+            else if (sec === "RE_MORTGAGES" && (f(1)||f(4))) arrays.reMortgages.push({lienHolder:f(1),terms:f(2),rate:f(3),principal:f(4)});
+            else if (sec === "OTHER_LIABILITIES" && (f(1)||f(2))) arrays.otherLiabilities.push({description:f(1),balance:f(2)});
+          }
+          Object.keys(arrays).forEach(k => { if (!arrays[k].length) arrays[k] = emptyData()[k]; });
+          setImportData({ ...emptyData(), clientName, asOfDate, cashGlacier, federalPayments, taxesDue, ...arrays });
         }
-
-        // Fill empty arrays with one blank row
-        Object.keys(arrays).forEach(k => { if (!arrays[k].length) arrays[k] = emptyData()[k]; });
-
-        const result = {
-          ...emptyData(), ...parsed,
-          cashGlacier, federalPayments, taxesDue,
-          ...arrays
-        };
-        setImportData(result);
       } catch(e) {
-        setImportError("Parse error: " + e.message);
+        setImportError("Parse error: " + e.message + " — check the file format and try again.");
       }
     }
 
@@ -2207,8 +2423,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 </div>
 
                 <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:14,marginBottom:20,fontSize:".85rem",color:"#2d5a8e"}}>
-                  <strong>How it works:</strong> Download the template, fill it in, then drag it back here.
-                  Each row starts with a section name (like FARM_PRODUCTS or MACHINERY) followed by the data.
+                  <strong>Supported formats:</strong>
+                  <ul style={{margin:"6px 0 0 16px",lineHeight:1.8}}>
+                    <li><strong>FBMT Excel format</strong> — the existing First Bank of Montana balance sheet Excel file (.xlsx). Just drag it in as-is.</li>
+                    <li><strong>Import template</strong> — download the template below, fill it in, drag it back.</li>
+                  </ul>
                 </div>
 
                 <button onClick={downloadTemplate}
