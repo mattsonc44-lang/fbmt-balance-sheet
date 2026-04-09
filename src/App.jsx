@@ -258,7 +258,21 @@ const FBMT_CSS_B64 = [
   "ZTouODhyZW07Y29sb3I6IzMzMztsaW5lLWhlaWdodDoxLjY7fQouaW5zaWdodC1idWxsZXR7Zm9udC1zaXplOi44OHJlbTtjb2xv",
   "cjojMzMzO2xpbmUtaGVpZ2h0OjEuNjtwYWRkaW5nLWxlZnQ6MTZweDtwb3NpdGlvbjpyZWxhdGl2ZTt9Ci5pbnNpZ2h0LWJ1bGxl",
   "dDo6YmVmb3Jle2NvbnRlbnQ6ImJ1bGxldCI7cG9zaXRpb246YWJzb2x1dGU7bGVmdDo0cHg7Y29sb3I6IzZCMEUxRTtmb250LXNp",
-  "emU6LjZyZW07fQouaW5zaWdodC1nYXB7aGVpZ2h0OjZweDt9Cg==",
+  "emU6LjZyZW07fQouaW5zaWdodC1nYXB7aGVpZ2h0OjZweDt9CgouY2xpZW50LWZvbGRlcntiYWNrZ3JvdW5kOndoaXRlO2JvcmRl",
+  "ci1yYWRpdXM6MTBweDtib3JkZXI6MXB4IHNvbGlkICNlOGUwZTA7bWFyZ2luLWJvdHRvbToxMHB4O292ZXJmbG93OmhpZGRlbjti",
+  "b3gtc2hhZG93OjAgMXB4IDRweCByZ2JhKDAsMCwwLC4wNSk7fQouY2xpZW50LWZvbGRlci1oZWFkZXJ7ZGlzcGxheTpmbGV4O2Fs",
+  "aWduLWl0ZW1zOmNlbnRlcjtqdXN0aWZ5LWNvbnRlbnQ6c3BhY2UtYmV0d2VlbjtwYWRkaW5nOjE2cHggMjBweDtjdXJzb3I6cG9p",
+  "bnRlcjt0cmFuc2l0aW9uOmJhY2tncm91bmQgLjE1cztnYXA6MTJweDt9Ci5jbGllbnQtZm9sZGVyLWhlYWRlcjpob3ZlcntiYWNr",
+  "Z3JvdW5kOiNmZGY5Zjk7fQouY2xpZW50LWZvbGRlci1sZWZ0e2Rpc3BsYXk6ZmxleDthbGlnbi1pdGVtczpjZW50ZXI7Z2FwOjE0",
+  "cHg7ZmxleDoxO30KLmZvbGRlci1pY29ue2ZvbnQtc2l6ZToxLjZyZW07ZmxleC1zaHJpbms6MDt9Ci5jbGllbnQtZm9sZGVyLW5h",
+  "bWV7Zm9udC1zaXplOjFyZW07Zm9udC13ZWlnaHQ6NzAwO2NvbG9yOiMxYTFhMWE7fQouY2xpZW50LWZvbGRlci1tZXRhe2ZvbnQt",
+  "c2l6ZTouNzhyZW07Y29sb3I6Izg4ODttYXJnaW4tdG9wOjJweDt9Ci5jbGllbnQtZm9sZGVyLXJpZ2h0e2Rpc3BsYXk6ZmxleDth",
+  "bGlnbi1pdGVtczpjZW50ZXI7Z2FwOjEwcHg7ZmxleC1zaHJpbms6MDt9Ci5mb2xkZXItY2hldnJvbntmb250LXNpemU6LjdyZW07",
+  "Y29sb3I6I2FhYTttYXJnaW4tbGVmdDo0cHg7fQouY2xpZW50LWZvbGRlci1zaGVldHN7YmFja2dyb3VuZDojZjlmNWY1O2JvcmRl",
+  "ci10b3A6MXB4IHNvbGlkICNlOGUwZTA7cGFkZGluZzo4cHggMTJweDtkaXNwbGF5OmZsZXg7ZmxleC1kaXJlY3Rpb246Y29sdW1u",
+  "O2dhcDo2cHg7fQouc2hlZXQtY2FyZC1uZXN0ZWR7YmFja2dyb3VuZDp3aGl0ZTtib3JkZXItcmFkaXVzOjhweDttYXJnaW46MDti",
+  "b3gtc2hhZG93Om5vbmU7cGFkZGluZzoxMnB4IDE2cHg7fQouc2hlZXQtY2FyZC1uZXN0ZWQ6aG92ZXJ7dHJhbnNmb3JtOm5vbmU7",
+  "Ym94LXNoYWRvdzowIDFweCA2cHggcmdiYSgxMDcsMTQsMzAsLjEpO30K",
 ].join("");
 const FBMT_CSS = atob(FBMT_CSS_B64);
 
@@ -908,6 +922,7 @@ export default function BalanceSheet() {
   const [compInsight, setCompInsight] = useState("");
   const [compInsightLoading, setCompInsightLoading] = useState(false);
   const [savedSheets, setSavedSheets] = useState([]);
+  const [openFolders, setOpenFolders] = useState({});
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
 
@@ -941,6 +956,10 @@ export default function BalanceSheet() {
   };
   const removeRow = (k, idx) => setData(d => ({ ...d, [k]: d[k].filter((_,i) => i !== idx) }));
 
+
+  const toggleFolder = (name) => {
+    setOpenFolders(f => ({ ...f, [name]: !f[name] }));
+  };
   // ── Storage ────────────────────────────────────────────────────────────────
   const loadSavedList = async () => {
     try {
@@ -2511,27 +2530,77 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           )}
 
           <div className="home-section-label">
-            {savedSheets.length > 0 ? "Saved Balance Sheets (" + savedSheets.length + ")" : "Saved Balance Sheets"}
+            {savedSheets.length > 0
+              ? "Clients (" + Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{})).length + ")"
+              : "Clients"}
           </div>
           {savedSheets.length === 0
             ? <div className="home-empty">No saved balance sheets yet. Complete a sheet and save it to store it here.</div>
-            : savedSheets.map(s => (
-                <div key={s.key} className="sheet-card" onClick={()=>loadSheet(s.key)}>
-                  <div className="sheet-icon">📋</div>
-                  <div className="sheet-info">
-                    <div className="sheet-name">{s.clientName}</div>
-                    <div className="sheet-meta">
-                      <span className="sheet-date">As of {s.asOfDate}</span>
-                      {s.savedAt && <span> · Saved {new Date(s.savedAt).toLocaleDateString()}</span>}
+            : (() => {
+                // Group sheets by client name
+                const groups = {};
+                savedSheets.forEach(s => {
+                  if (!groups[s.clientName]) groups[s.clientName] = [];
+                  groups[s.clientName].push(s);
+                });
+                const clientNames = Object.keys(groups).sort((a,b) => a.localeCompare(b));
+                return clientNames.map(name => {
+                  const sheets = groups[name].sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
+                  const isOpen = !!openFolders[name];
+                  const latest = sheets[0];
+                  return (
+                    <div key={name} className="client-folder">
+                      <div className="client-folder-header" onClick={()=>toggleFolder(name)}>
+                        <div className="client-folder-left">
+                          <span className="folder-icon">{isOpen ? "📂" : "📁"}</span>
+                          <div>
+                            <div className="client-folder-name">{name}</div>
+                            <div className="client-folder-meta">
+                              {sheets.length} balance sheet{sheets.length !== 1 ? "s" : ""}
+                              {" · "}Latest: {latest.asOfDate}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="client-folder-right">
+                          <button className="sheet-load-btn"
+                            onClick={e=>{e.stopPropagation();loadSheet(latest.key);}}>
+                            Open Latest
+                          </button>
+                          <span className="folder-chevron">{isOpen ? "▲" : "▼"}</span>
+                        </div>
+                      </div>
+                      {isOpen && (
+                        <div className="client-folder-sheets">
+                          {sheets.map(s => (
+                            <div key={s.key} className="sheet-card sheet-card-nested"
+                              onClick={()=>loadSheet(s.key)}>
+                              <div className="sheet-icon" style={{fontSize:"1.2rem"}}>📋</div>
+                              <div className="sheet-info">
+                                <div className="sheet-date" style={{fontSize:".95rem",fontWeight:700}}>
+                                  As of {s.asOfDate}
+                                </div>
+                                {s.savedAt && (
+                                  <div className="sheet-meta">
+                                    Saved {new Date(s.savedAt).toLocaleDateString()}
+                                  </div>
+                                )}
+                              </div>
+                              <button className="sheet-load-btn"
+                                onClick={e=>{e.stopPropagation();loadSheet(s.key);}}>
+                                Open and Edit
+                              </button>
+                              <button className="sheet-delete"
+                                onClick={e=>deleteSheet(s.key,e)}>
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  <button className="sheet-load-btn"
-                    onClick={e=>{e.stopPropagation();loadSheet(s.key);}}>
-                    Open and Edit
-                  </button>
-                  <button className="sheet-delete" onClick={e=>deleteSheet(s.key,e)}>Delete</button>
-                </div>
-              ))
+                  );
+                });
+              })()
           }
         </div>
       </div>
