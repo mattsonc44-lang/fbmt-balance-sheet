@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import * as XLSX from "xlsx";
+import Papa from "papaparse";
 
 const FBMT_CSS_B64 = [
   "KiwqOjpiZWZvcmUsKjo6YWZ0ZXJ7Ym94LXNpemluZzpib3JkZXItYm94O21hcmdpbjowO3BhZGRpbmc6MDt9CmJvZHl7Zm9udC1m",
@@ -301,7 +303,7 @@ function emptyData() {
     receivables:[{description:"",amount:""}], receivablesSecured:"",
     federalPayments:"",
     livestockMarket:[{number:"",kind:"",value:""}],
-    farmProducts:[{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100"}],
+    farmProducts:[{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100",contracted:false}],
     cropInvestment:[{cropType:"",acres:"",valuePerAcre:""}],
     supplies:[{description:"",value:""}], otherCurrent:[{description:"",amount:""}],
     breedingStock:[{number:"",kind:"",value:""}],
@@ -317,7 +319,7 @@ function emptyData() {
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
     reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
     otherLiabilities:[{description:"",balance:""}],
-    budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100"}],
+    budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false}],
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
@@ -404,6 +406,7 @@ function BudgetView({
             <span className="bg-col-label" style={{width:65}}>Unit</span>
             <span className="bg-col-label" style={{width:100}}>Price</span>
             <span className="bg-col-label" style={{width:70}}>Share %</span>
+            <span className="bg-col-label" style={{width:85,textAlign:"center"}}>Contracted</span>
             <span className="bg-col-label" style={{width:115}}>Your Value</span>
             <span style={{width:32}}></span>
           </div>
@@ -451,13 +454,21 @@ function BudgetView({
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
                 </div>
+                <div style={{width:85,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
+                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
+                    style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
+                  <label htmlFor={"bc-con-"+i} style={{fontSize:".75rem",color:"#555",cursor:"pointer"}}>
+                    {r.contracted ? "Yes" : ""}
+                  </label>
+                </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
               </div>
             );
           })}
           <button className="add-btn"
-            onClick={() => addRow("budgetCrops",{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100"})}>
+            onClick={() => addRow("budgetCrops",{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false})}>
             + Add Crop
           </button>
           <div className="budget-subtotal">
@@ -954,7 +965,13 @@ export default function BalanceSheet() {
   };
   useEffect(() => { loadSavedList(); }, []);
 
-  const [confirmSave, setConfirmSave] = useState(null); // null | { key, label }
+  const [confirmSave, setConfirmSave] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importData, setImportData] = useState(null);
+  const [importError, setImportError] = useState("");
+  const [importDate, setImportDate] = useState(new Date().toISOString().slice(0,10));
+  const [importDragging, setImportDragging] = useState(false);
+  const importFileRef = useRef(); // null | { key, label }
 
   const saveSheet = async () => {
     if (!data.clientName) return;
@@ -995,6 +1012,177 @@ export default function BalanceSheet() {
     } catch {}
   };
   const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); };
+
+  // ── Import helpers ─────────────────────────────────────────────────────────
+  function downloadTemplate() {
+    const rows = [
+      ["SECTION","FIELD1","FIELD2","FIELD3","FIELD4","FIELD5","FIELD6","NOTES"],
+      ["CLIENT","clientName","asOfDate","","","","","e.g. John Smith, 2024-12-31"],
+      ["CASH_GLACIER","amount","","","","","","Glacier Bank / FBMT balance"],
+      ["CASH_OTHER","institution","amount","","","","","Other bank accounts - one row per bank"],
+      ["RECEIVABLES","description","amount","","","","","Current receivables due within 1 year"],
+      ["FEDERAL_PAYMENTS","amount","","","","","","FSA/ARC/PLC/CRP payments"],
+      ["LIVESTOCK_MARKET","number","kind","value","","","","Market livestock - one row per group"],
+      ["FARM_PRODUCTS","quantity","unit","kind","pricePerUnit","share","contracted","Grain/hay on hand - one row per commodity"],
+      ["CROP_INVESTMENT","cropType","acres","valuePerAcre","","","","Growing crops - input costs"],
+      ["SUPPLIES","description","value","","","","","Fuel, chemicals, seed, parts"],
+      ["OTHER_CURRENT","description","amount","","","","","Other current assets"],
+      ["BREEDING_STOCK","number","kind","value","","","","Breeding cattle/horses"],
+      ["REAL_ESTATE","acres","reType","description","valuePerAcre","","","One row per tract"],
+      ["RE_CONTRACTS","description","amount","","","","","RE sale contracts receivable"],
+      ["VEHICLES","year","make","vin","condition","value","","Titled vehicles - one row each"],
+      ["MACHINERY","year","make","size","serial","condition","value","Equipment - one row each"],
+      ["OTHER_ASSETS","description","amount","","","","","Investments, retirement, etc."],
+      ["OPERATING_NOTES","creditor","dueDate","pmt","balance","security","","Operating lines of credit"],
+      ["ACCOUNTS_DUE","creditor","amount","","","","","Trade accounts owed"],
+      ["INTERMEDIATE_DEBT","creditor","security","dueDate","annualPmt","principal","rate","Equipment loans, term notes"],
+      ["RE_CURRENT","creditor","annualPmt","rate","","","","Current RE mortgage payments"],
+      ["TAXES_DUE","amount","","","","","","State/federal income taxes due"],
+      ["OTHER_CURRENT_LIAB","description","amount","","","","","Other current liabilities"],
+      ["RE_MORTGAGES","lienHolder","terms","rate","principal","","","Long-term RE mortgages"],
+      ["OTHER_LIABILITIES","description","balance","","","","","Other long-term liabilities"],
+      ["","","","","","","","--- EXAMPLE DATA BELOW ---"],
+      ["CLIENT","Smith Farms","2024-12-31","","","","",""],
+      ["CASH_GLACIER","125000","","","","","",""],
+      ["CASH_OTHER","FCS of Great Falls","45000","","","","",""],
+      ["FARM_PRODUCTS","50000","bu","winter wheat","5.50","100","true",""],
+      ["FARM_PRODUCTS","15000","bu","barley","4.20","50","false","50% crop share"],
+      ["REAL_ESTATE","640","Cropland","NW Sec 12 Cascade Co","2800","","",""],
+      ["MACHINERY","2019","John Deere 8320","320hp","RW8320P123456","Good","185000",""],
+      ["INTERMEDIATE_DEBT","FBMT","2019 JD 8320","2025-01-15","18500","92000","5.25",""],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [12,18,14,14,12,10,12,35].map(w=>({wch:w}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Balance Sheet Import");
+    XLSX.writeFile(wb, "FBMT_Balance_Sheet_Import_Template.xlsx");
+  }
+
+  function parseImportFile(file) {
+    setImportError("");
+    setImportData(null);
+    const ext = file.name.split(".").pop().toLowerCase();
+
+    function processRows(rows) {
+      try {
+        const parsed = { clientName: "", asOfDate: importDate };
+        const arrays = {
+          cashOther:[], receivables:[], livestockMarket:[], farmProducts:[],
+          cropInvestment:[], supplies:[], otherCurrent:[], breedingStock:[],
+          realEstate:[], reContracts:[], vehicles:[], machinery:[], otherAssets:[],
+          operatingNotes:[], accountsDue:[], intermediatDebt:[], reCurrent:[],
+          otherCurrentLiab:[], reMortgages:[], otherLiabilities:[]
+        };
+        let federalPayments = "", taxesDue = "", cashGlacier = "";
+
+        for (const row of rows) {
+          if (!row || !row[0]) continue;
+          const sec = String(row[0]).trim().toUpperCase();
+          const f = (i) => (row[i] !== undefined && row[i] !== null) ? String(row[i]).trim() : "";
+
+          if (sec === "CLIENT") {
+            if (f(1)) parsed.clientName = f(1);
+            if (f(2)) parsed.asOfDate = f(2);
+          } else if (sec === "CASH_GLACIER") {
+            cashGlacier = f(1);
+          } else if (sec === "CASH_OTHER") {
+            if (f(1)||f(2)) arrays.cashOther.push({institution:f(1),amount:f(2)});
+          } else if (sec === "RECEIVABLES") {
+            if (f(1)||f(2)) arrays.receivables.push({description:f(1),amount:f(2)});
+          } else if (sec === "FEDERAL_PAYMENTS") {
+            federalPayments = f(1);
+          } else if (sec === "LIVESTOCK_MARKET") {
+            if (f(1)||f(2)||f(3)) arrays.livestockMarket.push({number:f(1),kind:f(2),value:f(3)});
+          } else if (sec === "FARM_PRODUCTS") {
+            if (f(1)||f(3)) arrays.farmProducts.push({quantity:f(1),unit:f(2)||"bu",kind:f(3),pricePerUnit:f(4),share:f(5)||"100",contracted:f(6).toLowerCase()==="true"||f(6)==="1"||f(6).toLowerCase()==="yes"});
+          } else if (sec === "CROP_INVESTMENT") {
+            if (f(1)||f(2)) arrays.cropInvestment.push({cropType:f(1),acres:f(2),valuePerAcre:f(3)});
+          } else if (sec === "SUPPLIES") {
+            if (f(1)||f(2)) arrays.supplies.push({description:f(1),value:f(2)});
+          } else if (sec === "OTHER_CURRENT") {
+            if (f(1)||f(2)) arrays.otherCurrent.push({description:f(1),amount:f(2)});
+          } else if (sec === "BREEDING_STOCK") {
+            if (f(1)||f(2)||f(3)) arrays.breedingStock.push({number:f(1),kind:f(2),value:f(3)});
+          } else if (sec === "REAL_ESTATE") {
+            if (f(1)||f(2)) arrays.realEstate.push({acres:f(1),reType:f(2),description:f(3),valuePerAcre:f(4)});
+          } else if (sec === "RE_CONTRACTS") {
+            if (f(1)||f(2)) arrays.reContracts.push({description:f(1),amount:f(2)});
+          } else if (sec === "VEHICLES") {
+            if (f(1)||f(2)) arrays.vehicles.push({year:f(1),make:f(2),vin:f(3),condition:f(4),value:f(5)});
+          } else if (sec === "MACHINERY") {
+            if (f(1)||f(2)) arrays.machinery.push({year:f(1),make:f(2),size:f(3),serial:f(4),condition:f(5),value:f(6)});
+          } else if (sec === "OTHER_ASSETS") {
+            if (f(1)||f(2)) arrays.otherAssets.push({description:f(1),amount:f(2)});
+          } else if (sec === "OPERATING_NOTES") {
+            if (f(1)||f(4)) arrays.operatingNotes.push({creditor:f(1),dueDate:f(2),pmt:f(3),balance:f(4),security:f(5)});
+          } else if (sec === "ACCOUNTS_DUE") {
+            if (f(1)||f(2)) arrays.accountsDue.push({creditor:f(1),amount:f(2)});
+          } else if (sec === "INTERMEDIATE_DEBT") {
+            if (f(1)||f(5)) arrays.intermediatDebt.push({creditor:f(1),security:f(2),dueDate:f(3),annualPmt:f(4),principal:f(5),rate:f(6)});
+          } else if (sec === "RE_CURRENT") {
+            if (f(1)||f(2)) arrays.reCurrent.push({creditor:f(1),annualPmt:f(2),rate:f(3)});
+          } else if (sec === "TAXES_DUE") {
+            taxesDue = f(1);
+          } else if (sec === "OTHER_CURRENT_LIAB") {
+            if (f(1)||f(2)) arrays.otherCurrentLiab.push({description:f(1),amount:f(2)});
+          } else if (sec === "RE_MORTGAGES") {
+            if (f(1)||f(4)) arrays.reMortgages.push({lienHolder:f(1),terms:f(2),rate:f(3),principal:f(4)});
+          } else if (sec === "OTHER_LIABILITIES") {
+            if (f(1)||f(2)) arrays.otherLiabilities.push({description:f(1),balance:f(2)});
+          }
+        }
+
+        // Fill empty arrays with one blank row
+        Object.keys(arrays).forEach(k => { if (!arrays[k].length) arrays[k] = emptyData()[k]; });
+
+        const result = {
+          ...emptyData(), ...parsed,
+          cashGlacier, federalPayments, taxesDue,
+          ...arrays
+        };
+        setImportData(result);
+      } catch(e) {
+        setImportError("Parse error: " + e.message);
+      }
+    }
+
+    if (ext === "csv") {
+      Papa.parse(file, {
+        complete: (r) => processRows(r.data),
+        error: (e) => setImportError("CSV parse error: " + e.message)
+      });
+    } else if (ext === "xlsx" || ext === "xls") {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target.result, {type:"array"});
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
+          processRows(rows);
+        } catch(err) {
+          setImportError("Excel parse error: " + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      setImportError("Unsupported file type. Please use .csv, .xlsx, or .xls");
+    }
+  }
+
+  function handleImportFile(file) {
+    if (!file) return;
+    parseImportFile(file);
+  }
+
+  function applyImport() {
+    if (!importData) return;
+    const d = { ...importData, asOfDate: importDate };
+    setData(d);
+    setStep(0);
+    setScreen("wizard");
+    setShowImport(false);
+    setImportData(null);
+  }
   const deleteSheet = async (key, e) => {
     e.stopPropagation();
     try { await storage.delete(key); await loadSavedList(); } catch {}
@@ -1239,7 +1427,7 @@ ${blank(data.receivables.filter(r=>r.description||r.amount),2).map(r=>`<div clas
 <div class="row"><span>Federal Payments:</span><span>${pFmt(data.federalPayments)}</span></div>
 <div class="sec">Farm Products:</div>
 <div class="trow th"><span class="c1">Qty/Unit</span><span class="c2">Kind</span><span class="c3">Price/Unit</span><span class="c5">Total Value</span></div>
-${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>{const sh=numVal(r.share||"100");const val=numVal(r.quantity)*numVal(r.pricePerUnit)*(sh/100);return`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}${sh<100?" ("+sh+"% share)":""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(val)}</span></div>`;}).join("")}
+${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>{const sh=numVal(r.share||"100");const val=numVal(r.quantity)*numVal(r.pricePerUnit)*(sh/100);const tags=[];if(sh<100)tags.push(sh+"% share");if(r.contracted)tags.push("contracted");return`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}${tags.length?" ("+tags.join(", ")+")":""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(val)}</span></div>`;}).join("")}
 <div class="sec">Growing Crops:</div>
 ${blank(data.cropInvestment.filter(r=>r.cropType),2).map(r=>`<div class="trow"><span class="c1">${r.cropType||""}</span><span class="c2">${r.acres?" acres: "+r.acres:""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="subtot"><span>TOTAL CURRENT ASSETS:</span><span>${pFmt(totalCurrentAssets)||"$0"}</span></div>
@@ -1427,6 +1615,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             <span className="fp-col-label" style={{flex:1}}>Kind</span>
             <span className="fp-col-label" style={{width:105}}>Price/Unit</span>
             <span className="fp-col-label" style={{width:75}}>Share %</span>
+            <span className="fp-col-label" style={{width:85,textAlign:"center"}}>Contracted</span>
             <span className="fp-col-label" style={{width:115}}>Your Value</span>
             <span style={{width:32}}></span>
           </div>
@@ -1467,12 +1656,20 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
                 </div>
+                <div style={{width:85,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                  <input type="checkbox" id={"fp-con-"+i} checked={!!r.contracted}
+                    onChange={e=>setArr("farmProducts",i,"contracted",e.target.checked)}
+                    style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
+                  <label htmlFor={"fp-con-"+i} style={{fontSize:".75rem",color:"#555",cursor:"pointer"}}>
+                    {r.contracted ? "Yes" : ""}
+                  </label>
+                </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={()=>removeRow("farmProducts",i)}>x</button>
               </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("farmProducts",{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100"})}>+ Add Farm Product</button>
+          <button className="add-btn" onClick={()=>addRow("farmProducts",{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100",contracted:false})}>+ Add Farm Product</button>
           <div className="subtotal-row total"><span>Total Farm Products</span><strong>{fmt(farmProdTotal)}</strong></div>
         </div>
       );
@@ -1970,7 +2167,105 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           </div>
         </div>
         <div className="home-body">
-          <button className="home-new-btn" onClick={startNew}>+ New Balance Sheet</button>
+          <div style={{display:"flex",gap:12,marginBottom:36,flexWrap:"wrap"}}>
+            <button className="home-new-btn" style={{margin:0}} onClick={startNew}>
+              + New Balance Sheet
+            </button>
+            <button className="home-new-btn" style={{margin:0,background:"#2d5a8e"}}
+              onClick={()=>{setImportData(null);setImportError("");setShowImport(true);}}>
+              Import from CSV / Excel
+            </button>
+          </div>
+
+          {/* ── Import Modal ── */}
+          {showImport && (
+            <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+              <div style={{background:"white",borderRadius:14,padding:32,maxWidth:600,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                  <div style={{fontSize:"1.15rem",fontWeight:700,color:"#1a1a1a"}}>Import Balance Sheet Data</div>
+                  <button onClick={()=>setShowImport(false)}
+                    style={{background:"none",border:"none",fontSize:"1.4rem",cursor:"pointer",color:"#888",lineHeight:1}}>x</button>
+                </div>
+
+                <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:14,marginBottom:20,fontSize:".85rem",color:"#2d5a8e"}}>
+                  <strong>How it works:</strong> Download the template, fill it in, then drag it back here.
+                  Each row starts with a section name (like FARM_PRODUCTS or MACHINERY) followed by the data.
+                </div>
+
+                <button onClick={downloadTemplate}
+                  style={{display:"flex",alignItems:"center",gap:8,background:"#2d5a8e",color:"white",border:"none",borderRadius:8,padding:"10px 20px",fontSize:".9rem",fontWeight:600,cursor:"pointer",marginBottom:20,fontFamily:"inherit"}}>
+                  Download Import Template (.xlsx)
+                </button>
+
+                {/* Drag and Drop Zone */}
+                <div
+                  onDragOver={e=>{e.preventDefault();setImportDragging(true);}}
+                  onDragLeave={()=>setImportDragging(false)}
+                  onDrop={e=>{e.preventDefault();setImportDragging(false);const f=e.dataTransfer.files[0];if(f)handleImportFile(f);}}
+                  onClick={()=>importFileRef.current.click()}
+                  style={{
+                    border:"2.5px dashed " + (importDragging ? "#2d5a8e" : "#ccc"),
+                    borderRadius:10,padding:"32px 20px",textAlign:"center",
+                    background:importDragging ? "#f0f6ff" : "#fafafa",
+                    cursor:"pointer",transition:"all .15s",marginBottom:16
+                  }}>
+                  <div style={{fontSize:"2rem",marginBottom:8}}>📂</div>
+                  <div style={{fontWeight:600,color:"#333",marginBottom:4}}>
+                    {importDragging ? "Drop to import" : "Drag and drop your file here"}
+                  </div>
+                  <div style={{fontSize:".8rem",color:"#888"}}>or click to browse — CSV, XLSX, or XLS</div>
+                  <input ref={importFileRef} type="file" accept=".csv,.xlsx,.xls"
+                    style={{display:"none"}}
+                    onChange={e=>handleImportFile(e.target.files[0])} />
+                </div>
+
+                {importError && (
+                  <div style={{background:"#fce8e8",border:"1px solid #f0c0c0",borderRadius:8,padding:12,fontSize:".85rem",color:"#7a1a1a",marginBottom:16}}>
+                    {importError}
+                  </div>
+                )}
+
+                {importData && (
+                  <div>
+                    <div style={{background:"#e8f5ea",border:"1px solid #b8dfc0",borderRadius:8,padding:14,marginBottom:16}}>
+                      <div style={{fontWeight:700,color:"#1a5c25",marginBottom:8}}>File parsed successfully</div>
+                      <div style={{fontSize:".85rem",color:"#2a4a2a",display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                        <span>Client: <strong>{importData.clientName || "(none)"}</strong></span>
+                        <span>Cash (Glacier): <strong>{importData.cashGlacier ? "$"+Number(importData.cashGlacier).toLocaleString() : "$0"}</strong></span>
+                        <span>Farm Products: <strong>{importData.farmProducts.filter(r=>r.kind).length} items</strong></span>
+                        <span>Real Estate: <strong>{importData.realEstate.filter(r=>r.acres).length} tracts</strong></span>
+                        <span>Machinery: <strong>{importData.machinery.filter(r=>r.make).length} items</strong></span>
+                        <span>Vehicles: <strong>{importData.vehicles.filter(r=>r.make).length} items</strong></span>
+                        <span>Term Debt: <strong>{importData.intermediatDebt.filter(r=>r.creditor).length} loans</strong></span>
+                        <span>RE Mortgages: <strong>{importData.reMortgages.filter(r=>r.lienHolder).length} mortgages</strong></span>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                        As of Date
+                      </label>
+                      <input type="date" value={importDate}
+                        onChange={e=>setImportDate(e.target.value)}
+                        style={{border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:"1rem",fontFamily:"inherit",outline:"none",width:200}} />
+                      <div style={{fontSize:".75rem",color:"#888",marginTop:4}}>
+                        Set the balance sheet date for this import
+                      </div>
+                    </div>
+
+                    <div style={{display:"flex",gap:12}}>
+                      <button className="btn btn-secondary" onClick={()=>setShowImport(false)}>Cancel</button>
+                      <button className="btn btn-primary" onClick={applyImport}
+                        style={{background:"#2d5a8e"}}>
+                        Import and Open Balance Sheet
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="home-section-label">
             {savedSheets.length > 0 ? "Saved Balance Sheets (" + savedSheets.length + ")" : "Saved Balance Sheets"}
           </div>
