@@ -988,6 +988,7 @@ export default function BalanceSheet() {
   const [newFolderName, setNewFolderName] = useState("");
   const [pendingSaveKey, setPendingSaveKey] = useState(null);
   const [selectedFolderPath, setSelectedFolderPath] = useState([]);
+  const [userFolders, setUserFolders] = useState([]); // standalone folders (path arrays)
   const [linkedEntityNW, setLinkedEntityNW] = useState(0);
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
@@ -1028,6 +1029,16 @@ export default function BalanceSheet() {
   const toggleFolder = (name) => {
     setOpenFolders(f => ({ ...f, [name]: !f[name] }));
   };
+
+  const createFolder = (path) => {
+    const newFolders = [...userFolders];
+    const pathStr = JSON.stringify(path);
+    if (!newFolders.some(f => JSON.stringify(f) === pathStr)) {
+      newFolders.push(path);
+      setUserFolders(newFolders);
+      try { localStorage.setItem("fbmt_userFolders", JSON.stringify(newFolders)); } catch {}
+    }
+  };
   // ── Storage ────────────────────────────────────────────────────────────────
   const loadSavedList = async () => {
     try {
@@ -1048,7 +1059,14 @@ export default function BalanceSheet() {
       }
     } catch {}
   };
-  useEffect(() => { loadSavedList(); }, []);
+  useEffect(() => {
+    loadSavedList();
+    // Load any user-created folders
+    try {
+      const stored = localStorage.getItem("fbmt_userFolders");
+      if (stored) setUserFolders(JSON.parse(stored));
+    } catch {}
+  }, []);
 
   // Load linked entity net worth whenever the link changes
   useEffect(() => {
@@ -1117,11 +1135,11 @@ export default function BalanceSheet() {
     setShowSaveFolderPicker(true);
   };
 
-  const doSave = async (key) => {
+  const doSave = async (key, folderPathOverride) => {
     setSaveStatus("saving");
     setConfirmSave(null);
     try {
-      const fp = showSaveFolderPicker ? selectedFolderPath : (data.folderPath || []);
+      const fp = folderPathOverride !== undefined ? folderPathOverride : (data.folderPath || []);
       const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString() };
       await storage.set(key, JSON.stringify(savePayload));
       set("folderPath", fp);
@@ -1800,9 +1818,15 @@ export default function BalanceSheet() {
   // ── Collect all folder paths in use ─────────────────────────────────────────
   function getAllFolderPaths(sheets) {
     const pathSet = new Set();
-    pathSet.add(""); // root = unfiled
+    pathSet.add("");
     sheets.forEach(s => {
       const path = s.folderPath || [];
+      for (let i = 1; i <= path.length; i++) {
+        pathSet.add(JSON.stringify(path.slice(0, i)));
+      }
+    });
+    // Also include user-created standalone folders
+    userFolders.forEach(path => {
       for (let i = 1; i <= path.length; i++) {
         pathSet.add(JSON.stringify(path.slice(0, i)));
       }
@@ -2929,6 +2953,8 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                     disabled={!newFolderName.trim()}
                     onClick={()=>{
                       if(!newFolderName.trim()) return;
+                      const newPath=[...showCreateFolder,newFolderName.trim()];
+                      createFolder(newPath);
                       setShowCreateFolder(null);
                       setNewFolderName("");
                     }}>
@@ -3121,6 +3147,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                     onKeyDown={e=>{
                       if(e.key==="Enter"&&newFolderName.trim()){
                         const newPath=[...showCreateFolder,newFolderName.trim()];
+                        createFolder(newPath);
                         setSelectedFolderPath(newPath);
                         setShowCreateFolder(null);
                         setNewFolderName("");
@@ -3131,6 +3158,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                     onClick={()=>{
                       if(!newFolderName.trim()) return;
                       const newPath=[...showCreateFolder,newFolderName.trim()];
+                      createFolder(newPath);
                       setSelectedFolderPath(newPath);
                       setShowCreateFolder(null);
                       setNewFolderName("");
@@ -3190,8 +3218,9 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <button className="btn btn-secondary" onClick={()=>{setShowSaveFolderPicker(false);setPendingSaveKey(null);}}>Cancel</button>
               <button className="btn btn-save"
                 onClick={()=>{
+                  const fp = [...selectedFolderPath];
                   setShowSaveFolderPicker(false);
-                  if(pendingSaveKey) doSave(pendingSaveKey);
+                  if(pendingSaveKey) doSave(pendingSaveKey, fp);
                 }}>
                 Save Here
               </button>
