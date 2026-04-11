@@ -1077,6 +1077,11 @@ export default function BalanceSheet() {
     }
   }, [savedSheets, data.clientName]);
 
+  // Auto-reload corp personal debt when client name changes
+  useEffect(() => {
+    if (data.clientName) loadCorpPersonalDebt();
+  }, [data.clientName]);
+
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [importData, setImportData] = useState(null);
@@ -1725,6 +1730,39 @@ export default function BalanceSheet() {
       setCompInsight("Connection error: " + err.message + ". Check that ANTHROPIC_API_KEY is set in Netlify environment variables.");
     }
     setCompInsightLoading(false);
+  };
+
+  // ── Corp Personal Debt Loader ──────────────────────────────────────────────
+  const loadCorpPersonalDebt = async () => {
+    if (!data.clientName) return;
+    try {
+      const result = await storage.list(STORAGE_PREFIX);
+      if (!result || !result.keys) return;
+      const corpDebts = [];
+      for (const key of result.keys) {
+        try {
+          const item = await storage.get(key);
+          if (!item) continue;
+          const p = JSON.parse(item.value);
+          // Only sheets linked to this client
+          if ((p.linkedEntity || "").trim().toLowerCase() !== data.clientName.trim().toLowerCase()) continue;
+          const ownerName = p.clientName || "Unknown";
+          // Corp-paid term debt
+          (p.intermediatDebt || []).forEach(r => {
+            if (r.corpPaid && r.creditor && numVal(r.annualPmt) > 0) {
+              corpDebts.push({ creditor: r.creditor, security: r.security || "", annualPmt: r.annualPmt, owner: ownerName, type: "term" });
+            }
+          });
+          // Corp-paid RE current portion
+          (p.reCurrent || []).forEach(r => {
+            if (r.corpPaid && r.creditor && numVal(r.annualPmt) > 0) {
+              corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re" });
+            }
+          });
+        } catch {}
+      }
+      setCorpPersonalDebt(corpDebts);
+    } catch { setCorpPersonalDebt([]); }
   };
 
   const handlePrint = () => {
