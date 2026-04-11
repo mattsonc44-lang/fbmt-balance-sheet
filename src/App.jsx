@@ -401,7 +401,7 @@ function BudgetView({
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
-  corpPersonalDebt,
+  corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
   setArr, removeRow, addRow
 }) {
@@ -581,7 +581,7 @@ function BudgetView({
       <div className="budget-section">
         <div className="budget-section-head expense-head">
           <span>EXPENSES</span>
-          <span className="bsh-total">{fmt(budgetTotalExpenses)}</span>
+          <span className="bsh-total">{fmt(budgetTotalExpenses + (corpPersonalDebtTotal||0))}</span>
         </div>
         <div className="budget-subsection">
           <div className="budget-sub-label">Operating Expenses</div>
@@ -705,18 +705,19 @@ function BudgetView({
           </div>
         </div>
         <div className="budget-grand expense-grand">
-          <span>TOTAL EXPENSES</span><span>{fmt(budgetTotalExpenses)}</span>
+          <span>TOTAL EXPENSES</span>
+          <span>{fmt(budgetTotalExpenses + (corpPersonalDebtTotal||0))}</span>
         </div>
-        <div className={"budget-net " + (budgetNetIncome >= 0 ? "net-positive" : "net-negative")}>
+        <div className={"budget-net " + ((budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)) >= 0 ? "net-positive" : "net-negative")}>
           <div className="margin-detail">
             <div className="margin-label">
-              {budgetNetIncome >= 0 ? "MARGIN (Net Income)" : "MARGIN (Net Loss)"}
+              {(budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)) >= 0 ? "MARGIN (Net Income)" : "MARGIN (Net Loss)"}
             </div>
             <div className="margin-calc">
-              {fmt(budgetTotalIncome)} income minus {fmt(budgetTotalExpenses)} expenses
+              {fmt(budgetTotalIncome)} income minus {fmt(budgetTotalExpenses + (corpPersonalDebtTotal||0))} expenses
             </div>
           </div>
-          <span className="margin-value">{fmt(Math.abs(budgetNetIncome))}</span>
+          <span className="margin-value">{fmt(Math.abs(budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)))}</span>
         </div>
       </div>
     </div>
@@ -1589,11 +1590,11 @@ export default function BalanceSheet() {
   const debtServiceTermsCorp = debtServiceTerms.filter(r=>r.corpPaid);
   const debtServiceREPersonal = debtServiceRE.filter(r=>!r.corpPaid);
   const debtServiceRECorp = debtServiceRE.filter(r=>r.corpPaid);
-  const budgetTermDebtTotal = debtServiceTerms.reduce((s,r)=>s+n(r.annualPmt),0);
-  const budgetREDebtTotal = debtServiceRE.reduce((s,r)=>s+n(r.annualPmt),0);
+  const budgetTermDebtTotal = debtServiceTermsPersonal.reduce((s,r)=>s+n(r.annualPmt),0);
+  const budgetREDebtTotal = debtServiceREPersonal.reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetTotalDebtService = budgetTermDebtTotal + budgetREDebtTotal;
   const budgetCorpDebtTotal = [...debtServiceTermsCorp,...debtServiceRECorp].reduce((s,r)=>s+n(r.annualPmt),0);
-  const budgetPersonalDebtTotal = budgetTotalDebtService - budgetCorpDebtTotal;
+  const budgetPersonalDebtTotal = budgetTotalDebtService;
   const budgetTotalExpenses = budgetOperatingExpenses + budgetTotalDebtService;
   const budgetNetIncome = budgetTotalIncome - budgetTotalExpenses;
 
@@ -2942,9 +2943,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             <div className="budget-client">{data.clientName || "Client Budget"} — {data.asOfDate}</div>
             <div className="budget-top-totals">
               <div className="btt-item"><span>Income</span><strong style={{color:"#1a5c25"}}>{fmt(budgetTotalIncome)}</strong></div>
-              <div className="btt-item"><span>Expenses</span><strong style={{color:"#c44"}}>{fmt(budgetTotalExpenses)}</strong></div>
+              <div className="btt-item"><span>Expenses</span><strong style={{color:"#c44"}}>{fmt(budgetTotalExpenses + corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0))}</strong></div>
               <div className="btt-item btt-net"><span>Net</span>
-                <strong style={{color:budgetNetIncome>=0?"#1a5c25":"#c44"}}>{fmt(budgetNetIncome)}</strong>
+                <strong style={{color:(budgetTotalIncome - budgetTotalExpenses - corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0))>=0?"#1a5c25":"#c44"}}>
+                  {fmt(budgetTotalIncome - budgetTotalExpenses - corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0))}
+                </strong>
               </div>
             </div>
             <button className="btn btn-save" onClick={saveSheet}
@@ -2970,6 +2973,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               budgetPersonalDebtTotal={budgetPersonalDebtTotal}
               budgetCorpDebtTotal={budgetCorpDebtTotal}
               corpPersonalDebt={corpPersonalDebt}
+              corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
               setArr={setArr}
