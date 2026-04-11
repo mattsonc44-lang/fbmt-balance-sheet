@@ -989,6 +989,7 @@ export default function BalanceSheet() {
   const [pendingSaveKey, setPendingSaveKey] = useState(null);
   const [selectedFolderPath, setSelectedFolderPath] = useState([]);
   const [userFolders, setUserFolders] = useState([]); // standalone folders (path arrays)
+  const [editingFolder, setEditingFolder] = useState(null); // { path, newName }
   const [linkedEntityNW, setLinkedEntityNW] = useState(0);
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
@@ -1833,6 +1834,54 @@ export default function BalanceSheet() {
     });
     return [...pathSet].map(p => p ? JSON.parse(p) : []);
   }
+
+
+  const renameFolder = async (oldPath, newName) => {
+    if (!newName.trim() || newName.trim() === oldPath[oldPath.length-1]) {
+      setEditingFolder(null);
+      return;
+    }
+    const newPath = [...oldPath.slice(0, -1), newName.trim()];
+    const oldKey = JSON.stringify(oldPath);
+    const newKey = JSON.stringify(newPath);
+
+    // Update userFolders - rename this folder and all children that start with oldPath
+    const updatedFolders = userFolders.map(f => {
+      const fKey = JSON.stringify(f.slice(0, oldPath.length));
+      if (fKey === oldKey) return [...newPath, ...f.slice(oldPath.length)];
+      return f;
+    });
+    setUserFolders(updatedFolders);
+    try { localStorage.setItem("fbmt_userFolders", JSON.stringify(updatedFolders)); } catch {}
+
+    // Update all saved sheets that have this folder in their path
+    try {
+      const result = await storage.list(STORAGE_PREFIX);
+      if (result && result.keys) {
+        for (const key of result.keys) {
+          try {
+            const item = await storage.get(key);
+            if (!item) continue;
+            const p = JSON.parse(item.value);
+            const fp = p.folderPath || [];
+            if (fp.length >= oldPath.length &&
+                JSON.stringify(fp.slice(0, oldPath.length)) === oldKey) {
+              p.folderPath = [...newPath, ...fp.slice(oldPath.length)];
+              await storage.set(key, JSON.stringify(p));
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // If currently open sheet is in this folder, update it
+    if (data.folderPath && JSON.stringify(data.folderPath.slice(0, oldPath.length)) === oldKey) {
+      set("folderPath", [...newPath, ...data.folderPath.slice(oldPath.length)]);
+    }
+
+    await loadSavedList();
+    setEditingFolder(null);
+  };
 
   // ── Corp Personal Debt Loader ──────────────────────────────────────────────
   const loadCorpPersonalDebt = async () => {
@@ -3057,27 +3106,53 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                         return (
                           <div key={fKey} className="client-folder" style={{marginLeft: depth * 20 + "px", marginBottom:6}}>
                             <div className="client-folder-header" onClick={()=>toggleFolder(fKey)}>
-                              <div className="client-folder-left">
+                              <div className="client-folder-left" style={{flex:1,minWidth:0}}>
                                 <span className="folder-icon">{fOpen ? "📂" : "📁"}</span>
-                                <div>
-                                  <div className="client-folder-name">{folderName}</div>
-                                  <div className="client-folder-meta">
-                                    {allSheetsInFolder.length} sheet{allSheetsInFolder.length!==1?"s":""}
-                                    {latestInFolder && " · Latest: " + latestInFolder.asOfDate}
-                                    <span style={{color:"#aaa",marginLeft:6}}>{path.join(" / ")}</span>
+                                {editingFolder && JSON.stringify(editingFolder.path)===JSON.stringify(path) ? (
+                                  <div style={{display:"flex",alignItems:"center",gap:6,flex:1}} onClick={e=>e.stopPropagation()}>
+                                    <input className="text-input"
+                                      style={{flex:1,maxWidth:220,padding:"5px 10px",fontSize:".9rem"}}
+                                      value={editingFolder.newName} autoFocus
+                                      onChange={e=>setEditingFolder({...editingFolder,newName:e.target.value})}
+                                      onKeyDown={e=>{
+                                        if(e.key==="Enter") renameFolder(editingFolder.path, editingFolder.newName);
+                                        if(e.key==="Escape") setEditingFolder(null);
+                                      }} />
+                                    <button className="btn btn-primary" style={{padding:"5px 12px",fontSize:".8rem"}}
+                                      onClick={()=>renameFolder(editingFolder.path, editingFolder.newName)}>Save</button>
+                                    <button className="btn btn-secondary" style={{padding:"5px 10px",fontSize:".8rem"}}
+                                      onClick={()=>setEditingFolder(null)}>Cancel</button>
                                   </div>
-                                </div>
+                                ) : (
+                                  <div>
+                                    <div className="client-folder-name">{folderName}</div>
+                                    <div className="client-folder-meta">
+                                      {allSheetsInFolder.length} sheet{allSheetsInFolder.length!==1?"s":""}
+                                      {latestInFolder && " · Latest: " + latestInFolder.asOfDate}
+                                      {path.length > 1 && <span style={{color:"#aaa",marginLeft:6}}>{path.join(" / ")}</span>}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                               <div className="client-folder-right">
-                                <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"3px 8px",fontSize:".72rem",cursor:"pointer",color:"#6B0E1E",fontFamily:"inherit",fontWeight:600}}
-                                  onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}>
-                                  + Subfolder
-                                </button>
-                                {latestInFolder && (
-                                  <button className="sheet-load-btn"
-                                    onClick={e=>{e.stopPropagation();loadSheet(latestInFolder.key);}}>
-                                    Open Latest
-                                  </button>
+                                {(!editingFolder || JSON.stringify(editingFolder.path)!==JSON.stringify(path)) && (
+                                  <span>
+                                    <button style={{background:"none",border:"1px solid #e0d0d0",borderRadius:5,padding:"3px 7px",fontSize:".75rem",cursor:"pointer",color:"#888",fontFamily:"inherit",marginRight:4}}
+                                      title="Rename folder"
+                                      onClick={e=>{e.stopPropagation();setEditingFolder({path,newName:folderName});}}>
+                                      Rename
+                                    </button>
+                                    <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"3px 8px",fontSize:".72rem",cursor:"pointer",color:"#6B0E1E",fontFamily:"inherit",fontWeight:600,marginRight:4}}
+                                      onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}>
+                                      + Sub
+                                    </button>
+                                    {latestInFolder && (
+                                      <button className="sheet-load-btn"
+                                        onClick={e=>{e.stopPropagation();loadSheet(latestInFolder.key);}}>
+                                        Open Latest
+                                      </button>
+                                    )}
+                                  </span>
                                 )}
                                 <span className="folder-chevron">{fOpen ? "▲" : "▼"}</span>
                               </div>
