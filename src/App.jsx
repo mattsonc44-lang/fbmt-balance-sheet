@@ -1917,6 +1917,88 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
     setTimeout(() => W.print(), 400);
   };
 
+  const handlePrintBudget = () => {
+    const corpPDTotal = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0);
+    const totalExp = budgetTotalExpenses + corpPDTotal;
+    const netInc = budgetTotalIncome - totalExp;
+    const W = window.open("","_blank","width=850,height=1100");
+    if (!W) return;
+    const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
+      const rv = numVal(r.acres)*numVal(r.yieldPerAcre)*numVal(r.price)*(numVal(r.share||"100")/100);
+      return "<tr><td>"+r.crop+"</td><td class='r'>"+r.acres+"</td><td class='r'>"+r.yieldPerAcre+" "+r.unit+"</td><td class='r'>$"+numVal(r.price).toFixed(2)+"</td><td class='r'>"+r.share+"%"+(r.contracted?" C":"")+"</td><td class='r'>$"+Math.round(rv).toLocaleString()+"</td></tr>";
+    }).join("");
+    const lsRows = data.budgetLivestock.filter(r=>r.type||r.head).map(r=>{
+      const rv = numVal(r.head)*numVal(r.lbs)*numVal(r.price);
+      return "<tr><td>"+r.type+"</td><td class='r'>"+r.head+"</td><td class='r'>"+r.lbs+" lbs</td><td class='r'>$"+numVal(r.price).toFixed(2)+"/lb</td><td class='r'></td><td class='r'>$"+Math.round(rv).toLocaleString()+"</td></tr>";
+    }).join("");
+    const miscRows = data.budgetMisc.filter(r=>r.description||r.amount).map(r=>
+      "<tr><td colspan='5'>"+r.description+"</td><td class='r'>$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
+    ).join("");
+    const expRows = data.budgetExpenses.filter(r=>r.description||r.amount).map(r=>
+      "<tr><td colspan='5'>"+r.description+"</td><td class='r'>$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
+    ).join("");
+    const debtPersonalRows = [...debtServiceTermsPersonal,...debtServiceREPersonal].map(r=>
+      "<tr><td colspan='5'>"+r.creditor+(r.security?" ("+r.security+")":"")+"</td><td class='r'>$"+Math.round(numVal(r.annualPmt)).toLocaleString()+"</td></tr>"
+    ).join("");
+    const debtCorpRows = [...debtServiceTermsCorp,...debtServiceRECorp].map(r=>
+      "<tr><td colspan='5'>"+r.creditor+(r.security?" ("+r.security+")":"")+" <em style='color:#2d5a8e'>(corp pays)</em></td><td class='r' style='color:#2d5a8e'>$"+Math.round(numVal(r.annualPmt)).toLocaleString()+"</td></tr>"
+    ).join("");
+    const personalDebtRows = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).map(r=>
+      "<tr><td colspan='5'>"+r.creditor+" <em style='color:#7a4f00'>("+r.owner+")</em></td><td class='r' style='color:#7a4f00'>$"+Math.round(numVal(r.annualPmt)).toLocaleString()+"</td></tr>"
+    ).join("");
+    const html = "<!DOCTYPE html><html><head><title>Budget - "+data.clientName+"</title><style>"
+      +"body{font-family:Arial,sans-serif;font-size:8pt;margin:.45in .4in;color:#000;}"
+      +"h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:2pt;}"
+      +"h2{font-size:11pt;font-weight:700;text-align:center;margin-bottom:6pt;}"
+      +".hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8pt;}"
+      +".logo{border:2pt solid #6B0E1E;padding:3pt 6pt;font-weight:900;color:#6B0E1E;font-size:8pt;text-align:center;}"
+      +".name{border-bottom:1pt solid #000;padding-bottom:3pt;margin-bottom:6pt;font-weight:700;font-size:9pt;}"
+      +".cols{display:flex;gap:10pt;}"
+      +".col{flex:1;}"
+      +".col-head{background:#000;color:#fff;font-weight:700;font-size:8pt;padding:2pt 5pt;margin-bottom:2pt;}"
+      +".sec{font-style:italic;font-size:7pt;color:#555;margin:4pt 0 1pt;}"
+      +"table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:3pt;}"
+      +"th{background:#333;color:#fff;padding:2pt 4pt;text-align:left;font-size:7pt;}"
+      +"th.r{text-align:right;}td{padding:2pt 4pt;border-bottom:.5pt dotted #ddd;}"
+      +"td.r{text-align:right;font-weight:600;}"
+      +".subtot{display:flex;justify-content:space-between;border-top:1pt solid #000;padding-top:2pt;margin:2pt 0;font-weight:700;font-size:8pt;}"
+      +".tot{display:flex;justify-content:space-between;background:#000;color:#fff;padding:2pt 5pt;font-weight:700;font-size:9pt;margin:3pt 0;}"
+      +".net{display:flex;justify-content:space-between;padding:4pt 5pt;font-weight:700;font-size:10pt;margin-top:6pt;border:2pt solid #000;}"
+      +"</style></head><body>"
+      +"<div class='hdr'><div class='logo'>FIRST<br/>BANK<br/>of Montana</div>"
+      +"<div><h1>Annual Agri-Business Budget</h1><h2>First Bank of Montana</h2></div>"
+      +"<div style='text-align:right;font-size:8pt'><strong>Date:</strong> "+data.asOfDate+"</div></div>"
+      +"<div class='name'>Name: "+data.clientName+"</div>"
+      +"<div class='cols'>"
+      // INCOME column
+      +"<div class='col'>"
+      +"<div class='col-head'>INCOME</div>"
+      +(cropRows?"<div class='sec'>Crop Income</div><table><tr><th>Crop</th><th class='r'>Acres</th><th class='r'>Yield</th><th class='r'>Price</th><th class='r'>Share</th><th class='r'>Value</th></tr>"+cropRows+"</table><div class='subtot'><span>Crop Income</span><span>$"+Math.round(budgetCropTotal).toLocaleString()+"</span></div>":"")
+      +(lsRows?"<div class='sec'>Livestock Income</div><table><tr><th>Type</th><th class='r'>Head</th><th class='r'>Wt</th><th class='r'>Price</th><th class='r'></th><th class='r'>Value</th></tr>"+lsRows+"</table><div class='subtot'><span>Livestock Income</span><span>$"+Math.round(budgetLivestockTotal).toLocaleString()+"</span></div>":"")
+      +(miscRows?"<div class='sec'>Miscellaneous Income</div><table>"+miscRows+"</table><div class='subtot'><span>Misc Income</span><span>$"+Math.round(budgetMiscTotal).toLocaleString()+"</span></div>":"")
+      +"<div class='tot'><span>TOTAL INCOME</span><span>$"+Math.round(budgetTotalIncome).toLocaleString()+"</span></div>"
+      +"</div>"
+      // EXPENSES column
+      +"<div class='col'>"
+      +"<div class='col-head'>EXPENSES</div>"
+      +(expRows?"<div class='sec'>Operating Expenses</div><table>"+expRows+"</table><div class='subtot'><span>Total Operating</span><span>$"+Math.round(budgetOperatingExpenses).toLocaleString()+"</span></div>":"")
+      +(debtPersonalRows?"<div class='sec'>Debt Service — Personal</div><table>"+debtPersonalRows+"</table>":"")
+      +(debtCorpRows?"<div class='sec'>Debt Service — Corp Paid</div><table>"+debtCorpRows+"</table>":"")
+      +((debtPersonalRows||debtCorpRows)?"<div class='subtot'><span>Total Own Debt Service</span><span>$"+Math.round(budgetTotalDebtService+budgetCorpDebtTotal).toLocaleString()+"</span></div>":"")
+      +(personalDebtRows?"<div class='sec' style='color:#7a4f00'>Personal Debt Paid by This Entity</div><table>"+personalDebtRows+"</table><div class='subtot' style='color:#7a4f00'><span>Personal Debt Subtotal</span><span>$"+Math.round(corpPDTotal).toLocaleString()+"</span></div>":"")
+      +"<div class='tot'><span>TOTAL EXPENSES</span><span>$"+Math.round(totalExp).toLocaleString()+"</span></div>"
+      +"<div class='net' style='"+(netInc>=0?"background:#e8f5ea;":"background:#fce8e8;")+"'>"
+      +"<span>"+(netInc>=0?"MARGIN (Net Income)":"MARGIN (Net Loss)")+"</span>"
+      +"<span>$"+Math.round(Math.abs(netInc)).toLocaleString()+"</span></div>"
+      +"</div>"
+      +"</div>"
+      +"</body></html>";
+    W.document.write(html);
+    W.document.close();
+    W.focus();
+    setTimeout(()=>W.print(), 400);
+  };
+
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => setStep(s => Math.min(s+1, STEPS.length-1));
@@ -2953,6 +3035,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             <button className="btn btn-save" onClick={saveSheet}
               disabled={!data.clientName || saveStatus === "saving"}>
               {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save"}
+            </button>
+            <button className="btn btn-secondary" onClick={handlePrintBudget}
+              style={{fontSize:".85rem"}}>
+              Print Budget
             </button>
           </div>
           <div className="budget-body">
