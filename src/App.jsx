@@ -401,6 +401,7 @@ function BudgetView({
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
+  corpPersonalDebt,
   budgetTotalExpenses, budgetNetIncome,
   setArr, removeRow, addRow
 }) {
@@ -676,6 +677,26 @@ function BudgetView({
           {budgetCorpDebtTotal > 0 && (
             <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".8rem",color:"#2d5a8e",background:"#f0f6ff",borderRadius:5,marginTop:4}}>
               <span>Corp Paid Subtotal</span><strong>{fmt(budgetCorpDebtTotal)}</strong>
+            </div>
+          )}
+          {corpPersonalDebt && corpPersonalDebt.length > 0 && (
+            <div style={{marginTop:8}}>
+              <div className="debt-category-label" style={{color:"#7a4f00",background:"#fff8e8",padding:"3px 6px",borderRadius:4}}>
+                Personal Debt Paid by This Entity
+              </div>
+              {corpPersonalDebt.filter(r=>r.annualPmt && numVal(r.annualPmt)>0).map((r, i) => (
+                <div key={i} className="debt-row" style={{borderLeftColor:"#c08020"}}>
+                  <span className="debt-creditor">{r.creditor}</span>
+                  <span className="debt-detail" style={{color:"#7a4f00",fontSize:".7rem"}}>
+                    {r.owner}{r.security ? " · " + r.security : ""}
+                  </span>
+                  <span className="debt-amount" style={{color:"#7a4f00"}}>{fmt(r.annualPmt)}</span>
+                </div>
+              ))}
+              <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".8rem",color:"#7a4f00",background:"#fff8e8",borderRadius:5,marginTop:4}}>
+                <span>Personal Debt Subtotal</span>
+                <strong>{fmt(corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0))}</strong>
+              </div>
             </div>
           )}
           <div className="budget-subtotal">
@@ -962,6 +983,7 @@ export default function BalanceSheet() {
   const [openFolders, setOpenFolders] = useState({});
   const [linkedEntityNW, setLinkedEntityNW] = useState(0);
   const [availableEntities, setAvailableEntities] = useState([]);
+  const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
 
@@ -2804,7 +2826,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           Balance Sheet
         </button>
         <button className={"tab-btn" + (activeTab === "budget" ? " tab-active" : "")}
-          onClick={()=>setActiveTab("budget")}>
+          onClick={()=>{setActiveTab("budget");loadCorpPersonalDebt();}}>
           Budget / Cash Flow
         </button>
         <button className={"tab-btn" + (activeTab === "compare" ? " tab-active" : "")}
@@ -2909,6 +2931,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               budgetTotalDebtService={budgetTotalDebtService}
               budgetPersonalDebtTotal={budgetPersonalDebtTotal}
               budgetCorpDebtTotal={budgetCorpDebtTotal}
+              corpPersonalDebt={corpPersonalDebt}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
               setArr={setArr}
