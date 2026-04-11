@@ -982,6 +982,12 @@ export default function BalanceSheet() {
   const [compInsightLoading, setCompInsightLoading] = useState(false);
   const [savedSheets, setSavedSheets] = useState([]);
   const [openFolders, setOpenFolders] = useState({});
+  const [showSaveFolderPicker, setShowSaveFolderPicker] = useState(false);
+  const [showMoveModal, setShowMoveModal] = useState(null); // key of sheet being moved
+  const [showCreateFolder, setShowCreateFolder] = useState(null); // path where new folder is being created
+  const [newFolderName, setNewFolderName] = useState("");
+  const [pendingSaveKey, setPendingSaveKey] = useState(null);
+  const [selectedFolderPath, setSelectedFolderPath] = useState([]);
   const [linkedEntityNW, setLinkedEntityNW] = useState(0);
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
@@ -1033,7 +1039,7 @@ export default function BalanceSheet() {
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt });
+              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [] });
             }
           } catch {}
         }
@@ -1093,24 +1099,32 @@ export default function BalanceSheet() {
   const saveSheet = async () => {
     if (!data.clientName) return;
     const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
-    // Check if a record already exists for this client + date
+    // Check if already exists
     try {
       const existing = await storage.get(key);
       if (existing) {
-        // Ask user if they want to overwrite
-        setConfirmSave({ key, label: data.clientName + " — " + data.asOfDate });
-        return;
+        const p = JSON.parse(existing.value);
+        // If it has a folder already, just confirm overwrite without folder picker
+        if (p.folderPath && p.folderPath.length > 0) {
+          setConfirmSave({ key, label: data.clientName + " — " + data.asOfDate });
+          return;
+        }
       }
     } catch {}
-    // No existing record — save directly
-    await doSave(key);
+    // Show folder picker
+    setPendingSaveKey(key);
+    setSelectedFolderPath(data.folderPath && data.folderPath.length > 0 ? [...data.folderPath] : []);
+    setShowSaveFolderPicker(true);
   };
 
   const doSave = async (key) => {
     setSaveStatus("saving");
     setConfirmSave(null);
     try {
-      await storage.set(key, JSON.stringify({ ...data, _savedAt: new Date().toISOString() }));
+      const fp = showSaveFolderPicker ? selectedFolderPath : (data.folderPath || []);
+      const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString() };
+      await storage.set(key, JSON.stringify(savePayload));
+      set("folderPath", fp);
       setSaveStatus("saved");
       await loadSavedList();
       setTimeout(() => setSaveStatus(null), 3000);
@@ -1732,6 +1746,69 @@ export default function BalanceSheet() {
     }
     setCompInsightLoading(false);
   };
+
+
+  // ── Move sheet to a different folder ────────────────────────────────────────
+  const moveSheet = async (key, newFolderPath) => {
+    try {
+      const item = await storage.get(key);
+      if (!item) return;
+      const p = JSON.parse(item.value);
+      p.folderPath = newFolderPath;
+      p._savedAt = new Date().toISOString();
+      await storage.set(key, JSON.stringify(p));
+      // If this is the currently open sheet, update data too
+      if (data.clientName === p.clientName && data.asOfDate === p.asOfDate) {
+        set("folderPath", newFolderPath);
+      }
+      await loadSavedList();
+      setShowMoveModal(null);
+    } catch {}
+  };
+
+  // ── Build folder tree from saved sheets ─────────────────────────────────────
+  function buildFolderTree(sheets) {
+    const tree = {};
+    sheets.forEach(s => {
+      const path = s.folderPath || [];
+      let node = tree;
+      // Build nested structure
+      path.forEach(segment => {
+        if (!node[segment]) node[segment] = { _children: {}, _sheets: [] };
+        node = node[segment]._children;
+      });
+      // Find the leaf node for this path
+      let leaf = tree;
+      path.forEach(seg => { leaf = leaf[seg]._children; });
+      // Add sheet to parent (one level up from _children)
+      let parent = tree;
+      for (let i = 0; i < path.length - 1; i++) parent = parent[path[i]]._children;
+      if (path.length === 0) {
+        if (!tree._unfiledSheets) tree._unfiledSheets = [];
+        tree._unfiledSheets.push(s);
+      } else {
+        const lastSeg = path[path.length - 1];
+        let parentNode = tree;
+        for (let i = 0; i < path.length - 1; i++) parentNode = parentNode[path[i]]._children;
+        if (!parentNode[lastSeg]) parentNode[lastSeg] = { _children: {}, _sheets: [] };
+        parentNode[lastSeg]._sheets.push(s);
+      }
+    });
+    return tree;
+  }
+
+  // ── Collect all folder paths in use ─────────────────────────────────────────
+  function getAllFolderPaths(sheets) {
+    const pathSet = new Set();
+    pathSet.add(""); // root = unfiled
+    sheets.forEach(s => {
+      const path = s.folderPath || [];
+      for (let i = 1; i <= path.length; i++) {
+        pathSet.add(JSON.stringify(path.slice(0, i)));
+      }
+    });
+    return [...pathSet].map(p => p ? JSON.parse(p) : []);
+  }
 
   // ── Corp Personal Debt Loader ──────────────────────────────────────────────
   const loadCorpPersonalDebt = async () => {
@@ -2820,77 +2897,198 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             </div>
           )}
 
-          <div className="home-section-label">
-            {savedSheets.length > 0
-              ? "Clients (" + Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{})).length + ")"
-              : "Clients"}
+          <div className="home-section-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span>
+              {savedSheets.length > 0
+                ? "Clients (" + Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{})).length + ")"
+                : "Clients"}
+            </span>
+            <button onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
+              style={{background:"none",border:"1.5px dashed #6B0E1E",borderRadius:6,padding:"3px 12px",color:"#6B0E1E",fontSize:".78rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              + New Folder
+            </button>
           </div>
+
+          {/* ── Create Folder Modal ── */}
+          {showCreateFolder !== null && (
+            <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <div style={{background:"white",borderRadius:12,padding:28,maxWidth:400,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,.2)"}}>
+                <div style={{fontWeight:700,fontSize:"1rem",marginBottom:8}}>
+                  {showCreateFolder.length === 0 ? "Create Top-Level Folder" : "Create Subfolder inside " + showCreateFolder[showCreateFolder.length-1]}
+                </div>
+                <div style={{fontSize:".82rem",color:"#888",marginBottom:14}}>
+                  Folders organize your clients. Examples: "Chris Mattson", "Smith Farms", "XYZ Corp"
+                </div>
+                <input className="text-input" type="text" value={newFolderName}
+                  placeholder="Folder name..." autoFocus
+                  onChange={e=>setNewFolderName(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&newFolderName.trim()){setShowCreateFolder(null);setNewFolderName("");}}} />
+                <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end"}}>
+                  <button className="btn btn-secondary" onClick={()=>{setShowCreateFolder(null);setNewFolderName("");}}>Cancel</button>
+                  <button className="btn btn-primary"
+                    disabled={!newFolderName.trim()}
+                    onClick={()=>{
+                      if(!newFolderName.trim()) return;
+                      setShowCreateFolder(null);
+                      setNewFolderName("");
+                    }}>
+                    Create Folder
+                  </button>
+                </div>
+                <div style={{fontSize:".75rem",color:"#aaa",marginTop:10}}>
+                  Tip: folders appear automatically when you save a sheet into them.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Move Sheet Modal ── */}
+          {showMoveModal && (
+            <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+              <div style={{background:"white",borderRadius:12,padding:28,maxWidth:480,width:"100%",maxHeight:"80vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,.2)"}}>
+                <div style={{fontWeight:700,fontSize:"1rem",marginBottom:16}}>Move Sheet to Folder</div>
+                {(() => {
+                  const movingSheet = savedSheets.find(s=>s.key===showMoveModal);
+                  const allPaths = getAllFolderPaths(savedSheets);
+                  return (
+                    <div>
+                      <div style={{fontSize:".85rem",color:"#555",marginBottom:14}}>
+                        Moving: <strong>{movingSheet?.clientName}</strong> — {movingSheet?.asOfDate}
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+                        {/* Unfiled option */}
+                        <div
+                          onClick={()=>moveSheet(showMoveModal,[])}
+                          style={{padding:"10px 14px",border:"1.5px solid #ddd",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10,background:"#fafafa"}}
+                          onMouseOver={e=>e.currentTarget.style.borderColor="#6B0E1E"}
+                          onMouseOut={e=>e.currentTarget.style.borderColor="#ddd"}>
+                          <span style={{fontSize:"1.2rem"}}>📋</span>
+                          <span style={{fontSize:".9rem"}}>Unfiled (top level)</span>
+                        </div>
+                        {allPaths.filter(p=>p.length>0).map((path,i) => (
+                          <div key={i}
+                            onClick={()=>moveSheet(showMoveModal,path)}
+                            style={{padding:"10px 14px",border:"1.5px solid #ddd",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10,background:"#fafafa",paddingLeft:(path.length*16+14)+"px"}}
+                            onMouseOver={e=>e.currentTarget.style.borderColor="#6B0E1E"}
+                            onMouseOut={e=>e.currentTarget.style.borderColor="#ddd"}>
+                            <span style={{fontSize:"1.1rem"}}>📁</span>
+                            <span style={{fontSize:".9rem"}}>{path[path.length-1]}</span>
+                            <span style={{fontSize:".75rem",color:"#aaa",marginLeft:"auto"}}>{path.join(" / ")}</span>
+                          </div>
+                        ))}
+                        {/* Create new folder option */}
+                        <div
+                          onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
+                          style={{padding:"10px 14px",border:"1.5px dashed #6B0E1E",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:"#6B0E1E",background:"#fdf9f9"}}>
+                          <span style={{fontSize:"1.1rem"}}>➕</span>
+                          <span style={{fontSize:".9rem",fontWeight:600}}>Create new folder first...</span>
+                        </div>
+                      </div>
+                      <button className="btn btn-secondary" onClick={()=>setShowMoveModal(null)}>Cancel</button>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
           {savedSheets.length === 0
             ? <div className="home-empty">No saved balance sheets yet. Complete a sheet and save it to store it here.</div>
             : (() => {
-                // Group sheets by client name
-                const groups = {};
-                savedSheets.forEach(s => {
-                  if (!groups[s.clientName]) groups[s.clientName] = [];
-                  groups[s.clientName].push(s);
-                });
-                const clientNames = Object.keys(groups).sort((a,b) => a.localeCompare(b));
-                return clientNames.map(name => {
-                  const sheets = groups[name].sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
-                  const isOpen = !!openFolders[name];
-                  const latest = sheets[0];
+                // Build tree from folderPath on each sheet
+                // Collect all unique folder paths
+                const allPaths = getAllFolderPaths(savedSheets);
+                // Build a recursive tree renderer
+                function renderFolderLevel(pathPrefix, depth) {
+                  const indent = depth * 20;
+                  // Get child folder names at this level
+                  const childFolders = allPaths
+                    .filter(p => p.length === pathPrefix.length + 1 &&
+                      p.slice(0, pathPrefix.length).join("|") === pathPrefix.join("|"))
+                    .sort((a,b) => a[a.length-1].localeCompare(b[b.length-1]));
+                  // Get sheets at this exact path
+                  const sheetsHere = savedSheets
+                    .filter(s => {
+                      const fp = s.folderPath || [];
+                      return fp.length === pathPrefix.length &&
+                        fp.join("|") === pathPrefix.join("|");
+                    })
+                    .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
+                  const folderKey = pathPrefix.join("|") || "_root_";
+                  const isOpen = pathPrefix.length === 0 ? true : !!openFolders[folderKey];
                   return (
-                    <div key={name} className="client-folder">
-                      <div className="client-folder-header" onClick={()=>toggleFolder(name)}>
-                        <div className="client-folder-left">
-                          <span className="folder-icon">{isOpen ? "📂" : "📁"}</span>
-                          <div>
-                            <div className="client-folder-name">{name}</div>
-                            <div className="client-folder-meta">
-                              {sheets.length} balance sheet{sheets.length !== 1 ? "s" : ""}
-                              {" · "}Latest: {latest.asOfDate}
+                    <div key={folderKey} style={{marginLeft: depth > 0 ? indent + "px" : 0}}>
+                      {/* Subfolder groups */}
+                      {childFolders.map(path => {
+                        const folderName = path[path.length-1];
+                        const fKey = path.join("|");
+                        const fOpen = !!openFolders[fKey];
+                        const allSheetsInFolder = savedSheets.filter(s => {
+                          const fp = s.folderPath || [];
+                          return fp.length >= path.length && fp.slice(0,path.length).join("|") === path.join("|");
+                        });
+                        const latestInFolder = allSheetsInFolder.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
+                        return (
+                          <div key={fKey} className="client-folder" style={{marginLeft: depth * 20 + "px", marginBottom:6}}>
+                            <div className="client-folder-header" onClick={()=>toggleFolder(fKey)}>
+                              <div className="client-folder-left">
+                                <span className="folder-icon">{fOpen ? "📂" : "📁"}</span>
+                                <div>
+                                  <div className="client-folder-name">{folderName}</div>
+                                  <div className="client-folder-meta">
+                                    {allSheetsInFolder.length} sheet{allSheetsInFolder.length!==1?"s":""}
+                                    {latestInFolder && " · Latest: " + latestInFolder.asOfDate}
+                                    <span style={{color:"#aaa",marginLeft:6}}>{path.join(" / ")}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="client-folder-right">
+                                <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"3px 8px",fontSize:".72rem",cursor:"pointer",color:"#6B0E1E",fontFamily:"inherit",fontWeight:600}}
+                                  onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}>
+                                  + Subfolder
+                                </button>
+                                {latestInFolder && (
+                                  <button className="sheet-load-btn"
+                                    onClick={e=>{e.stopPropagation();loadSheet(latestInFolder.key);}}>
+                                    Open Latest
+                                  </button>
+                                )}
+                                <span className="folder-chevron">{fOpen ? "▲" : "▼"}</span>
+                              </div>
                             </div>
+                            {fOpen && renderFolderLevel(path, 1)}
                           </div>
-                        </div>
-                        <div className="client-folder-right">
-                          <button className="sheet-load-btn"
-                            onClick={e=>{e.stopPropagation();loadSheet(latest.key);}}>
-                            Open Latest
-                          </button>
-                          <span className="folder-chevron">{isOpen ? "▲" : "▼"}</span>
-                        </div>
-                      </div>
-                      {isOpen && (
-                        <div className="client-folder-sheets">
-                          {sheets.map(s => (
+                        );
+                      })}
+                      {/* Sheets at this level */}
+                      {sheetsHere.length > 0 && (
+                        <div className={depth > 0 ? "client-folder-sheets" : ""} style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {sheetsHere.map(s => (
                             <div key={s.key} className="sheet-card sheet-card-nested"
                               onClick={()=>loadSheet(s.key)}>
                               <div className="sheet-icon" style={{fontSize:"1.2rem"}}>📋</div>
                               <div className="sheet-info">
-                                <div className="sheet-date" style={{fontSize:".95rem",fontWeight:700}}>
-                                  As of {s.asOfDate}
-                                </div>
-                                {s.savedAt && (
-                                  <div className="sheet-meta">
-                                    Saved {new Date(s.savedAt).toLocaleDateString()}
-                                  </div>
-                                )}
+                                <div style={{fontSize:".9rem",fontWeight:700,color:"#1a1a1a"}}>{s.clientName}</div>
+                                <div className="sheet-date">As of {s.asOfDate}</div>
+                                {s.savedAt && <div className="sheet-meta">Saved {new Date(s.savedAt).toLocaleDateString()}</div>}
                               </div>
                               <button className="sheet-load-btn"
                                 onClick={e=>{e.stopPropagation();loadSheet(s.key);}}>
-                                Open and Edit
+                                Open
                               </button>
-                              <button className="sheet-delete"
-                                onClick={e=>deleteSheet(s.key,e)}>
-                                Delete
+                              <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#555",fontFamily:"inherit"}}
+                                onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}>
+                                Move
                               </button>
+                              <button className="sheet-delete" onClick={e=>deleteSheet(s.key,e)}>Delete</button>
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
                   );
-                });
+                }
+                return renderFolderLevel([], 0);
               })()
           }
         </div>
@@ -2901,6 +3099,106 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
+
+      {/* ── Save Folder Picker Modal ── */}
+      {showSaveFolderPicker && (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"white",borderRadius:14,padding:28,maxWidth:500,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+            <div style={{fontWeight:700,fontSize:"1.05rem",marginBottom:6}}>Save Balance Sheet</div>
+            <div style={{fontSize:".85rem",color:"#666",marginBottom:18}}>
+              Choose a folder for <strong>{data.clientName}</strong> — {data.asOfDate}
+            </div>
+            {/* New folder name input */}
+            {showCreateFolder !== null && (
+              <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:14,marginBottom:14}}>
+                <div style={{fontSize:".82rem",fontWeight:700,color:"#2d5a8e",marginBottom:8}}>
+                  New folder {showCreateFolder.length>0 ? "inside "+showCreateFolder[showCreateFolder.length-1] : "(top level)"}:
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <input className="text-input" type="text" value={newFolderName} autoFocus
+                    placeholder="Folder name..."
+                    onChange={e=>setNewFolderName(e.target.value)}
+                    onKeyDown={e=>{
+                      if(e.key==="Enter"&&newFolderName.trim()){
+                        const newPath=[...showCreateFolder,newFolderName.trim()];
+                        setSelectedFolderPath(newPath);
+                        setShowCreateFolder(null);
+                        setNewFolderName("");
+                      }
+                    }} />
+                  <button className="btn btn-primary" style={{flexShrink:0}}
+                    disabled={!newFolderName.trim()}
+                    onClick={()=>{
+                      if(!newFolderName.trim()) return;
+                      const newPath=[...showCreateFolder,newFolderName.trim()];
+                      setSelectedFolderPath(newPath);
+                      setShowCreateFolder(null);
+                      setNewFolderName("");
+                    }}>
+                    Create
+                  </button>
+                  <button className="btn btn-secondary" style={{flexShrink:0}}
+                    onClick={()=>{setShowCreateFolder(null);setNewFolderName("");}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:16}}>
+              {/* Unfiled */}
+              <div
+                onClick={()=>setSelectedFolderPath([])}
+                style={{padding:"10px 14px",border:"1.5px solid "+(selectedFolderPath.length===0?"#6B0E1E":"#ddd"),borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10,background:selectedFolderPath.length===0?"#f5e8ea":"#fafafa"}}>
+                <span style={{fontSize:"1.1rem"}}>📋</span>
+                <span style={{fontSize:".9rem",fontWeight:selectedFolderPath.length===0?700:400}}>Unfiled</span>
+                {selectedFolderPath.length===0 && <span style={{marginLeft:"auto",fontSize:".75rem",color:"#6B0E1E",fontWeight:700}}>Selected</span>}
+              </div>
+              {/* Existing folders */}
+              {getAllFolderPaths(savedSheets).filter(p=>p.length>0).sort((a,b)=>a.join("/").localeCompare(b.join("/"))).map((path,i) => {
+                const isSelected = JSON.stringify(selectedFolderPath)===JSON.stringify(path);
+                return (
+                  <div key={i}
+                    onClick={()=>setSelectedFolderPath(path)}
+                    style={{padding:"10px 14px",border:"1.5px solid "+(isSelected?"#6B0E1E":"#ddd"),borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10,paddingLeft:(path.length*16+14)+"px",background:isSelected?"#f5e8ea":"#fafafa"}}>
+                    <span style={{fontSize:"1.1rem"}}>{isSelected?"📂":"📁"}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:".9rem",fontWeight:isSelected?700:400}}>{path[path.length-1]}</div>
+                      {path.length>1&&<div style={{fontSize:".72rem",color:"#aaa"}}>{path.join(" / ")}</div>}
+                    </div>
+                    {isSelected && <span style={{fontSize:".75rem",color:"#6B0E1E",fontWeight:700}}>Selected</span>}
+                    <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"2px 7px",fontSize:".7rem",cursor:"pointer",color:"#6B0E1E",fontFamily:"inherit",flexShrink:0}}
+                      onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}>
+                      + Sub
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Create new top-level folder */}
+              <div
+                onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
+                style={{padding:"10px 14px",border:"1.5px dashed #6B0E1E",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:"#6B0E1E",background:"#fdf9f9"}}>
+                <span style={{fontSize:"1.1rem"}}>➕</span>
+                <span style={{fontSize:".9rem",fontWeight:600}}>Create new folder...</span>
+              </div>
+            </div>
+            {selectedFolderPath.length > 0 && (
+              <div style={{fontSize:".82rem",color:"#6B0E1E",fontWeight:600,marginBottom:12,padding:"6px 10px",background:"#f5e8ea",borderRadius:6}}>
+                Saving to: {selectedFolderPath.join(" / ")}
+              </div>
+            )}
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button className="btn btn-secondary" onClick={()=>{setShowSaveFolderPicker(false);setPendingSaveKey(null);}}>Cancel</button>
+              <button className="btn btn-save"
+                onClick={()=>{
+                  setShowSaveFolderPicker(false);
+                  if(pendingSaveKey) doSave(pendingSaveKey);
+                }}>
+                Save Here
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Overwrite Confirmation Modal ── */}
       {confirmSave && (
