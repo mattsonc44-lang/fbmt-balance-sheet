@@ -398,7 +398,10 @@ function BudgetView({
   data, budgetCropTotal, budgetLivestockTotal, budgetMiscTotal,
   budgetTotalIncome, budgetOperatingExpenses,
   debtServiceTerms, debtServiceRE,
-  budgetTotalDebtService, budgetTotalExpenses, budgetNetIncome,
+  debtServiceTermsPersonal, debtServiceTermsCorp,
+  debtServiceREPersonal, debtServiceRECorp,
+  budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
+  budgetTotalExpenses, budgetNetIncome,
   setArr, removeRow, addRow
 }) {
   return (
@@ -618,10 +621,10 @@ function BudgetView({
           {debtServiceTerms.length === 0 && debtServiceRE.length === 0 && (
             <div className="debt-empty">No debt entered on Balance Sheet tab yet.</div>
           )}
-          {debtServiceTerms.length > 0 && (
+          {debtServiceTermsPersonal.length > 0 && (
             <div>
-              <div className="debt-category-label">Intermediate / Term Debt</div>
-              {debtServiceTerms.map((r, i) => (
+              <div className="debt-category-label">Intermediate / Term Debt — Personal</div>
+              {debtServiceTermsPersonal.map((r, i) => (
                 <div key={i} className="debt-row">
                   <span className="debt-creditor">{r.creditor}</span>
                   <span className="debt-detail">{r.security ? "(" + r.security + ")" : ""}</span>
@@ -630,10 +633,24 @@ function BudgetView({
               ))}
             </div>
           )}
-          {debtServiceRE.length > 0 && (
+          {debtServiceTermsCorp.length > 0 && (
             <div>
-              <div className="debt-category-label">Real Estate Mortgages</div>
-              {debtServiceRE.map((r, i) => (
+              <div className="debt-category-label" style={{color:"#2d5a8e"}}>
+                Intermediate / Term Debt — Corp Paid
+              </div>
+              {debtServiceTermsCorp.map((r, i) => (
+                <div key={i} className="debt-row" style={{borderLeftColor:"#2d5a8e"}}>
+                  <span className="debt-creditor">{r.creditor}</span>
+                  <span className="debt-detail" style={{color:"#2d5a8e",fontSize:".7rem"}}>corp pays</span>
+                  <span className="debt-amount" style={{color:"#2d5a8e"}}>{fmt(r.annualPmt)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {debtServiceREPersonal.length > 0 && (
+            <div>
+              <div className="debt-category-label">Real Estate Mortgages — Personal</div>
+              {debtServiceREPersonal.map((r, i) => (
                 <div key={i} className="debt-row">
                   <span className="debt-creditor">{r.creditor}</span>
                   <span className="debt-detail"></span>
@@ -642,8 +659,28 @@ function BudgetView({
               ))}
             </div>
           )}
+          {debtServiceRECorp.length > 0 && (
+            <div>
+              <div className="debt-category-label" style={{color:"#2d5a8e"}}>
+                Real Estate Mortgages — Corp Paid
+              </div>
+              {debtServiceRECorp.map((r, i) => (
+                <div key={i} className="debt-row" style={{borderLeftColor:"#2d5a8e"}}>
+                  <span className="debt-creditor">{r.creditor}</span>
+                  <span className="debt-detail" style={{color:"#2d5a8e",fontSize:".7rem"}}>corp pays</span>
+                  <span className="debt-amount" style={{color:"#2d5a8e"}}>{fmt(r.annualPmt)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {budgetCorpDebtTotal > 0 && (
+            <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".8rem",color:"#2d5a8e",background:"#f0f6ff",borderRadius:5,marginTop:4}}>
+              <span>Corp Paid Subtotal</span><strong>{fmt(budgetCorpDebtTotal)}</strong>
+            </div>
+          )}
           <div className="budget-subtotal">
-            <span>Total Debt Service</span><strong>{fmt(budgetTotalDebtService)}</strong>
+            <span>Total Debt Service{budgetCorpDebtTotal > 0 ? " (personal + corp)" : ""}</span>
+            <strong>{fmt(budgetTotalDebtService)}</strong>
           </div>
         </div>
         <div className="budget-grand expense-grand">
@@ -923,6 +960,8 @@ export default function BalanceSheet() {
   const [compInsightLoading, setCompInsightLoading] = useState(false);
   const [savedSheets, setSavedSheets] = useState([]);
   const [openFolders, setOpenFolders] = useState({});
+  const [linkedEntityNW, setLinkedEntityNW] = useState(0);
+  const [availableEntities, setAvailableEntities] = useState([]);
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
 
@@ -981,6 +1020,40 @@ export default function BalanceSheet() {
     } catch {}
   };
   useEffect(() => { loadSavedList(); }, []);
+
+  // Load linked entity net worth whenever the link changes
+  useEffect(() => {
+    async function fetchLinkedNW() {
+      if (!data.linkedEntity) { setLinkedEntityNW(0); return; }
+      try {
+        const prefix = STORAGE_PREFIX + data.linkedEntity.replace(/\s+/g,"_") + ":";
+        const result = await storage.list(prefix);
+        if (result && result.keys && result.keys.length > 0) {
+          // Get most recent sheet for linked entity
+          const sorted = result.keys.sort((a,b) => b.localeCompare(a));
+          const item = await storage.get(sorted[0]);
+          if (item) {
+            const p = JSON.parse(item.value);
+            const m = numVal;
+            const ta = [p.cashGlacier,...(p.cashOther||[]).map(r=>r.amount),(p.receivables||[]).map(r=>r.amount),(p.farmProducts||[]).map(r=>String(m(r.quantity)*m(r.pricePerUnit))),(p.realEstate||[]).map(r=>String(m(r.acres)*m(r.valuePerAcre))),(p.vehicles||[]).map(r=>r.value),(p.machinery||[]).map(r=>r.value),(p.otherAssets||[]).map(r=>r.amount)].flat().reduce((s,v)=>s+m(v),0);
+            const tl = [(p.operatingNotes||[]).map(r=>r.balance),(p.intermediatDebt||[]).map(r=>r.principal),(p.reMortgages||[]).map(r=>r.principal),(p.otherLiabilities||[]).map(r=>r.balance)].flat().reduce((s,v)=>s+m(v),0);
+            setLinkedEntityNW(ta - tl);
+          }
+        }
+      } catch { setLinkedEntityNW(0); }
+    }
+    fetchLinkedNW();
+  }, [data.linkedEntity]);
+
+  // Load available entities for the link picker
+  useEffect(() => {
+    if (savedSheets.length > 0) {
+      const names = [...new Set(savedSheets.map(s => s.clientName))]
+        .filter(n => n !== data.clientName)
+        .sort();
+      setAvailableEntities(names);
+    }
+  }, [savedSheets, data.clientName]);
 
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
@@ -1460,7 +1533,8 @@ export default function BalanceSheet() {
   const machVal = data.machinery.reduce((s,r)=>s+n(r.value),0);
   const otherAssetsTotal = data.otherAssets.reduce((s,r)=>s+n(r.amount),0);
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
-  const totalAssets = totalCurrentAssets + totalLTAssets;
+  const linkedEntityVal = data.linkedEntity ? linkedEntityNW : 0;
+  const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
   const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
   const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
@@ -1484,9 +1558,15 @@ export default function BalanceSheet() {
   const budgetOperatingExpenses = data.budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
+  const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!r.corpPaid);
+  const debtServiceTermsCorp = debtServiceTerms.filter(r=>r.corpPaid);
+  const debtServiceREPersonal = debtServiceRE.filter(r=>!r.corpPaid);
+  const debtServiceRECorp = debtServiceRE.filter(r=>r.corpPaid);
   const budgetTermDebtTotal = debtServiceTerms.reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetREDebtTotal = debtServiceRE.reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetTotalDebtService = budgetTermDebtTotal + budgetREDebtTotal;
+  const budgetCorpDebtTotal = [...debtServiceTermsCorp,...debtServiceRECorp].reduce((s,r)=>s+n(r.annualPmt),0);
+  const budgetPersonalDebtTotal = budgetTotalDebtService - budgetCorpDebtTotal;
   const budgetTotalExpenses = budgetOperatingExpenses + budgetTotalDebtService;
   const budgetNetIncome = budgetTotalIncome - budgetTotalExpenses;
 
@@ -2258,10 +2338,16 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
               <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:70}}>
+                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Corp Pays</span>
+                <input type="checkbox" checked={!!r.corpPaid}
+                  onChange={e=>setArr("intermediatDebt",i,"corpPaid",e.target.checked)}
+                  style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
+              </div>
               <button className="remove-btn" onClick={()=>removeRow("intermediatDebt",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:""})}>+ Add Loan</button>
+          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:"",corpPaid:false})}>+ Add Loan</button>
           <div className="subtotal-row"><span>Total Intermediate Debt</span><strong className="red">{fmt(intermedTotal)}</strong></div>
         </div>
       );
@@ -2274,10 +2360,16 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("reCurrent",i,"creditor",v)} placeholder="Mortgage holder" />
               <Inp label="Annual Payment" prefix="$" value={r.annualPmt} onChange={v=>setArr("reCurrent",i,"annualPmt",v)} />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reCurrent",i,"rate",v)} />
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:70}}>
+                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Corp Pays</span>
+                <input type="checkbox" checked={!!r.corpPaid}
+                  onChange={e=>setArr("reCurrent",i,"corpPaid",e.target.checked)}
+                  style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
+              </div>
               <button className="remove-btn" onClick={()=>removeRow("reCurrent",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:"",rate:""})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:"",rate:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total Current RE Portion</span><strong className="red">{fmt(reCurrentTotal)}</strong></div>
         </div>
       );
@@ -2314,10 +2406,16 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reMortgages",i,"rate",v)} />
               <Inp label="Principal (beyond 12 mo)" prefix="$" value={r.principal} onChange={v=>setArr("reMortgages",i,"principal",v)} />
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:70}}>
+                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Corp Pays</span>
+                <input type="checkbox" checked={!!r.corpPaid}
+                  onChange={e=>setArr("reMortgages",i,"corpPaid",e.target.checked)}
+                  style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
+              </div>
               <button className="remove-btn" onClick={()=>removeRow("reMortgages",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:""})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total RE Mortgages (LT)</span><strong className="red">{fmt(reMortTotal)}</strong></div>
         </div>
       );
@@ -2361,7 +2459,13 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 {reTotal > 0 && <div className="ss-row"><span>Real Estate</span><span>{fmt(reTotal)}</span></div>}
                 {vehiclesVal > 0 && <div className="ss-row"><span>Titled Vehicles</span><span>{fmt(vehiclesVal)}</span></div>}
                 {machVal > 0 && <div className="ss-row"><span>Machinery and Equipment</span><span>{fmt(machVal)}</span></div>}
-                <div className="ss-subtotal"><span>Total Long-Term Assets</span><span>{fmt(totalLTAssets)}</span></div>
+                {linkedEntityVal !== 0 && (
+                  <div className="ss-row" style={{color:"#2d5a8e",fontStyle:"italic"}}>
+                    <span>Investment in {data.linkedEntity}</span>
+                    <span>{fmt(linkedEntityVal)}</span>
+                  </div>
+                )}
+                <div className="ss-subtotal"><span>Total Long-Term Assets</span><span>{fmt(totalLTAssets + linkedEntityVal)}</span></div>
               </div>
               <div className="ss-total green-total"><span>TOTAL ASSETS</span><span>{fmt(totalAssets)}</span></div>
             </div>
@@ -2391,6 +2495,50 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               </div>
             </div>
           </div>
+          {/* ── Entity Link Section ── */}
+          <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,padding:16,marginTop:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom: data.linkedEntity !== undefined && availableEntities.length > 0 ? 10 : 0}}>
+              <input type="checkbox" id="entity-link-check"
+                checked={!!data.linkedEntity}
+                onChange={e => set("linkedEntity", e.target.checked ? (availableEntities[0] || "") : "")}
+                style={{width:16,height:16,accentColor:"#2d5a8e",cursor:"pointer"}} />
+              <label htmlFor="entity-link-check"
+                style={{fontWeight:700,fontSize:".88rem",color:"#2d5a8e",cursor:"pointer"}}>
+                Link a business entity — include their net worth on this statement
+              </label>
+            </div>
+            {!!data.linkedEntity && (
+              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                <div style={{fontSize:".82rem",color:"#555"}}>Linked entity:</div>
+                {availableEntities.length === 0
+                  ? <div style={{fontSize:".82rem",color:"#c44",fontStyle:"italic"}}>
+                      No other saved clients found. Save another balance sheet first.
+                    </div>
+                  : <select value={data.linkedEntity}
+                      onChange={e=>set("linkedEntity",e.target.value)}
+                      style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".9rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
+                      {availableEntities.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                }
+                {linkedEntityNW !== 0 && (
+                  <div style={{fontSize:".88rem",fontWeight:700,color:"#2d5a8e"}}>
+                    Net Worth: {fmt(linkedEntityNW)}
+                    <span style={{fontSize:".75rem",fontWeight:400,marginLeft:6,color:"#888"}}>
+                      (added to your assets as Investment in {data.linkedEntity})
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+            {availableEntities.length === 0 && !data.linkedEntity && (
+              <div style={{fontSize:".75rem",color:"#888",marginTop:4}}>
+                Save a business entity balance sheet first, then link it here to include their net worth on this statement.
+              </div>
+            )}
+          </div>
+
           <div className="print-note">Review all figures with your client, then click Print Balance Sheet.</div>
           <div className="save-bar">
             <div className="save-date-wrap">
@@ -2754,7 +2902,13 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               budgetOperatingExpenses={budgetOperatingExpenses}
               debtServiceTerms={debtServiceTerms}
               debtServiceRE={debtServiceRE}
+              debtServiceTermsPersonal={debtServiceTermsPersonal}
+              debtServiceTermsCorp={debtServiceTermsCorp}
+              debtServiceREPersonal={debtServiceREPersonal}
+              debtServiceRECorp={debtServiceRECorp}
               budgetTotalDebtService={budgetTotalDebtService}
+              budgetPersonalDebtTotal={budgetPersonalDebtTotal}
+              budgetCorpDebtTotal={budgetCorpDebtTotal}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
               setArr={setArr}
