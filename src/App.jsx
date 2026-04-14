@@ -313,7 +313,7 @@ function emptyData() {
     clientName:"", asOfDate: new Date().toISOString().slice(0,10),
     cashGlacier:"", cashOther:[{institution:"",amount:""}],
     receivables:[{description:"",amount:""}], receivablesSecured:"",
-    federalPayments:"",
+    federalPayments:[{program:"",amount:""}],
     livestockMarket:[{number:"",kind:"",value:""}],
     farmProducts:[{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100",contracted:false}],
     cropInvestment:[{cropType:"",acres:"",valuePerAcre:""}],
@@ -1277,7 +1277,8 @@ export default function BalanceSheet() {
           }
 
           // Federal Payments (row 16 = index 15, col D)
-          const federalPayments = num(R(15), 3) || num(R(16), 3);
+          const fedAmt = num(R(15), 3) || num(R(16), 3);
+          const federalPayments = fedAmt ? [{program:"Government Payments",amount:fedAmt}] : [{program:"",amount:""}];
 
           // Market Livestock (rows 19-21 = index 18-20, A=num, B=kind, C=value/head)
           const livestockMarket = [];
@@ -1484,12 +1485,14 @@ export default function BalanceSheet() {
           // ── Generic Section-Based Format (original template) ──────────────
           const arrays = {
             cashOther:[], receivables:[], livestockMarket:[], farmProducts:[],
+            federalPayments:[],
             cropInvestment:[], supplies:[], otherCurrent:[], breedingStock:[],
             realEstate:[], reContracts:[], vehicles:[], machinery:[], otherAssets:[],
             operatingNotes:[], accountsDue:[], intermediatDebt:[], reCurrent:[],
             otherCurrentLiab:[], reMortgages:[], otherLiabilities:[]
           };
-          let federalPayments = "", taxesDue = "", cashGlacier = "", clientName = "", asOfDate = importDate;
+          let taxesDue = "", cashGlacier = "", clientName = "", asOfDate = importDate;
+          if (!arrays.federalPayments) arrays.federalPayments = [];
 
           for (const row of rows) {
             if (!row || !row[0]) continue;
@@ -1499,7 +1502,9 @@ export default function BalanceSheet() {
             else if (sec === "CASH_GLACIER") { cashGlacier = f(1); }
             else if (sec === "CASH_OTHER" && (f(1)||f(2))) arrays.cashOther.push({institution:f(1),amount:f(2)});
             else if (sec === "RECEIVABLES" && (f(1)||f(2))) arrays.receivables.push({description:f(1),amount:f(2)});
-            else if (sec === "FEDERAL_PAYMENTS") { federalPayments = f(1); }
+            else if (sec === "FEDERAL_PAYMENTS") {
+              if (f(1)||f(2)) arrays.federalPayments.push({program:f(1)||"Government Payment",amount:f(2)||f(1)});
+            }
             else if (sec === "LIVESTOCK_MARKET" && (f(1)||f(2)||f(3))) arrays.livestockMarket.push({number:f(1),kind:f(2),value:f(3)});
             else if (sec === "FARM_PRODUCTS" && (f(1)||f(3))) arrays.farmProducts.push({quantity:f(1),unit:f(2)||"bu",kind:f(3),pricePerUnit:f(4),share:f(5)||"100",contracted:f(6).toLowerCase()==="true"||f(6)==="1"||f(6).toLowerCase()==="yes"});
             else if (sec === "CROP_INVESTMENT" && (f(1)||f(2))) arrays.cropInvestment.push({cropType:f(1),acres:f(2),valuePerAcre:f(3)});
@@ -1521,7 +1526,8 @@ export default function BalanceSheet() {
             else if (sec === "OTHER_LIABILITIES" && (f(1)||f(2))) arrays.otherLiabilities.push({description:f(1),balance:f(2)});
           }
           Object.keys(arrays).forEach(k => { if (!arrays[k].length) arrays[k] = emptyData()[k]; });
-          setImportData({ ...emptyData(), clientName, asOfDate, cashGlacier, federalPayments, taxesDue, ...arrays });
+          const fedArr = arrays.federalPayments.length > 0 ? arrays.federalPayments : [{program:"",amount:""}];
+          setImportData({ ...emptyData(), clientName, asOfDate, cashGlacier, federalPayments:fedArr, taxesDue, ...arrays });
         }
       } catch(e) {
         setImportError("Parse error: " + e.message + " — check the file format and try again.");
@@ -1580,7 +1586,9 @@ export default function BalanceSheet() {
   const n = numVal;
   const cashTotal = n(data.cashGlacier) + data.cashOther.reduce((s,r)=>s+n(r.amount),0);
   const recTotal = data.receivables.reduce((s,r)=>s+n(r.amount),0);
-  const fedPay = n(data.federalPayments);
+  const fedPay = Array.isArray(data.federalPayments)
+    ? data.federalPayments.reduce((s,r)=>s+n(r.amount),0)
+    : n(data.federalPayments);
   const lsMktTotal = data.livestockMarket.reduce((s,r)=>s+n(r.value),0);
   const farmProdTotal = data.farmProducts.reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||"100")/100),0);
   const cropInv = data.cropInvestment.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
@@ -1652,7 +1660,10 @@ export default function BalanceSheet() {
     const ls = (d.livestockMarket||[]).reduce((s,r)=>s+m(r.value),0);
     const sup = (d.supplies||[]).reduce((s,r)=>s+m(r.value),0);
     const oc = (d.otherCurrent||[]).reduce((s,r)=>s+m(r.amount),0);
-    const tc = cash+rec+m(d.federalPayments)+ls+fp+ci+sup+oc;
+    const fedP = Array.isArray(d.federalPayments)
+      ? (d.federalPayments||[]).reduce((s,r)=>s+m(r.amount),0)
+      : m(d.federalPayments||"");
+    const tc = cash+rec+fedP+ls+fp+ci+sup+oc;
     const bs = (d.breedingStock||[]).reduce((s,r)=>s+m(r.value),0);
     const re = (d.realEstate||[]).reduce((s,r)=>s+m(r.acres)*m(r.valuePerAcre),0);
     const veh = (d.vehicles||[]).reduce((s,r)=>s+m(r.value),0);
@@ -1969,7 +1980,7 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 <div class="row"><span>Cash on Hand and in Bank:</span><span>${pFmt(cashTotal)||"$0"}</span></div>
 <div class="sec">Current Receivables:</div>
 ${blank(data.receivables.filter(r=>r.description||r.amount),2).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}
-<div class="row"><span>Federal Payments:</span><span>${pFmt(data.federalPayments)}</span></div>
+${(Array.isArray(data.federalPayments)?data.federalPayments:[{program:"Federal Payments",amount:data.federalPayments}]).filter(r=>r.amount&&numVal(r.amount)>0).map(r=>`<div class="row"><span>${r.program||"Federal Payments"}</span><span>${pFmt(r.amount)}</span></div>`).join("")}
 <div class="sec">Farm Products:</div>
 <div class="trow th"><span class="c1">Qty/Unit</span><span class="c2">Kind</span><span class="c3">Price/Unit</span><span class="c5">Total Value</span></div>
 ${blank(data.farmProducts.filter(r=>r.kind),3).map(r=>{const sh=numVal(r.share||"100");const val=numVal(r.quantity)*numVal(r.pricePerUnit)*(sh/100);const tags=[];if(sh<100)tags.push(sh+"% share");if(r.contracted)tags.push("contracted");return`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}${tags.length?" ("+tags.join(", ")+")":""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(val)}</span></div>`;}).join("")}
@@ -2213,7 +2224,26 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
       case "federal_payments": return (
         <div className="step-content">
           <SecHdr icon="🏛" title="Federal Payments Due" subtitle="FSA, ARC/PLC, CRP, CFAP, or other government payments expected" />
-          <Inp label="Federal payments due and receivable" prefix="$" value={data.federalPayments} onChange={v=>set("federalPayments",v)} />
+          {(Array.isArray(data.federalPayments) ? data.federalPayments : [{program:"",amount:""}]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={"federalPayments-"+i}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Program" value={r.program}
+                onChange={v=>setArr("federalPayments",i,"program",v)}
+                placeholder="e.g., FSA ARC-CO, CRP, CFAP, PLC" />
+              <Inp label="Amount" prefix="$" value={r.amount}
+                onChange={v=>setArr("federalPayments",i,"amount",v)} />
+              <button className="remove-btn"
+                onClick={()=>removeRow("federalPayments",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn"
+            onClick={()=>addRow("federalPayments",{program:"",amount:""})}>
+            + Add Payment
+          </button>
+          <div className="subtotal-row total">
+            <span>Total Federal Payments</span>
+            <strong>{fmt(fedPay)}</strong>
+          </div>
         </div>
       );
       case "livestock_market": return (
@@ -2739,7 +2769,12 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 <div className="ss-label">Current Assets</div>
                 <div className="ss-row"><span>Cash on Hand and in Bank</span><span>{fmt(cashTotal)}</span></div>
                 {recTotal > 0 && <div className="ss-row"><span>Receivables</span><span>{fmt(recTotal)}</span></div>}
-                {fedPay > 0 && <div className="ss-row"><span>Federal Payments</span><span>{fmt(fedPay)}</span></div>}
+                {fedPay > 0 && (Array.isArray(data.federalPayments) && data.federalPayments.filter(r=>n(r.amount)>0).length > 1
+  ? data.federalPayments.filter(r=>n(r.amount)>0).map((r,i) => (
+      <div key={i} className="ss-row"><span>{r.program||"Federal Payment"}</span><span>{fmt(r.amount)}</span></div>
+    ))
+  : <div className="ss-row"><span>Federal Payments</span><span>{fmt(fedPay)}</span></div>
+)}
                 {lsMktTotal > 0 && <div className="ss-row"><span>Market Livestock</span><span>{fmt(lsMktTotal)}</span></div>}
                 {farmProdTotal > 0 && <div className="ss-row"><span>Farm Products</span><span>{fmt(farmProdTotal)}</span></div>}
                 {cropInv > 0 && <div className="ss-row"><span>Crop Investment</span><span>{fmt(cropInv)}</span></div>}
