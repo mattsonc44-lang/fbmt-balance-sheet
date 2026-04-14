@@ -1069,34 +1069,6 @@ export default function BalanceSheet() {
     } catch {}
   }, []);
 
-  // Load linked entities net worth whenever the list changes
-  useEffect(() => {
-    async function fetchAllLinkedNW() {
-      const entities = data.linkedEntities || [];
-      if (!entities.length) { setLinkedEntityNWMap({}); return; }
-      const newMap = {};
-      for (const name of entities) {
-        try {
-          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
-          const result = await storage.list(prefix);
-          if (result && result.keys && result.keys.length > 0) {
-            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
-            const item = await storage.get(sorted[0]);
-            if (item) {
-              const p = JSON.parse(item.value);
-              const m = numVal;
-              const ta = [p.cashGlacier,...(p.cashOther||[]).map(r=>r.amount),(p.receivables||[]).map(r=>r.amount),(p.farmProducts||[]).map(r=>String(m(r.quantity)*m(r.pricePerUnit))),(p.realEstate||[]).map(r=>String(m(r.acres)*m(r.valuePerAcre))),(p.vehicles||[]).map(r=>r.value),(p.machinery||[]).map(r=>r.value),(p.otherAssets||[]).map(r=>r.amount)].flat().reduce((s,v)=>s+m(v),0);
-              const tl = [(p.operatingNotes||[]).map(r=>r.balance),(p.intermediatDebt||[]).map(r=>r.principal),(p.reMortgages||[]).map(r=>r.principal),(p.otherLiabilities||[]).map(r=>r.balance)].flat().reduce((s,v)=>s+m(v),0);
-              newMap[name] = ta - tl;
-            }
-          }
-        } catch {}
-      }
-      setLinkedEntityNWMap(newMap);
-    }
-    fetchAllLinkedNW();
-  }, [JSON.stringify(data.linkedEntities)]);
-
   // Load available entities for the link picker
   useEffect(() => {
     if (savedSheets.length > 0) {
@@ -1702,6 +1674,33 @@ export default function BalanceSheet() {
       "TOTAL LIABILITIES":tl, "WORKING CAPITAL":tc-tcl, "NET WORTH":ta-tl
     };
   }
+
+  // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
+  useEffect(() => {
+    async function fetchAllLinkedNW() {
+      const entities = data.linkedEntities || [];
+      if (!entities.length) { setLinkedEntityNWMap({}); return; }
+      const newMap = {};
+      for (const name of entities) {
+        try {
+          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
+          const result = await storage.list(prefix);
+          if (result && result.keys && result.keys.length > 0) {
+            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
+            const item = await storage.get(sorted[0]);
+            if (item) {
+              const p = JSON.parse(item.value);
+              const totals = sheetTotals(p);
+              newMap[name] = totals["NET WORTH"] || 0;
+            }
+          }
+        } catch {}
+      }
+      setLinkedEntityNWMap(newMap);
+    }
+    fetchAllLinkedNW();
+  }, [JSON.stringify(data.linkedEntities), savedSheets.length]);
+
 
   const loadComparisonSheets = async () => {
     if (!data.clientName) return;
