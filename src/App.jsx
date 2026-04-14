@@ -990,7 +990,7 @@ export default function BalanceSheet() {
   const [selectedFolderPath, setSelectedFolderPath] = useState([]);
   const [userFolders, setUserFolders] = useState([]); // standalone folders (path arrays)
   const [editingFolder, setEditingFolder] = useState(null); // { path, newName }
-  const [linkedEntityNW, setLinkedEntityNW] = useState(0);
+  const [linkedEntityNWMap, setLinkedEntityNWMap] = useState({}); // { clientName: netWorth }
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
@@ -1069,39 +1069,44 @@ export default function BalanceSheet() {
     } catch {}
   }, []);
 
-  // Load linked entity net worth whenever the link changes
+  // Load linked entities net worth whenever the list changes
   useEffect(() => {
-    async function fetchLinkedNW() {
-      if (!data.linkedEntity) { setLinkedEntityNW(0); return; }
-      try {
-        const prefix = STORAGE_PREFIX + data.linkedEntity.replace(/\s+/g,"_") + ":";
-        const result = await storage.list(prefix);
-        if (result && result.keys && result.keys.length > 0) {
-          // Get most recent sheet for linked entity
-          const sorted = result.keys.sort((a,b) => b.localeCompare(a));
-          const item = await storage.get(sorted[0]);
-          if (item) {
-            const p = JSON.parse(item.value);
-            const m = numVal;
-            const ta = [p.cashGlacier,...(p.cashOther||[]).map(r=>r.amount),(p.receivables||[]).map(r=>r.amount),(p.farmProducts||[]).map(r=>String(m(r.quantity)*m(r.pricePerUnit))),(p.realEstate||[]).map(r=>String(m(r.acres)*m(r.valuePerAcre))),(p.vehicles||[]).map(r=>r.value),(p.machinery||[]).map(r=>r.value),(p.otherAssets||[]).map(r=>r.amount)].flat().reduce((s,v)=>s+m(v),0);
-            const tl = [(p.operatingNotes||[]).map(r=>r.balance),(p.intermediatDebt||[]).map(r=>r.principal),(p.reMortgages||[]).map(r=>r.principal),(p.otherLiabilities||[]).map(r=>r.balance)].flat().reduce((s,v)=>s+m(v),0);
-            setLinkedEntityNW(ta - tl);
+    async function fetchAllLinkedNW() {
+      const entities = data.linkedEntities || [];
+      if (!entities.length) { setLinkedEntityNWMap({}); return; }
+      const newMap = {};
+      for (const name of entities) {
+        try {
+          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
+          const result = await storage.list(prefix);
+          if (result && result.keys && result.keys.length > 0) {
+            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
+            const item = await storage.get(sorted[0]);
+            if (item) {
+              const p = JSON.parse(item.value);
+              const m = numVal;
+              const ta = [p.cashGlacier,...(p.cashOther||[]).map(r=>r.amount),(p.receivables||[]).map(r=>r.amount),(p.farmProducts||[]).map(r=>String(m(r.quantity)*m(r.pricePerUnit))),(p.realEstate||[]).map(r=>String(m(r.acres)*m(r.valuePerAcre))),(p.vehicles||[]).map(r=>r.value),(p.machinery||[]).map(r=>r.value),(p.otherAssets||[]).map(r=>r.amount)].flat().reduce((s,v)=>s+m(v),0);
+              const tl = [(p.operatingNotes||[]).map(r=>r.balance),(p.intermediatDebt||[]).map(r=>r.principal),(p.reMortgages||[]).map(r=>r.principal),(p.otherLiabilities||[]).map(r=>r.balance)].flat().reduce((s,v)=>s+m(v),0);
+              newMap[name] = ta - tl;
+            }
           }
-        }
-      } catch { setLinkedEntityNW(0); }
+        } catch {}
+      }
+      setLinkedEntityNWMap(newMap);
     }
-    fetchLinkedNW();
-  }, [data.linkedEntity]);
+    fetchAllLinkedNW();
+  }, [JSON.stringify(data.linkedEntities)]);
 
   // Load available entities for the link picker
   useEffect(() => {
     if (savedSheets.length > 0) {
+      const linked = data.linkedEntities || [];
       const names = [...new Set(savedSheets.map(s => s.clientName))]
-        .filter(n => n !== data.clientName)
+        .filter(n => n !== data.clientName && !linked.includes(n))
         .sort();
       setAvailableEntities(names);
     }
-  }, [savedSheets, data.clientName]);
+  }, [savedSheets, data.clientName, JSON.stringify(data.linkedEntities)]);
 
   // Auto-reload corp personal debt when client name changes
   useEffect(() => {
@@ -1602,7 +1607,7 @@ export default function BalanceSheet() {
   const machVal = data.machinery.reduce((s,r)=>s+n(r.value),0);
   const otherAssetsTotal = data.otherAssets.reduce((s,r)=>s+n(r.amount),0);
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
-  const linkedEntityVal = data.linkedEntity ? linkedEntityNW : 0;
+  const linkedEntityVal = Object.values(linkedEntityNWMap).reduce((s,v)=>s+v,0);
   const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
   const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
@@ -1907,7 +1912,8 @@ export default function BalanceSheet() {
           if (!item) continue;
           const p = JSON.parse(item.value);
           // Only sheets linked to this client
-          if ((p.linkedEntity || "").trim().toLowerCase() !== data.clientName.trim().toLowerCase()) continue;
+          const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
+          if (!linkedArr.some(e => e.trim().toLowerCase() === data.clientName.trim().toLowerCase())) continue;
           const ownerName = p.clientName || "Unknown";
           // Corp-paid term debt
           (p.intermediatDebt || []).forEach(r => {
@@ -2787,12 +2793,12 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 {reTotal > 0 && <div className="ss-row"><span>Real Estate</span><span>{fmt(reTotal)}</span></div>}
                 {vehiclesVal > 0 && <div className="ss-row"><span>Titled Vehicles</span><span>{fmt(vehiclesVal)}</span></div>}
                 {machVal > 0 && <div className="ss-row"><span>Machinery and Equipment</span><span>{fmt(machVal)}</span></div>}
-                {linkedEntityVal !== 0 && (
-                  <div className="ss-row" style={{color:"#2d5a8e",fontStyle:"italic"}}>
-                    <span>Investment in {data.linkedEntity}</span>
-                    <span>{fmt(linkedEntityVal)}</span>
+                {Object.entries(linkedEntityNWMap).map(([name, nw]) => (
+                  <div key={name} className="ss-row" style={{color:"#2d5a8e",fontStyle:"italic"}}>
+                    <span>Investment in {name}</span>
+                    <span>{fmt(nw)}</span>
                   </div>
-                )}
+                ))}
                 <div className="ss-subtotal"><span>Total Long-Term Assets</span><span>{fmt(totalLTAssets + linkedEntityVal)}</span></div>
               </div>
               <div className="ss-total green-total"><span>TOTAL ASSETS</span><span>{fmt(totalAssets)}</span></div>
@@ -2825,44 +2831,71 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           </div>
           {/* ── Entity Link Section ── */}
           <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,padding:16,marginTop:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom: data.linkedEntity !== undefined && availableEntities.length > 0 ? 10 : 0}}>
-              <input type="checkbox" id="entity-link-check"
-                checked={!!data.linkedEntity}
-                onChange={e => set("linkedEntity", e.target.checked ? (availableEntities[0] || "") : "")}
-                style={{width:16,height:16,accentColor:"#2d5a8e",cursor:"pointer"}} />
-              <label htmlFor="entity-link-check"
-                style={{fontWeight:700,fontSize:".88rem",color:"#2d5a8e",cursor:"pointer"}}>
-                Link a business entity — include their net worth on this statement
-              </label>
+            <div style={{fontWeight:700,fontSize:".88rem",color:"#2d5a8e",marginBottom:10}}>
+              Linked Business Entities
+              <span style={{fontWeight:400,fontSize:".78rem",color:"#888",marginLeft:8}}>
+                Their net worth appears as an investment asset on this statement
+              </span>
             </div>
-            {!!data.linkedEntity && (
-              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                <div style={{fontSize:".82rem",color:"#555"}}>Linked entity:</div>
-                {availableEntities.length === 0
-                  ? <div style={{fontSize:".82rem",color:"#c44",fontStyle:"italic"}}>
-                      No other saved clients found. Save another balance sheet first.
+
+            {/* Currently linked entities */}
+            {(data.linkedEntities||[]).length > 0 && (
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                {(data.linkedEntities||[]).map((name, i) => (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"white",border:"1px solid #c0d8f0",borderRadius:8,padding:"8px 12px"}}>
+                    <span style={{fontSize:"1rem"}}>🏢</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{name}</div>
+                      {linkedEntityNWMap[name] !== undefined && (
+                        <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
+                          Net Worth: {fmt(linkedEntityNWMap[name])}
+                          {" — added as Investment in " + name}
+                        </div>
+                      )}
                     </div>
-                  : <select value={data.linkedEntity}
-                      onChange={e=>set("linkedEntity",e.target.value)}
-                      style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".9rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
-                      {availableEntities.map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </select>
-                }
-                {linkedEntityNW !== 0 && (
-                  <div style={{fontSize:".88rem",fontWeight:700,color:"#2d5a8e"}}>
-                    Net Worth: {fmt(linkedEntityNW)}
-                    <span style={{fontSize:".75rem",fontWeight:400,marginLeft:6,color:"#888"}}>
-                      (added to your assets as Investment in {data.linkedEntity})
-                    </span>
+                    <button
+                      onClick={()=>set("linkedEntities",(data.linkedEntities||[]).filter((_,j)=>j!==i))}
+                      style={{background:"none",border:"1px solid #f0c0c0",borderRadius:5,padding:"3px 8px",fontSize:".75rem",cursor:"pointer",color:"#c44",fontFamily:"inherit"}}>
+                      Remove
+                    </button>
                   </div>
-                )}
+                ))}
+                <div style={{display:"flex",justifyContent:"flex-end",fontSize:".82rem",fontWeight:700,color:"#2d5a8e",padding:"4px 6px"}}>
+                  Total Investment Value: {fmt(linkedEntityVal)}
+                </div>
               </div>
             )}
-            {availableEntities.length === 0 && !data.linkedEntity && (
-              <div style={{fontSize:".75rem",color:"#888",marginTop:4}}>
-                Save a business entity balance sheet first, then link it here to include their net worth on this statement.
+
+            {/* Add entity dropdown */}
+            {availableEntities.length > 0 ? (
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <select
+                  defaultValue=""
+                  onChange={e=>{
+                    const name = e.target.value;
+                    if (!name) return;
+                    if (!(data.linkedEntities||[]).includes(name)) {
+                      set("linkedEntities",[...(data.linkedEntities||[]),name]);
+                    }
+                    e.target.value = "";
+                  }}
+                  style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
+                  <option value="">+ Add a linked entity...</option>
+                  {availableEntities.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <span style={{fontSize:".75rem",color:"#aaa"}}>
+                  Select from saved clients
+                </span>
+              </div>
+            ) : (data.linkedEntities||[]).length === 0 ? (
+              <div style={{fontSize:".78rem",color:"#888"}}>
+                Save other balance sheets first, then link them here to include their net worth on this statement.
+              </div>
+            ) : (
+              <div style={{fontSize:".78rem",color:"#aaa",fontStyle:"italic"}}>
+                All available entities are already linked.
               </div>
             )}
           </div>
