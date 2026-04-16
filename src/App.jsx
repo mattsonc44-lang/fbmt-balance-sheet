@@ -1087,25 +1087,23 @@ function InspectionView({ data, setData }) {
     }
   };
 
-  const checkCustomerResponse = async (specificShareId) => {
+  const checkCustomerResponse = async () => {
     setCheckingResponse(true);
     try {
-      // Look up by client name OR by specific share ID
-      let url = SUPABASE_URL + '/rest/v1/inspection_shares?';
-      if (specificShareId) {
-        url += 'share_id=eq.' + specificShareId;
-      } else if (shareLink) {
-        url += 'share_id=eq.' + shareLink.split('id=')[1];
-      } else {
-        url += 'client_name=eq.' + encodeURIComponent(data.clientName) + '&order=created_at.desc&limit=1';
+      const sid = data.inspShareId || (shareLink ? shareLink.split('id=')[1] : null);
+      if (!sid) {
+        alert('No share link found. Use "Share with Customer" first.');
+        setCheckingResponse(false);
+        return;
       }
-      url += '&select=response,responded_at,share_id';
-      const resp = await fetch(url, { headers: supaHeaders() });
+      const resp = await fetch(
+        SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + sid + '&select=response,responded_at',
+        { headers: supaHeaders() }
+      );
       const rows = await resp.json();
       if (rows[0]?.response) {
         const cr = rows[0].response;
         setCustomerResponse(cr);
-        // Merge into inspection data
         setData(d => ({
           ...d,
           inspCrops: (d.inspCrops||[]).map((r,i) => {
@@ -1128,16 +1126,12 @@ function InspectionView({ data, setData }) {
             };
           }),
         }));
-        // Remove from pending
-        setPendingResponses(p => {
-          const n = {...p}; delete n[data.clientName]; return n;
-        });
-        alert('✅ Customer response loaded! Their answers have been filled in above.');
+        alert('✅ Customer response loaded! Their answers have been filled in.');
       } else {
-        alert('No response from customer yet. They may not have submitted the form.');
+        alert('No response yet — the customer has not submitted the form.');
       }
     } catch(e) {
-      alert('Error checking response: ' + e.message);
+      alert('Error: ' + e.message);
     }
     setCheckingResponse(false);
   };
@@ -1246,6 +1240,14 @@ function InspectionView({ data, setData }) {
               padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}}>
             🔗 Share with Customer
           </button>
+          {data.inspShareId && (
+            <button onClick={checkCustomerResponse} disabled={checkingResponse}
+              style={{background:checkingResponse?'#e5e7eb':'#e8f5ea',color:checkingResponse?'#9ca3af':'#15803d',
+                border:'1.5px solid '+(checkingResponse?'#d1d5db':'#22c55e'),borderRadius:5,
+                padding:'7px 14px',fontWeight:700,fontSize:12,cursor:checkingResponse?'wait':'pointer'}}>
+              {checkingResponse ? '⏳ Checking...' : '📬 Check Response'}
+            </button>
+          )}
           <button onClick={handlePDF} style={{background:'#f0fdf4',color:INSP_TH,border:`1.5px solid ${INSP_TH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}}>🖨 Save PDF</button>
           <button onClick={handleSubmit} disabled={submitting} style={{background:INSP_GOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}}>
             {submitting?'⏳ Sending…':'📤 Submit Report'}
