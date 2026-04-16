@@ -1166,15 +1166,235 @@ function InspectionView({ data, setData }) {
   const grand   = cropTot + lsTot + invTot;
 
   const handlePDF = () => {
-    if (window.html2pdf) {
-      window.html2pdf().set({
-        margin:[10,10,10,10],
-        filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,
-        image:{type:'jpeg',quality:0.92},
-        html2canvas:{scale:2,useCORS:true,logging:false},
-        jsPDF:{unit:'mm',format:'letter',orientation:'portrait'},
-      }).from(printRef.current).save();
-    } else { window.print(); }
+    const W = window.open('','_blank','width=900,height=1100');
+    if (!W) return;
+    const pFmt = v => { const n = parseFloat(v)||0; return n > 0 ? '$'+Math.round(n).toLocaleString() : '—'; };
+    const pct  = (a,b) => { const av=parseFloat(a)||0,bv=parseFloat(b)||0; if(!bv)return null; return((av-bv)/bv)*100; };
+    const badgeColor = p => p===null?'#6b7280':Math.abs(p)>=20?'#dc2626':Math.abs(p)>=10?'#d97706':'#16a34a';
+    const badgeBg    = p => p===null?'#f3f4f6':Math.abs(p)>=20?'#fef2f2':Math.abs(p)>=10?'#fffbeb':'#f0fdf4';
+    const rowBorderColor = p => p===null?'transparent':Math.abs(p)>=20?'#dc2626':Math.abs(p)>=10?'#f59e0b':'#22c55e';
+
+    // Build crop rows
+    const cropRows = (data.inspCrops||[]).filter(r=>r.budgetedCrop).map((r,i)=>{
+      const p = pct(r.actualAcres,r.budgetedAcres);
+      const tot = (parseFloat(r.actualAcres||r.budgetedAcres)||0)*(parseFloat(r.actualYield||r.budgetedYield)||0)*(parseFloat(r.budgetedPrice)||0);
+      const bg = i%2===0?'white':'#f9fafb';
+      const devHtml = r.actualAcres&&r.budgetedAcres && p!==null
+        ? `<span style="font-size:10px;font-weight:700;color:${badgeColor(p)};background:${badgeBg(p)};padding:1px 6px;border-radius:999px">${p>0?'+':''}${p.toFixed(1)}%</span><br/><span style="font-size:10px;color:#6b7280">${(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}${(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac</span>`
+        : '—';
+      const reasonRow = r.actualAcres&&p!==null&&Math.abs(p)>=20
+        ? `<tr style="background:#fef2f2"><td colspan="9" style="padding:5px 10px 7px 28px;font-size:11px;color:#dc2626;border-bottom:1px solid #f0f0f0"><strong>Deviation reason:</strong> ${r.deviationReason||'<em style="color:#aaa">not provided</em>'}</td></tr>`
+        : '';
+      return `<tr style="background:${bg};border-left:3px solid ${p!==null&&r.actualAcres?rowBorderColor(p):'transparent'}">
+        <td style="padding:7px 10px;font-weight:600;font-size:12px">${r.budgetedCrop}</td>
+        <td style="padding:7px 10px;text-align:center;background:#f8f6f2;font-size:12px;color:#6b7280">${r.budgetedAcres||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px;font-weight:${r.actualAcres?700:400};color:${r.actualAcres?'#1a1a1a':'#9ca3af'}">${r.actualAcres||'—'}</td>
+        <td style="padding:7px 10px;text-align:center">${devHtml}</td>
+        <td style="padding:7px 10px;font-size:12px">${r.location||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.condition||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.actualYield||r.budgetedYield||'—'} ${r.budgetedUnit||'bu'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px;background:#f8f6f2;color:#6b7280">$${r.budgetedPrice||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;font-size:12px;color:#15803d">${tot>0?'$'+Math.round(tot).toLocaleString():'—'}</td>
+      </tr>${reasonRow}`;
+    }).join('');
+    const cropTotal = (data.inspCrops||[]).reduce((s,r)=>s+(parseFloat(r.actualAcres||r.budgetedAcres)||0)*(parseFloat(r.actualYield||r.budgetedYield)||0)*(parseFloat(r.budgetedPrice)||0),0);
+
+    // Build livestock rows
+    const lsRows = (data.inspLivestock||[]).filter(r=>r.budgetedType).map((r,i)=>{
+      const p = pct(r.actualHead,r.budgetedHead);
+      const bg = i%2===0?'white':'#f9fafb';
+      const devHtml = r.actualHead&&r.budgetedHead&&p!==null
+        ? `<span style="font-size:10px;font-weight:700;color:${badgeColor(p)};background:${badgeBg(p)};padding:1px 6px;border-radius:999px">${p>0?'+':''}${p.toFixed(1)}%</span>`
+        : '—';
+      const reasonRow = r.actualHead&&p!==null&&Math.abs(p)>=20
+        ? `<tr style="background:#fef2f2"><td colspan="6" style="padding:5px 10px 7px 28px;font-size:11px;color:#dc2626"><strong>Deviation reason:</strong> ${r.deviationReason||'<em style="color:#aaa">not provided</em>'}</td></tr>`
+        : '';
+      return `<tr style="background:${bg};border-left:3px solid ${p!==null&&r.actualHead?rowBorderColor(p):'transparent'}">
+        <td style="padding:7px 10px;font-weight:600;font-size:12px">${r.budgetedType}</td>
+        <td style="padding:7px 10px;text-align:center;background:#f8f6f2;font-size:12px;color:#6b7280">${r.budgetedHead||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px;font-weight:${r.actualHead?700:400}">${r.actualHead||'—'}</td>
+        <td style="padding:7px 10px;text-align:center">${devHtml}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.condition||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.estWeight?r.estWeight+' lbs':'—'}</td>
+      </tr>${reasonRow}`;
+    }).join('');
+
+    // Build inventory rows
+    const invRowsHtml = (data.inspInventory||[]).filter(r=>r.description||r.quantity).map((r,i)=>{
+      const tot=(parseFloat(r.quantity)||0)*(parseFloat(r.valuePerUnit)||0);
+      return `<tr style="background:${i%2===0?'white':'#f0fdf4'}">
+        <td style="padding:7px 10px;font-size:12px">${r.description||'—'}</td>
+        <td style="padding:7px 10px;font-size:12px">${r.location||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.condition||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-size:12px">${r.quantity||'—'} ${r.unitType||'bu'}</td>
+        <td style="padding:7px 10px;text-align:right;font-size:12px">$${r.valuePerUnit||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;font-size:12px;color:#15803d">${tot>0?'$'+Math.round(tot).toLocaleString():'—'}</td>
+      </tr>`;
+    }).join('');
+    const invTotal=(data.inspInventory||[]).reduce((s,r)=>s+(parseFloat(r.quantity)||0)*(parseFloat(r.valuePerUnit)||0),0);
+
+    const condBlock = (label,cond,cmt) => cond||cmt ? `
+      <tr style="border-bottom:1px solid #e5e7eb">
+        <td style="padding:9px 14px;font-weight:700;font-size:12px;white-space:nowrap;width:180px">${label}</td>
+        <td style="padding:9px 14px"><span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${cond==='Excellent'||cond==='Adequate'?'#dcfce7':cond==='Good'?'#dbeafe':cond==='Fair'||cond==='Limited'?'#fef9c3':cond==='Poor'?'#fee2e2':'#f3f4f6'};color:${cond==='Excellent'||cond==='Adequate'?'#15803d':cond==='Good'?'#1d4ed8':cond==='Fair'||cond==='Limited'?'#92400e':cond==='Poor'?'#b91c1c':'#6b7280'}">${cond||'—'}</span></td>
+        <td style="padding:9px 14px;font-size:12px;color:#374151">${cmt||'—'}</td>
+      </tr>` : '';
+
+    const deviationSummary = (data.inspCrops||[]).filter(r=>{ const p=pct(r.actualAcres,r.budgetedAcres); return r.actualAcres&&p!==null&&Math.abs(p)>=10; });
+
+    const html = `<!DOCTYPE html><html><head><title>Ag Inspection — ${data.clientName||'Report'}</title>
+<style>
+  @page { size: letter; margin: 0.6in 0.5in; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; font-size: 12px; }
+  .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 3px solid #6B0E1E; }
+  .logo-box { border: 2px solid #6B0E1E; padding: 6px 10px; text-align: center; }
+  .logo-first { font-size: 14px; font-weight: 900; color: #6B0E1E; line-height: 1.2; }
+  .logo-sub { font-size: 8px; color: #888; }
+  .report-title { text-align: center; flex: 1; padding: 0 20px; }
+  .report-title h1 { font-size: 17px; font-weight: 900; text-decoration: underline; color: #1a1a1a; margin-bottom: 3px; }
+  .report-title h2 { font-size: 13px; font-weight: 700; color: #6B0E1E; }
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 24px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
+  .meta-item label { font-size: 9px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 3px; }
+  .meta-item .val { font-size: 12px; font-weight: 700; color: #1a1a1a; }
+  .section { margin-bottom: 16px; }
+  .section-head { background: #1a4731; color: white; padding: 7px 12px; font-weight: 700; font-size: 12px; border-radius: 5px 5px 0 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #1a4731; color: white; padding: 6px 9px; font-size: 10px; font-weight: 700; text-align: center; border-right: 1px solid rgba(255,255,255,.15); }
+  th.left { text-align: left; }
+  th.dark { background: #374151; }
+  td { border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+  .tfoot-row td { background: #ecfdf5; font-weight: 700; text-align: right; padding: 7px 10px; color: #1a4731; }
+  .cond-table td { padding: 8px 14px; border-bottom: 1px solid #e5e7eb; }
+  .summary-box { background: #1a4731; color: white; border-radius: 6px; padding: 12px 18px; margin: 16px 0; display: flex; justify-content: space-between; align-items: center; }
+  .summary-item { text-align: center; }
+  .summary-item .s-label { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
+  .summary-item .s-val { font-size: 16px; font-weight: 900; }
+  .sig-block { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
+  .sig-line { border-top: 1.5px solid #1a1a1a; margin-top: 32px; padding-top: 4px; font-size: 10px; color: #6b7280; }
+  .dev-alert { background: #fef2f2; border-left: 3px solid #dc2626; padding: 8px 12px; margin-bottom: 12px; border-radius: 0 5px 5px 0; }
+  .dev-alert-title { font-size: 10px; font-weight: 700; color: #dc2626; margin-bottom: 4px; }
+  .dev-row { font-size: 11px; color: #374151; padding: 2px 0; }
+</style>
+</head><body>
+
+<div class="page-header">
+  <div class="logo-box">
+    <div class="logo-first">FIRST<br/>BANK<br/>of Montana</div>
+    <div class="logo-sub">www.1stbmt.com</div>
+  </div>
+  <div class="report-title">
+    <h1>Agricultural Inspection Report</h1>
+    <h2>First Bank of Montana</h2>
+  </div>
+  <div style="text-align:right;font-size:11px;min-width:120px">
+    <div style="font-weight:700">Date of Inspection</div>
+    <div style="font-size:14px;font-weight:900;color:#6B0E1E">${data.inspDate||'—'}</div>
+  </div>
+</div>
+
+<div class="meta-grid">
+  <div class="meta-item"><label>Customer Name</label><div class="val">${data.clientName||'—'}</div></div>
+  <div class="meta-item"><label>Inspector</label><div class="val">${data.inspInspector||'—'}</div></div>
+  <div class="meta-item"><label>Inspection Date</label><div class="val">${data.inspDate||'—'}</div></div>
+</div>
+
+${deviationSummary.length>0?`
+<div class="dev-alert">
+  <div class="dev-alert-title">⚠️ BUDGET DEVIATIONS REQUIRING ATTENTION</div>
+  ${deviationSummary.map(r=>{const p=pct(r.actualAcres,r.budgetedAcres);return`<div class="dev-row">${r.budgetedCrop}: Budgeted ${r.budgetedAcres} ac → Actual ${r.actualAcres} ac (${p>0?'+':''}${p.toFixed(1)}%)${r.deviationReason?' — '+r.deviationReason:''}</div>`;}).join('')}
+</div>`:''}
+
+${cropRows?`
+<div class="section">
+  <div class="section-head">🌱  CROP CONDITION — Budget vs. Actual</div>
+  <table>
+    <thead><tr>
+      <th class="left" style="min-width:90px">Crop</th>
+      <th class="dark" style="min-width:65px">Budget Ac</th>
+      <th style="min-width:65px">Actual Ac</th>
+      <th style="min-width:65px">Deviation</th>
+      <th class="left" style="min-width:80px">Location</th>
+      <th style="min-width:80px">Condition</th>
+      <th style="min-width:80px">Yield/Acre</th>
+      <th class="dark" style="min-width:70px">Budget Price</th>
+      <th style="min-width:75px">Total Value</th>
+    </tr></thead>
+    <tbody>${cropRows}</tbody>
+    <tr class="tfoot-row"><td colspan="8" style="text-align:right;padding:7px 10px;font-size:12px">CROP TOTAL</td><td style="padding:7px 10px;text-align:right;font-size:13px;color:#15803d">$${Math.round(cropTotal).toLocaleString()}</td></tr>
+  </table>
+</div>`:''}
+
+${lsRows?`
+<div class="section">
+  <div class="section-head">🐄  LIVESTOCK CONDITION — Budget vs. Actual</div>
+  <table>
+    <thead><tr>
+      <th class="left" style="min-width:100px">Type</th>
+      <th class="dark" style="min-width:65px">Budget Head</th>
+      <th style="min-width:65px">Actual Head</th>
+      <th style="min-width:65px">Deviation</th>
+      <th style="min-width:80px">Condition</th>
+      <th style="min-width:80px">Est. Weight</th>
+    </tr></thead>
+    <tbody>${lsRows}</tbody>
+  </table>
+</div>`:''}
+
+${invRowsHtml?`
+<div class="section">
+  <div class="section-head">🏚  INVENTORY (Stored Crop / Feed)</div>
+  <table>
+    <thead><tr>
+      <th class="left">Description</th><th class="left">Location</th>
+      <th>Condition</th><th style="text-align:right">Quantity</th>
+      <th style="text-align:right">Value/Unit</th><th style="text-align:right">Total Value</th>
+    </tr></thead>
+    <tbody>${invRowsHtml}</tbody>
+    <tr class="tfoot-row"><td colspan="5">INVENTORY TOTAL</td><td style="padding:7px 10px;color:#15803d">$${Math.round(invTotal).toLocaleString()}</td></tr>
+  </table>
+</div>`:''}
+
+<div class="section">
+  <div class="section-head">📋  FARM CONDITIONS</div>
+  <table class="cond-table">
+    <thead><tr>
+      <th class="left" style="width:180px">Category</th>
+      <th class="left" style="width:120px">Condition</th>
+      <th class="left">Comments</th>
+    </tr></thead>
+    <tbody>
+      ${condBlock('🟤 Pasture',data.inspPastureCond,data.inspPastureCmt)}
+      ${condBlock('💧 Water / Irrigation',data.inspWaterCond,data.inspWaterCmt)}
+      ${condBlock('🚜 Equipment',data.inspEquipCond,data.inspEquipCmt)}
+    </tbody>
+  </table>
+</div>
+
+${data.inspEnvCmt?`<div class="section"><div class="section-head">🌿  ENVIRONMENTAL OBSERVATIONS</div><div style="padding:12px 14px;font-size:12px;line-height:1.6;border:1px solid #e5e7eb;border-top:none">${data.inspEnvCmt}</div></div>`:''}
+${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIONAL OBSERVATIONS</div><div style="padding:12px 14px;font-size:12px;line-height:1.6;border:1px solid #e5e7eb;border-top:none">${data.inspAddlCmt}</div></div>`:''}
+
+<div class="summary-box">
+  <div class="summary-item"><div class="s-label">Crop Total</div><div class="s-val">$${Math.round(cropTotal).toLocaleString()}</div></div>
+  <div class="summary-item"><div class="s-label">Inventory Total</div><div class="s-val">$${Math.round(invTotal).toLocaleString()}</div></div>
+  <div class="summary-item"><div class="s-label">Grand Total</div><div class="s-val">$${Math.round(cropTotal+invTotal).toLocaleString()}</div></div>
+</div>
+
+<div class="sig-block">
+  <div><div class="sig-line">Customer Signature / Date</div></div>
+  <div><div class="sig-line">Loan Officer Signature / Date</div></div>
+</div>
+
+<div style="margin-top:14px;font-size:9px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px">
+  First Bank of Montana · Agricultural Inspection Report · ${data.clientName||''} · ${data.inspDate||''}
+</div>
+
+</body></html>`;
+
+    W.document.write(html);
+    W.document.close();
+    W.focus();
+    setTimeout(()=>W.print(), 500);
   };
 
   const EMAIL_CONFIG = {
@@ -1254,9 +1474,6 @@ function InspectionView({ data, setData }) {
             </button>
           )}
           <button onClick={handlePDF} style={{background:'#f0fdf4',color:INSP_TH,border:`1.5px solid ${INSP_TH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}}>🖨 Save PDF</button>
-          <button onClick={handleSubmit} disabled={submitting} style={{background:INSP_GOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}}>
-            {submitting?'⏳ Sending…':'📤 Submit Report'}
-          </button>
         </div>
       </div>
 
