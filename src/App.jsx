@@ -1082,6 +1082,10 @@ function InspectionView({ data, setData }) {
       setShareStatus('ready');
       // Save shareId to balance sheet data so we can check later
       setData(d => ({...d, inspShareId: shareId}));
+      // Auto-save so inspShareId persists across page reloads
+      const saveKey = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + (data.asOfDate||new Date().toISOString().slice(0,10));
+      const savePayload = {...data, inspShareId: shareId, _savedAt: new Date().toISOString()};
+      storage.set(saveKey, JSON.stringify(savePayload)).catch(()=>{});
     } catch(e) {
       setShareStatus('error:' + e.message);
     }
@@ -1240,7 +1244,7 @@ function InspectionView({ data, setData }) {
               padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}}>
             🔗 Share with Customer
           </button>
-          {data.inspShareId && (
+          {(data.inspShareId || shareLink) && (
             <button onClick={checkCustomerResponse} disabled={checkingResponse}
               style={{background:checkingResponse?'#e5e7eb':'#e8f5ea',color:checkingResponse?'#9ca3af':'#15803d',
                 border:'1.5px solid '+(checkingResponse?'#d1d5db':'#22c55e'),borderRadius:5,
