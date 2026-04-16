@@ -86,6 +86,21 @@ export default function CustomerInspectionForm() {
         }
       );
       if (!resp.ok) throw new Error(await resp.text());
+      // Send email notification to loan officer
+      try {
+        if (window.emailjs && shareRecord) {
+          await window.emailjs.send(
+            window.EMAILJS_SERVICE_ID || "service_fbmt",
+            window.EMAILJS_NOTIFY_TEMPLATE || "template_notify",
+            {
+              to_email: window.LOAN_OFFICER_EMAIL || "chris@firstbankofmontana.com",
+              client_name: shareRecord.client_name,
+              submitted_at: new Date().toLocaleString(),
+              message: "Your customer " + shareRecord.client_name + " has submitted their crop inspection form. Log in to review their responses.",
+            }
+          );
+        }
+      } catch(emailErr) { console.warn("Email notification failed:", emailErr); }
       setStep('done');
     } catch(e) {
       setErrorMsg(e.message);

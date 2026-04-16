@@ -1079,43 +1079,65 @@ function InspectionView({ data, setData }) {
       setShareLink(origin + '/inspect?id=' + shareId);
       setSharePin(pin);
       setShareStatus('ready');
+      // Save shareId to balance sheet data so we can check later
+      setData(d => ({...d, inspShareId: shareId}));
     } catch(e) {
       setShareStatus('error:' + e.message);
     }
   };
 
-  const checkCustomerResponse = async () => {
-    if (!shareLink) return;
+  const checkCustomerResponse = async (specificShareId) => {
     setCheckingResponse(true);
     try {
-      const shareId = shareLink.split('id=')[1];
-      const resp = await fetch(
-        SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + shareId + '&select=response,responded_at',
-        { headers: supaHeaders() }
-      );
+      // Look up by client name OR by specific share ID
+      let url = SUPABASE_URL + '/rest/v1/inspection_shares?';
+      if (specificShareId) {
+        url += 'share_id=eq.' + specificShareId;
+      } else if (shareLink) {
+        url += 'share_id=eq.' + shareLink.split('id=')[1];
+      } else {
+        url += 'client_name=eq.' + encodeURIComponent(data.clientName) + '&order=created_at.desc&limit=1';
+      }
+      url += '&select=response,responded_at,share_id';
+      const resp = await fetch(url, { headers: supaHeaders() });
       const rows = await resp.json();
       if (rows[0]?.response) {
-        setCustomerResponse(rows[0].response);
-        // Merge customer response into inspection data
         const cr = rows[0].response;
+        setCustomerResponse(cr);
+        // Merge into inspection data
         setData(d => ({
           ...d,
-          inspCrops: (d.inspCrops||[]).map((r,i) => ({
-            ...r,
-            actualAcres: cr.crops?.[i]?.actualAcres || r.actualAcres,
-            condition: cr.crops?.[i]?.condition || r.condition,
-            actualYield: cr.crops?.[i]?.actualYield || r.actualYield,
-            location: cr.crops?.[i]?.location || r.location,
-          })),
-          inspLivestock: (d.inspLivestock||[]).map((r,i) => ({
-            ...r,
-            actualHead: cr.livestock?.[i]?.actualHead || r.actualHead,
-            condition: cr.livestock?.[i]?.condition || r.condition,
-            estWeight: cr.livestock?.[i]?.estWeight || r.estWeight,
-          })),
+          inspCrops: (d.inspCrops||[]).map((r,i) => {
+            const c = cr.crops?.[i] || {};
+            return {
+              ...r,
+              actualAcres: c.actualAcres || r.actualAcres,
+              condition: c.condition || r.condition,
+              actualYield: c.actualYield || r.actualYield,
+              location: c.location || r.location,
+            };
+          }),
+          inspLivestock: (d.inspLivestock||[]).map((r,i) => {
+            const l = cr.livestock?.[i] || {};
+            return {
+              ...r,
+              actualHead: l.actualHead || r.actualHead,
+              condition: l.condition || r.condition,
+              estWeight: l.estWeight || r.estWeight,
+            };
+          }),
         }));
+        // Remove from pending
+        setPendingResponses(p => {
+          const n = {...p}; delete n[data.clientName]; return n;
+        });
+        alert('✅ Customer response loaded! Their answers have been filled in above.');
+      } else {
+        alert('No response from customer yet. They may not have submitted the form.');
       }
-    } catch {}
+    } catch(e) {
+      alert('Error checking response: ' + e.message);
+    }
     setCheckingResponse(false);
   };
 
@@ -1833,7 +1855,8 @@ export default function BalanceSheet() {
   const [editingFolder, setEditingFolder] = useState(null); // { path, newName }
   const [linkedEntityNWMap, setLinkedEntityNWMap] = useState({}); // { clientName: netWorth }
   const [availableEntities, setAvailableEntities] = useState([]);
-  const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
+  const [corpPersonalDebt, setCorpPersonalDebt] = useState([]);
+  const [pendingResponses, setPendingResponses] = useState({}); // { clientName: shareRecord }
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
 
@@ -1892,7 +1915,15 @@ export default function BalanceSheet() {
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [] });
+              let hasResponse = false;
+              if (p.inspShareId) {
+                try {
+                  const sr = await fetch(SUPABASE_URL+'/rest/v1/inspection_shares?share_id=eq.'+p.inspShareId+'&select=responded_at',{headers:supaHeaders()});
+                  const srows = await sr.json();
+                  hasResponse = !!(srows[0]?.responded_at);
+                } catch {}
+              }
+              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [], inspShareId: p.inspShareId || '', hasResponse });
             }
           } catch {}
         }
@@ -1903,6 +1934,7 @@ export default function BalanceSheet() {
   };
   useEffect(() => {
     loadSavedList();
+    checkAllPendingResponses();
     // Load any user-created folders
     try {
       const stored = localStorage.getItem("fbmt_userFolders");
@@ -2738,6 +2770,39 @@ export default function BalanceSheet() {
     await loadSavedList();
     setEditingFolder(null);
   };
+
+
+  // Check for pending customer inspection responses for all clients
+  const checkAllPendingResponses = async () => {
+    try {
+      const resp = await fetch(
+        SUPABASE_URL + '/rest/v1/inspection_shares?responded_at=not.is.null&select=client_name,share_id,responded_at,response',
+        { headers: supaHeaders() }
+      );
+      if (!resp.ok) return;
+      const rows = await resp.json();
+      const map = {};
+      rows.forEach(r => { map[r.client_name] = r; });
+      setPendingResponses(map);
+    } catch {}
+  };
+
+
+  // Auto-check for customer inspection response when sheet has a shareId
+  useEffect(() => {
+    async function checkForResponse() {
+      if (!data.inspShareId) { setHasCustomerResponse(false); return; }
+      try {
+        const resp = await fetch(
+          SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + data.inspShareId + '&select=responded_at',
+          { headers: supaHeaders() }
+        );
+        const rows = await resp.json();
+        setHasCustomerResponse(!!(rows[0]?.responded_at));
+      } catch { setHasCustomerResponse(false); }
+    }
+    checkForResponse();
+  }, [data.inspShareId]);
 
   // ── Corp Personal Debt Loader ──────────────────────────────────────────────
   const loadCorpPersonalDebt = async () => {
@@ -4080,6 +4145,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                                 <div style={{fontSize:".9rem",fontWeight:700,color:"#1a1a1a"}}>{s.clientName}</div>
                                 <div className="sheet-date">As of {s.asOfDate}</div>
                                 {s.savedAt && <div className="sheet-meta">Saved {new Date(s.savedAt).toLocaleDateString()}</div>}
+                                {s.inspShareId && s.hasResponse && (
+                                  <div style={{fontSize:".72rem",fontWeight:700,color:"#15803d",marginTop:2}}>
+                                    📬 Customer responded
+                                  </div>
+                                )}
                               </div>
                               <button className="sheet-load-btn"
                                 onClick={e=>{e.stopPropagation();loadSheet(s.key);}}>
@@ -4266,6 +4336,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         </button>
         <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
           onClick={()=>setActiveTab("inspection")}>
+          Ag Inspection{hasCustomerResponse ? " 📬" : ""}
+        </button>
+        <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
+          onClick={()=>{ setActiveTab("inspection"); if(data.clientName) checkCustomerResponse(); }}>
           🌾 Ag Inspection
         </button>
       </div>
@@ -4410,7 +4484,57 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
       )}
 
       {activeTab === "inspection" && (
-        <InspectionView data={data} setData={setData} />
+        <div>
+          {hasCustomerResponse && (
+            <div style={{background:"#e8f5ea",border:"1px solid #22c55e",borderRadius:10,
+              padding:"14px 18px",margin:"12px 12px 0",display:"flex",alignItems:"center",
+              gap:12,flexWrap:"wrap"}}>
+              <span style={{fontSize:"1.3rem"}}>📬</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:".9rem",color:"#15803d"}}>
+                  Customer has submitted their inspection form!
+                </div>
+                <div style={{fontSize:".78rem",color:"#555"}}>
+                  Click Load Response to pull their answers into the inspection form below.
+                </div>
+              </div>
+              <button
+                onClick={()=>{
+                  const sid = data.inspShareId;
+                  if (!sid) return;
+                  fetch(SUPABASE_URL+'/rest/v1/inspection_shares?share_id=eq.'+sid+'&select=response',
+                    {headers:supaHeaders()})
+                    .then(r=>r.json())
+                    .then(rows=>{
+                      if (!rows[0]?.response) return;
+                      const cr = rows[0].response;
+                      setData(d=>({...d,
+                        inspCrops:(d.inspCrops||[]).map((r,i)=>({
+                          ...r,
+                          actualAcres:cr.crops?.[i]?.actualAcres||r.actualAcres,
+                          condition:cr.crops?.[i]?.condition||r.condition,
+                          actualYield:cr.crops?.[i]?.actualYield||r.actualYield,
+                          location:cr.crops?.[i]?.location||r.location,
+                        })),
+                        inspLivestock:(d.inspLivestock||[]).map((r,i)=>({
+                          ...r,
+                          actualHead:cr.livestock?.[i]?.actualHead||r.actualHead,
+                          condition:cr.livestock?.[i]?.condition||r.condition,
+                          estWeight:cr.livestock?.[i]?.estWeight||r.estWeight,
+                        })),
+                      }));
+                      setHasCustomerResponse(false);
+                    });
+                }}
+                style={{background:"#15803d",color:"white",border:"none",borderRadius:7,
+                  padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+                  fontSize:".85rem",flexShrink:0}}>
+                Load Response
+              </button>
+            </div>
+          )}
+          <InspectionView data={data} setData={setData} />
+        </div>
       )}
     </div>
   );
