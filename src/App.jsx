@@ -1203,7 +1203,6 @@ function InspectionView({ data, setData }) {
               <tbody>
                 {crops.map((r,i)=>{
                   const pct = devPct(r.actualAcres, r.budgetedAcres);
-                  console.log('CROP DEBUG', r.budgetedCrop, 'budAc:', r.budgetedAcres, 'actAc:', r.actualAcres, 'pct:', pct, 'show:', r.actualAcres && pct !== null && Math.abs(pct) >= 20);
                   const showDev = pct !== null && Math.abs(pct) >= 10;
                   const rowBg = i%2===0?'white':'#f9fafb';
                   const ds = r.actualAcres ? devStyle(pct) : {};
