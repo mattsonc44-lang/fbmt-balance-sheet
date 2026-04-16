@@ -1065,6 +1065,15 @@ function InspectionView({ data, setData }) {
         insp_data: {
           inspCrops: data.inspCrops || [],
           inspLivestock: data.inspLivestock || [],
+          inspInventory: data.inspInventory || [],
+          inspPastureCond: data.inspPastureCond || "",
+          inspPastureCmt: data.inspPastureCmt || "",
+          inspWaterCond: data.inspWaterCond || "",
+          inspWaterCmt: data.inspWaterCmt || "",
+          inspEquipCond: data.inspEquipCond || "",
+          inspEquipCmt: data.inspEquipCmt || "",
+          inspEnvCmt: data.inspEnvCmt || "",
+          inspAddlCmt: data.inspAddlCmt || "",
           clientName: data.clientName,
           inspDate: data.inspDate,
         },
@@ -1110,27 +1119,17 @@ function InspectionView({ data, setData }) {
         setCustomerResponse(cr);
         setData(d => ({
           ...d,
-          inspCrops: (d.inspCrops||[]).map((r,i) => {
-            const c = cr.crops?.[i] || {};
-            return {
-              ...r,
-              actualAcres: c.actualAcres || r.actualAcres,
-              condition: c.condition || r.condition,
-              actualYield: c.actualYield || r.actualYield,
-              location: c.location || r.location,
-              deviationReason: c.deviationReason || r.deviationReason,
-            };
-          }),
-          inspLivestock: (d.inspLivestock||[]).map((r,i) => {
-            const l = cr.livestock?.[i] || {};
-            return {
-              ...r,
-              actualHead: l.actualHead || r.actualHead,
-              condition: l.condition || r.condition,
-              estWeight: l.estWeight || r.estWeight,
-              deviationReason: l.deviationReason || r.deviationReason,
-            };
-          }),
+          inspCrops: (d.inspCrops||[]).map((r,i) => { const c = cr.crops?.[i]||{}; return {...r, actualAcres:c.actualAcres||r.actualAcres, condition:c.condition||r.condition, actualYield:c.actualYield||r.actualYield, location:c.location||r.location, deviationReason:c.deviationReason||r.deviationReason}; }),
+          inspLivestock: (d.inspLivestock||[]).map((r,i) => { const l = cr.livestock?.[i]||{}; return {...r, actualHead:l.actualHead||r.actualHead, condition:l.condition||r.condition, estWeight:l.estWeight||r.estWeight, deviationReason:l.deviationReason||r.deviationReason}; }),
+          inspInventory: cr.inventory?.length ? cr.inventory : d.inspInventory,
+          inspPastureCond: cr.pastureCond || d.inspPastureCond,
+          inspPastureCmt: cr.pastureCmt || d.inspPastureCmt,
+          inspWaterCond: cr.waterCond || d.inspWaterCond,
+          inspWaterCmt: cr.waterCmt || d.inspWaterCmt,
+          inspEquipCond: cr.equipCond || d.inspEquipCond,
+          inspEquipCmt: cr.equipCmt || d.inspEquipCmt,
+          inspEnvCmt: cr.envCmt || d.inspEnvCmt,
+          inspAddlCmt: cr.addlCmt || d.inspAddlCmt,
         }));
         alert('✅ Customer response loaded! Their answers have been filled in.');
       } else {
