@@ -1118,6 +1118,7 @@ function InspectionView({ data, setData }) {
               condition: c.condition || r.condition,
               actualYield: c.actualYield || r.actualYield,
               location: c.location || r.location,
+              deviationReason: c.deviationReason || r.deviationReason,
             };
           }),
           inspLivestock: (d.inspLivestock||[]).map((r,i) => {
@@ -1127,6 +1128,7 @@ function InspectionView({ data, setData }) {
               actualHead: l.actualHead || r.actualHead,
               condition: l.condition || r.condition,
               estWeight: l.estWeight || r.estWeight,
+              deviationReason: l.deviationReason || r.deviationReason,
             };
           }),
         }));
@@ -4511,12 +4513,14 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                           condition:cr.crops?.[i]?.condition||r.condition,
                           actualYield:cr.crops?.[i]?.actualYield||r.actualYield,
                           location:cr.crops?.[i]?.location||r.location,
+                          deviationReason:cr.crops?.[i]?.deviationReason||r.deviationReason,
                         })),
                         inspLivestock:(d.inspLivestock||[]).map((r,i)=>({
                           ...r,
                           actualHead:cr.livestock?.[i]?.actualHead||r.actualHead,
                           condition:cr.livestock?.[i]?.condition||r.condition,
                           estWeight:cr.livestock?.[i]?.estWeight||r.estWeight,
+                          deviationReason:cr.livestock?.[i]?.deviationReason||r.deviationReason,
                         })),
                       }));
                       setHasCustomerResponse(false);
