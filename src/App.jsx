@@ -4338,10 +4338,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           onClick={()=>setActiveTab("inspection")}>
           Ag Inspection{hasCustomerResponse ? " 📬" : ""}
         </button>
-        <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
-          onClick={()=>{ setActiveTab("inspection"); if(data.clientName) checkCustomerResponse(); }}>
-          🌾 Ag Inspection
-        </button>
       </div>
 
       {activeTab === "balance" && (
