@@ -1272,7 +1272,7 @@ function InspectionView({ data, setData }) {
                         </td>
                       </tr>
                       {/* Deviation reason row - only required at >= 20% */}
-                      {pct !== null && Math.abs(pct) >= 20 && (
+                      {r.actualAcres && pct !== null && Math.abs(pct) >= 20 && (
                         <tr style={{background:'#fef2f2'}}>
                           <td colSpan={10} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -1357,7 +1357,7 @@ function InspectionView({ data, setData }) {
                         <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d'}}>{lsRowTot(r)>0?inspFmt$(lsRowTot(r)):'—'}</td>
                         <td style={INSP_TD_S}><button type="button" onClick={()=>remLS(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button></td>
                       </tr>
-                      {pct !== null && Math.abs(pct) >= 20 && (
+                      {r.actualHead && pct !== null && Math.abs(pct) >= 20 && (
                         <tr style={{background:'#fef2f2'}}>
                           <td colSpan={10} style={{padding:'6px 10px 8px 32px'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
