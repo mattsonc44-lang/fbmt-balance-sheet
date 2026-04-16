@@ -1394,7 +1394,23 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
     W.document.write(html);
     W.document.close();
     W.focus();
-    setTimeout(()=>W.print(), 500);
+    // Auto-detect paper size: measure content height and pick letter vs legal
+    setTimeout(()=>{
+      try {
+        const bodyH = W.document.body.scrollHeight;
+        // Letter printable area at 96dpi with 0.6in margins ≈ 940px
+        // Legal printable area at 96dpi with 0.6in margins ≈ 1228px
+        const useLegal = bodyH > 920;
+        const pageStyle = W.document.createElement('style');
+        pageStyle.textContent = useLegal
+          ? '@page { size: legal portrait; margin: 0.5in; }'
+          : '@page { size: letter portrait; margin: 0.6in 0.5in; }';
+        W.document.head.appendChild(pageStyle);
+        // Show a small indicator in the window title
+        W.document.title = (useLegal ? '[Legal] ' : '[Letter] ') + 'Ag Inspection — ' + ('' + (data.clientName||'Report'));
+      } catch {}
+      W.print();
+    }, 500);
   };
 
   const EMAIL_CONFIG = {
