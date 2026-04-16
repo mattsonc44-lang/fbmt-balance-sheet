@@ -341,6 +341,7 @@ function emptyData() {
     inspLoans: ["","",""],
     inspCrops: [],
     inspLivestock: [],
+    inspShareId: "",
     inspInventory: [],
     inspPastureCond:"", inspPastureCmt:"",
     inspWaterCond:"", inspWaterCmt:"",
@@ -1856,6 +1857,7 @@ export default function BalanceSheet() {
   const [linkedEntityNWMap, setLinkedEntityNWMap] = useState({}); // { clientName: netWorth }
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]);
+  const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
   const [pendingResponses, setPendingResponses] = useState({}); // { clientName: shareRecord }
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -1915,15 +1917,7 @@ export default function BalanceSheet() {
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              let hasResponse = false;
-              if (p.inspShareId) {
-                try {
-                  const sr = await fetch(SUPABASE_URL+'/rest/v1/inspection_shares?share_id=eq.'+p.inspShareId+'&select=responded_at',{headers:supaHeaders()});
-                  const srows = await sr.json();
-                  hasResponse = !!(srows[0]?.responded_at);
-                } catch {}
-              }
-              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [], inspShareId: p.inspShareId || '', hasResponse });
+              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [], inspShareId: p.inspShareId || '', hasResponse: false });
             }
           } catch {}
         }
