@@ -1037,13 +1037,11 @@ export default function BalanceSheet() {
     if (!newFolders.some(f => JSON.stringify(f) === pathStr)) {
       newFolders.push(path);
       setUserFolders(newFolders);
-      try { if (typeof localStorage !== "undefined") localStorage.setItem("fbmt_userFolders", JSON.stringify(newFolders)); } catch (e) { console.warn("localStorage not available:", e.message); }
+      try { localStorage.setItem("fbmt_userFolders", JSON.stringify(newFolders)); } catch {}
     }
   };
   // ── Storage ────────────────────────────────────────────────────────────────
-  const [loadError, setLoadError] = useState("");
   const loadSavedList = async () => {
-    setLoadError("");
     try {
       const result = await storage.list(STORAGE_PREFIX);
       if (result && result.keys) {
@@ -1059,23 +1057,45 @@ export default function BalanceSheet() {
         }
         sheets.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
         setSavedSheets(sheets);
-      } else {
-        setLoadError("Could not reach database. Check your Supabase config or unpause the project at app.supabase.com");
       }
-    } catch (err) {
-      setLoadError("Database error: " + (err.message || "unknown error"));
-    }
+    } catch {}
   };
   useEffect(() => {
     loadSavedList();
     // Load any user-created folders
     try {
-      if (typeof localStorage !== "undefined") {
-        const stored = localStorage.getItem("fbmt_userFolders");
-        if (stored) setUserFolders(JSON.parse(stored));
-      }
-    } catch (e) { console.warn("localStorage not available:", e.message); }
+      const stored = localStorage.getItem("fbmt_userFolders");
+      if (stored) setUserFolders(JSON.parse(stored));
+    } catch {}
   }, []);
+
+  // Load linked entities net worth whenever the list changes
+  useEffect(() => {
+    async function fetchAllLinkedNW() {
+      const entities = data.linkedEntities || [];
+      if (!entities.length) { setLinkedEntityNWMap({}); return; }
+      const newMap = {};
+      for (const name of entities) {
+        try {
+          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
+          const result = await storage.list(prefix);
+          if (result && result.keys && result.keys.length > 0) {
+            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
+            const item = await storage.get(sorted[0]);
+            if (item) {
+              const p = JSON.parse(item.value);
+              const m = numVal;
+              const ta = [p.cashGlacier,...(p.cashOther||[]).map(r=>r.amount),(p.receivables||[]).map(r=>r.amount),(p.farmProducts||[]).map(r=>String(m(r.quantity)*m(r.pricePerUnit))),(p.realEstate||[]).map(r=>String(m(r.acres)*m(r.valuePerAcre))),(p.vehicles||[]).map(r=>r.value),(p.machinery||[]).map(r=>r.value),(p.otherAssets||[]).map(r=>r.amount)].flat().reduce((s,v)=>s+m(v),0);
+              const tl = [(p.operatingNotes||[]).map(r=>r.balance),(p.intermediatDebt||[]).map(r=>r.principal),(p.reMortgages||[]).map(r=>r.principal),(p.otherLiabilities||[]).map(r=>r.balance)].flat().reduce((s,v)=>s+m(v),0);
+              newMap[name] = ta - tl;
+            }
+          }
+        } catch {}
+      }
+      setLinkedEntityNWMap(newMap);
+    }
+    fetchAllLinkedNW();
+  }, [JSON.stringify(data.linkedEntities)]);
 
   // Load available entities for the link picker
   useEffect(() => {
@@ -1682,33 +1702,6 @@ export default function BalanceSheet() {
       "TOTAL LIABILITIES":tl, "WORKING CAPITAL":tc-tcl, "NET WORTH":ta-tl
     };
   }
-
-  // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
-  useEffect(() => {
-    async function fetchAllLinkedNW() {
-      const entities = data.linkedEntities || [];
-      if (!entities.length) { setLinkedEntityNWMap({}); return; }
-      const newMap = {};
-      for (const name of entities) {
-        try {
-          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
-          const result = await storage.list(prefix);
-          if (result && result.keys && result.keys.length > 0) {
-            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
-            const item = await storage.get(sorted[0]);
-            if (item) {
-              const p = JSON.parse(item.value);
-              const totals = sheetTotals(p);
-              newMap[name] = totals["NET WORTH"] || 0;
-            }
-          }
-        } catch {}
-      }
-      setLinkedEntityNWMap(newMap);
-    }
-    fetchAllLinkedNW();
-  }, [JSON.stringify(data.linkedEntities), savedSheets.length]);
-
 
   const loadComparisonSheets = async () => {
     if (!data.clientName) return;
@@ -3142,23 +3135,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             </div>
           )}
 
-          {!isConfigured() && (
-            <div style={{background:"#fff8e0",border:"1px solid #f0d060",borderRadius:10,padding:16,marginBottom:16,fontSize:".88rem",color:"#7a5a00"}}>
-              <strong>⚠️ Database not configured.</strong> Your saved balance sheets cannot load.
-              <br/>Check that <code>public/config.js</code> has your correct Supabase URL and anon key,
-              and that the file is included in your Netlify deployment.
-            </div>
-          )}
-            <div style={{background:"#fce8e8",border:"1px solid #f0c0c0",borderRadius:10,padding:16,marginBottom:16,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-              <span style={{fontSize:"1.2rem"}}>⚠️</span>
-              <div style={{flex:1,fontSize:".88rem",color:"#7a1a1a"}}>{loadError}</div>
-              <button className="btn btn-secondary" style={{fontSize:".82rem"}} onClick={loadSavedList}>
-                Retry
-              </button>
-            </div>
-          )}
-
-          {savedSheets.length === 0 && !loadError
+          {savedSheets.length === 0
             ? <div className="home-empty">No saved balance sheets yet. Complete a sheet and save it to store it here.</div>
             : (() => {
                 // Build tree from folderPath on each sheet
