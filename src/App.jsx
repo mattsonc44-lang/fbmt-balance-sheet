@@ -960,6 +960,7 @@ const inspTa = (val, onChange, ph, rows=3) => (
 
 // Deviation helpers
 const devPct = (actual, budgeted) => {
+  if (!actual && actual !== 0) return null; // no actual value entered yet
   const a = parseFloat(actual)||0, b = parseFloat(budgeted)||0;
   if (!b) return null;
   return ((a - b) / b) * 100;
@@ -1202,6 +1203,7 @@ function InspectionView({ data, setData }) {
               <tbody>
                 {crops.map((r,i)=>{
                   const pct = devPct(r.actualAcres, r.budgetedAcres);
+                  console.log('CROP DEBUG', r.budgetedCrop, 'budAc:', r.budgetedAcres, 'actAc:', r.actualAcres, 'pct:', pct, 'show:', r.actualAcres && pct !== null && Math.abs(pct) >= 20);
                   const showDev = pct !== null && Math.abs(pct) >= 10;
                   const rowBg = i%2===0?'white':'#f9fafb';
                   const ds = r.actualAcres ? devStyle(pct) : {};
