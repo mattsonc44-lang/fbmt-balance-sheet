@@ -1094,7 +1094,7 @@ function InspectionView({ data, setData }) {
       }
       const deviations = (data.inspCrops||[]).filter(r => {
         const p = devPct(r.actualAcres, r.budgetedAcres);
-        return p !== null && Math.abs(p) >= 10;
+        return r.actualAcres && p !== null && Math.abs(p) >= 10;
       }).map(r => `${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac -> actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) -- ${r.deviationReason||'no reason given'}`).join('\n');
 
       const body = `AG INSPECTION REPORT\nCustomer: ${data.clientName}\nInspector: ${data.inspInspector||''}\nDate: ${data.inspDate||''}\n\nCROP DEVIATIONS FROM BUDGET:\n${deviations||'None'}\n\nGRAND TOTAL: ${inspFmt$(grand)}\n\nPasture: ${data.inspPastureCond||'—'} ${data.inspPastureCmt||''}\nWater: ${data.inspWaterCond||'—'} ${data.inspWaterCmt||''}\nEquipment: ${data.inspEquipCond||'—'} ${data.inspEquipCmt||''}\nEnvironmental: ${data.inspEnvCmt||''}\nAdditional: ${data.inspAddlCmt||''}`;
@@ -1477,10 +1477,10 @@ function InspectionView({ data, setData }) {
         </div>
 
         {/* ── Deviation Summary ── */}
-        {crops.some(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=10; }) && (
+        {crops.some(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return r.actualAcres&&p!==null&&Math.abs(p)>=10; }) && (
           <div style={{background:'#fffbeb',border:'2px solid #f59e0b',borderRadius:6,padding:16,marginBottom:20}}>
             <div style={{fontWeight:700,fontSize:14,color:'#92400e',marginBottom:10}}>⚠️ Budget Deviation Summary</div>
-            {crops.filter(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=5; }).map(r=>{
+            {crops.filter(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return r.actualAcres&&p!==null&&Math.abs(p)>=10; }).map(r=>{
               const p = devPct(r.actualAcres, r.budgetedAcres);
               const ac = parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0);
               return (
