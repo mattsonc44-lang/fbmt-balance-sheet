@@ -968,13 +968,13 @@ const devStyle = pct => {
   if (pct === null) return {};
   const abs = Math.abs(pct);
   if (abs >= 20) return {background:'#fef2f2',borderLeft:'4px solid #dc2626'};
-  if (abs >= 5)  return {background:'#fffbeb',borderLeft:'4px solid #f59e0b'};
+  if (abs >= 10) return {background:'#fffbeb',borderLeft:'4px solid #f59e0b'};
   return {background:'#f0fdf4',borderLeft:'4px solid #22c55e'};
 };
 const devBadge = pct => {
   if (pct === null || Math.abs(pct) < 0.5) return null;
   const abs = Math.abs(pct); const pos = pct > 0;
-  const color = abs >= 20 ? '#dc2626' : abs >= 5 ? '#d97706' : '#16a34a';
+  const color = abs >= 20 ? '#dc2626' : abs >= 10 ? '#d97706' : '#16a34a';
   return (
     <span style={{fontSize:10,fontWeight:700,color,background:color+'18',padding:'1px 6px',borderRadius:999,whiteSpace:'nowrap'}}>
       {pos?'+':''}{pct.toFixed(1)}%
@@ -1094,8 +1094,8 @@ function InspectionView({ data, setData }) {
       }
       const deviations = (data.inspCrops||[]).filter(r => {
         const p = devPct(r.actualAcres, r.budgetedAcres);
-        return p !== null && Math.abs(p) >= 5;
-      }).map(r => `${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac → actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) — ${r.deviationReason||'no reason given'}`).join('\n');
+        return p !== null && Math.abs(p) >= 10;
+      }).map(r => `${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac -> actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) -- ${r.deviationReason||'no reason given'}`).join('\n');
 
       const body = `AG INSPECTION REPORT\nCustomer: ${data.clientName}\nInspector: ${data.inspInspector||''}\nDate: ${data.inspDate||''}\n\nCROP DEVIATIONS FROM BUDGET:\n${deviations||'None'}\n\nGRAND TOTAL: ${inspFmt$(grand)}\n\nPasture: ${data.inspPastureCond||'—'} ${data.inspPastureCmt||''}\nWater: ${data.inspWaterCond||'—'} ${data.inspWaterCmt||''}\nEquipment: ${data.inspEquipCond||'—'} ${data.inspEquipCmt||''}\nEnvironmental: ${data.inspEnvCmt||''}\nAdditional: ${data.inspAddlCmt||''}`;
 
@@ -1151,7 +1151,7 @@ function InspectionView({ data, setData }) {
 
       {/* Legend */}
       <div style={{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}}>
-        {[['#22c55e','On Budget (< 5% deviation)'],['#f59e0b','Minor Deviation (5–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>(
+        {[['#22c55e','On Budget (< 10% deviation)'],['#f59e0b','Minor Deviation (10–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>(
           <div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}}>
             <div style={{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}/>
             {l}
@@ -1202,7 +1202,7 @@ function InspectionView({ data, setData }) {
               <tbody>
                 {crops.map((r,i)=>{
                   const pct = devPct(r.actualAcres, r.budgetedAcres);
-                  const showDev = pct !== null && Math.abs(pct) >= 5;
+                  const showDev = pct !== null && Math.abs(pct) >= 10;
                   const rowBg = i%2===0?'white':'#f9fafb';
                   const ds = r.actualAcres ? devStyle(pct) : {};
                   return (
@@ -1232,8 +1232,16 @@ function InspectionView({ data, setData }) {
                           <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'—'}</div>
                           <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
                         </td>
-                        {/* Actual acres */}
-                        <td style={INSP_TD_S}>{inspInp(r.actualAcres, v=>updCrop(r.id,'actualAcres',v), r.budgetedAcres||'0', 'number')}</td>
+                        {/* Actual acres — type to enter */}
+                        <td style={INSP_TD_S}>
+                          <input
+                            type="text"
+                            value={r.actualAcres}
+                            placeholder={r.budgetedAcres||'0'}
+                            onChange={e=>updCrop(r.id,'actualAcres',e.target.value.replace(/[^0-9.]/g,''))}
+                            style={{border:'1.5px solid #6B0E1E',borderRadius:4,padding:'5px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'#fdf9f9',fontWeight:600,textAlign:'center'}}
+                          />
+                        </td>
                         {/* Deviation badge */}
                         <td style={{...INSP_TD_S,textAlign:'center'}}>
                           {r.actualAcres && r.budgetedAcres ? (
@@ -1263,17 +1271,17 @@ function InspectionView({ data, setData }) {
                           <button type="button" onClick={()=>remCrop(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button>
                         </td>
                       </tr>
-                      {/* Deviation reason row */}
-                      {showDev && (
-                        <tr style={{background: Math.abs(pct)>=20?'#fef2f2':'#fffbeb'}}>
+                      {/* Deviation reason row - only required at >= 20% */}
+                      {pct !== null && Math.abs(pct) >= 20 && (
+                        <tr style={{background:'#fef2f2'}}>
                           <td colSpan={10} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
-                              <span style={{fontSize:11,fontWeight:700,color:Math.abs(pct)>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}}>
-                                {Math.abs(pct)>=20?'⛔':'⚠️'} Deviation reason:
+                              <span style={{fontSize:11,fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
+                                ⛔ Deviation reason (required):
                               </span>
                               {inspInp(r.deviationReason, v=>updCrop(r.id,'deviationReason',v),
-                                Math.abs(pct)>=20?'Required — explain major deviation from budget…':'Explain deviation from budgeted acres…',
-                                'text', {border:`1px solid ${Math.abs(pct)>=20?'#fca5a5':'#fcd34d'}`,background:'white'})}
+                                'Required — explain major deviation from budget…',
+                                'text', {border:'1px solid #fca5a5',background:'white'})}
                             </div>
                           </td>
                         </tr>
@@ -1318,7 +1326,7 @@ function InspectionView({ data, setData }) {
               <tbody>
                 {lsRows.map((r,i)=>{
                   const pct = devPct(r.actualHead, r.budgetedHead);
-                  const showDev = pct !== null && Math.abs(pct) >= 5;
+                  const showDev = pct !== null && Math.abs(pct) >= 10;
                   const ds = r.actualHead ? devStyle(pct) : {};
                   return (
                     <React.Fragment key={r.id}>
@@ -1469,7 +1477,7 @@ function InspectionView({ data, setData }) {
         </div>
 
         {/* ── Deviation Summary ── */}
-        {crops.some(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=5; }) && (
+        {crops.some(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=10; }) && (
           <div style={{background:'#fffbeb',border:'2px solid #f59e0b',borderRadius:6,padding:16,marginBottom:20}}>
             <div style={{fontWeight:700,fontSize:14,color:'#92400e',marginBottom:10}}>⚠️ Budget Deviation Summary</div>
             {crops.filter(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=5; }).map(r=>{
