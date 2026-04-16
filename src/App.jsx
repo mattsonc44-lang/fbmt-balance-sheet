@@ -1292,7 +1292,7 @@ function InspectionView({ data, setData }) {
                 </div>
                 <button onClick={()=>{
                     const subject = encodeURIComponent('Inspection Form - ' + data.clientName);
-                    const body = encodeURIComponent('Please fill out your inspection form:\n\nLink: ' + shareLink + '\nPIN: ' + sharePin + '\n\nEnter the PIN, fill in your actual acres/conditions/yields, and submit.\n\nThank you,\nFirst Bank of Montana');
+                    const body = encodeURIComponent('Please fill out your crop inspection form below.\n\n'+'Click the link to open your form:\n'+shareLink+'\n\n'+'Your PIN: '+sharePin+'\n\n'+'Steps:\n1. Click the link above\n2. Enter your PIN when prompted\n3. Fill in your actual acres, yields, and conditions\n4. Submit the form\n\n'+'Thank you,\nFirst Bank of Montana\n'+(window.location.origin));
                     window.location.href = 'mailto:?subject=' + subject + '&body=' + body;
                   }}
                   style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:7,
@@ -1342,7 +1342,7 @@ function InspectionView({ data, setData }) {
       <div ref={printRef}>
         {/* Header info */}
         <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px 24px'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px 24px'}}>
             <div><label style={INSP_LBL}>CUSTOMER NAME</label>
               <div style={{padding:'6px 8px',background:'#f0fdf4',borderRadius:4,fontSize:13,fontWeight:600,color:INSP_SH}}>{data.clientName||'—'}</div>
             </div>
@@ -1351,12 +1351,6 @@ function InspectionView({ data, setData }) {
             </div>
             <div><label style={INSP_LBL}>INSPECTOR NAME</label>
               {inspInp(data.inspInspector||'', v=>set('inspInspector',v), 'Enter inspector name')}
-            </div>
-            <div>
-              <label style={INSP_LBL}>LOAN NUMBER(S)</label>
-              <div style={{display:'flex',flexDirection:'column',gap:5}}>
-                {loans.map((l,i)=><div key={i}>{inspInp(l, v=>setLoan(i,v), `Loan ${i+1}`)}</div>)}
-              </div>
             </div>
           </div>
         </div>
@@ -1713,7 +1707,7 @@ function InspectionView({ data, setData }) {
 
         {/* Signature */}
         <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,border:'1px solid #d1fae5'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:28}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:28}}>
             <div>
               <label style={INSP_LBL}>INSPECTOR SIGNATURE</label>
               <div style={{borderBottom:'2px solid #374151',height:44,marginTop:8}}/>

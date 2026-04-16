@@ -54,6 +54,7 @@ export default function CustomerInspectionForm() {
   const [envCmt,setEnvCmt] = useState('');
   const [addlCmt,setAddlCmt] = useState('');
   const [submitting,setSubmitting] = useState(false);
+  const [lastAddedId,setLastAddedId] = useState(null);
   const [errorMsg,setErrorMsg] = useState('');
 
   const shareId = new URLSearchParams(window.location.search).get('id');
@@ -311,7 +312,7 @@ export default function CustomerInspectionForm() {
                 const tot=(parseFloat(r.quantity)||0)*(parseFloat(r.valuePerUnit)||0);
                 return (
                   <tr key={r.id||i} style={{background:i%2===0?'white':'#f0fdf4'}}>
-                    <td style={INSP_TD_S}>{inp(r.description,v=>updInv(r.id,'description',v),'Corn, Soybeans, Hay...')}</td>
+                    <td style={INSP_TD_S}><input type="text" value={r.description} placeholder="Corn, Soybeans, Hay..." autoFocus={r.id===lastAddedId} onChange={e=>updInv(r.id,'description',e.target.value)} onFocus={()=>setLastAddedId(null)} style={{border:'1px solid #d1d5db',borderRadius:4,padding:'5px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/></td>
                     <td style={INSP_TD_S}>{inp(r.location,v=>updInv(r.id,'location',v),'Bin/Facility')}</td>
                     <td style={INSP_TD_S}><CondPills value={r.condition} onChange={v=>updInv(r.id,'condition',v)}/></td>
                     <td style={INSP_TD_S}>{inp(r.quantity,v=>updInv(r.id,'quantity',v),'0',true)}</td>
@@ -334,7 +335,7 @@ export default function CustomerInspectionForm() {
             </tr></tfoot>
           </table>
         </div>
-        <button type="button" onClick={()=>setInventory(l=>[...l,{id:uid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}])} style={{marginTop:10,background:'none',border:'1.5px dashed #6b7280',borderRadius:6,padding:'6px 16px',cursor:'pointer',fontSize:12,color:'#6b7280',fontFamily:'inherit',fontWeight:600}}>+ Add Row</button>
+        <button type="button" onClick={()=>{ const newId=uid(); setLastAddedId(newId); setInventory(l=>[...l,{id:newId,description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]); }} style={{marginTop:10,background:'none',border:'1.5px dashed #6b7280',borderRadius:6,padding:'6px 16px',cursor:'pointer',fontSize:12,color:'#6b7280',fontFamily:'inherit',fontWeight:600}}>+ Add Row</button>
       </Section>
 
       {/* ── PASTURE ── */}
