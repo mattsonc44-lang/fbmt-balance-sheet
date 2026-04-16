@@ -1038,10 +1038,87 @@ function InspectionView({ data, setData }) {
   }, []);
 
   const set = (field, val) => setData(d=>({...d, [field]:val}));
+  const [showShareModal, setShowShareModal] = React.useState(false);
+  const [shareLink, setShareLink] = React.useState('');
+  const [sharePin, setSharePin] = React.useState('');
+  const [shareStatus, setShareStatus] = React.useState(''); // 'generating'|'ready'|'error'
+  const [checkingResponse, setCheckingResponse] = React.useState(false);
+  const [customerResponse, setCustomerResponse] = React.useState(null);
   const setLoan = (i,v) => setData(d=>({...d, inspLoans: d.inspLoans.map((x,j)=>j===i?v:x)}));
   const updCrop = (id,f,v) => setData(d=>({...d, inspCrops: d.inspCrops.map(r=>r.id===id?{...r,[f]:v}:r)}));
   const updLS   = (id,f,v) => setData(d=>({...d, inspLivestock: d.inspLivestock.map(r=>r.id===id?{...r,[f]:v}:r)}));
   const updInv  = (id,f,v) => setData(d=>({...d, inspInventory: d.inspInventory.map(r=>r.id===id?{...r,[f]:v}:r)}));
+
+  const generateShare = async () => {
+    setShareStatus('generating');
+    setShowShareModal(true);
+    try {
+      // Generate random share ID and PIN
+      const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
+      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const payload = {
+        share_id: shareId,
+        pin,
+        client_name: data.clientName,
+        as_of_date: data.asOfDate || data.inspDate || new Date().toISOString().slice(0,10),
+        insp_data: {
+          inspCrops: data.inspCrops || [],
+          inspLivestock: data.inspLivestock || [],
+          clientName: data.clientName,
+          inspDate: data.inspDate,
+        },
+        response: null,
+      };
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/inspection_shares', {
+        method: 'POST',
+        headers: { ...supaHeaders(), 'Prefer': 'return=representation' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const origin = window.location.origin;
+      setShareLink(origin + '/inspect?id=' + shareId);
+      setSharePin(pin);
+      setShareStatus('ready');
+    } catch(e) {
+      setShareStatus('error:' + e.message);
+    }
+  };
+
+  const checkCustomerResponse = async () => {
+    if (!shareLink) return;
+    setCheckingResponse(true);
+    try {
+      const shareId = shareLink.split('id=')[1];
+      const resp = await fetch(
+        SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + shareId + '&select=response,responded_at',
+        { headers: supaHeaders() }
+      );
+      const rows = await resp.json();
+      if (rows[0]?.response) {
+        setCustomerResponse(rows[0].response);
+        // Merge customer response into inspection data
+        const cr = rows[0].response;
+        setData(d => ({
+          ...d,
+          inspCrops: (d.inspCrops||[]).map((r,i) => ({
+            ...r,
+            actualAcres: cr.crops?.[i]?.actualAcres || r.actualAcres,
+            condition: cr.crops?.[i]?.condition || r.condition,
+            actualYield: cr.crops?.[i]?.actualYield || r.actualYield,
+            location: cr.crops?.[i]?.location || r.location,
+          })),
+          inspLivestock: (d.inspLivestock||[]).map((r,i) => ({
+            ...r,
+            actualHead: cr.livestock?.[i]?.actualHead || r.actualHead,
+            condition: cr.livestock?.[i]?.condition || r.condition,
+            estWeight: cr.livestock?.[i]?.estWeight || r.estWeight,
+          })),
+        }));
+      }
+    } catch {}
+    setCheckingResponse(false);
+  };
+
   const addCrop = () => setData(d=>({...d, inspCrops:[...d.inspCrops,{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}]}));
   const remCrop = id => setData(d=>({...d, inspCrops: d.inspCrops.filter(r=>r.id!==id)}));
   const addLS   = () => setData(d=>({...d, inspLivestock:[...d.inspLivestock,{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}]}));
@@ -1140,13 +1217,85 @@ function InspectionView({ data, setData }) {
           <div style={{fontWeight:800,fontSize:18,color:INSP_SH,fontFamily:"'Playfair Display',serif"}}>Ag Inspection Report</div>
           <div style={{fontSize:12,color:'#6b7280'}}>Pre-loaded from Budget tab · Fill in actuals below</div>
         </div>
-        <div style={{display:'flex',gap:8}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <button onClick={generateShare}
+            style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,
+              padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}}>
+            🔗 Share with Customer
+          </button>
           <button onClick={handlePDF} style={{background:'#f0fdf4',color:INSP_TH,border:`1.5px solid ${INSP_TH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}}>🖨 Save PDF</button>
           <button onClick={handleSubmit} disabled={submitting} style={{background:INSP_GOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}}>
             {submitting?'⏳ Sending…':'📤 Submit Report'}
           </button>
         </div>
       </div>
+
+      {/* ── Share Modal ── */}
+      {showShareModal && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',
+          zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'white',borderRadius:14,padding:28,maxWidth:480,width:'100%',
+            boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
+            <div style={{fontWeight:700,fontSize:'1.05rem',marginBottom:6,color:'#1a1a1a'}}>
+              Share Inspection with Customer
+            </div>
+            {shareStatus === 'generating' && (
+              <div style={{color:'#6b7280',padding:'20px 0',textAlign:'center'}}>Generating secure link...</div>
+            )}
+            {shareStatus === 'ready' && (
+              <div>
+                <div style={{fontSize:'.85rem',color:'#555',marginBottom:16}}>
+                  Send your customer the link and PIN below. They fill in actual acres, conditions and yields, then submit. You can load their response back here anytime.
+                </div>
+                <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:8,padding:14,marginBottom:12}}>
+                  <div style={{fontSize:'.72rem',fontWeight:700,color:'#2d5a8e',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Share Link</div>
+                  <div style={{fontSize:'.82rem',wordBreak:'break-all',color:'#1a1a1a',fontFamily:'monospace',marginBottom:8}}>{shareLink}</div>
+                  <button onClick={()=>navigator.clipboard.writeText(shareLink).then(()=>alert('Copied!'))}
+                    style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,padding:'4px 10px',fontSize:'.75rem',cursor:'pointer',fontWeight:600}}>
+                    Copy Link
+                  </button>
+                </div>
+                <div style={{background:'#f5e8ea',border:'1px solid #e0b0b8',borderRadius:8,padding:14,marginBottom:14}}>
+                  <div style={{fontSize:'.72rem',fontWeight:700,color:'#6B0E1E',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Customer PIN</div>
+                  <div style={{fontSize:'2rem',fontWeight:900,letterSpacing:'.25em',color:'#6B0E1E',fontFamily:'monospace'}}>{sharePin}</div>
+                  <div style={{fontSize:'.72rem',color:'#888',marginTop:4}}>Customer must enter this to open the form</div>
+                </div>
+                <button onClick={()=>{
+                    const subject = encodeURIComponent('Inspection Form - ' + data.clientName);
+                    const body = encodeURIComponent('Please fill out your inspection form:\n\nLink: ' + shareLink + '\nPIN: ' + sharePin + '\n\nEnter the PIN, fill in your actual acres/conditions/yields, and submit.\n\nThank you,\nFirst Bank of Montana');
+                    window.location.href = 'mailto:?subject=' + subject + '&body=' + body;
+                  }}
+                  style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:7,
+                    padding:'10px 0',fontWeight:700,fontSize:'.9rem',cursor:'pointer',marginBottom:8}}>
+                  📧 Open in Email (Outlook / Mail)
+                </button>
+                <button onClick={checkCustomerResponse} disabled={checkingResponse}
+                  style={{width:'100%',background:'none',border:'1.5px solid #22c55e',borderRadius:7,
+                    padding:'8px 0',fontWeight:700,fontSize:'.88rem',cursor:'pointer',color:'#15803d',marginBottom:8}}>
+                  {checkingResponse ? 'Checking...' : '🔄 Check for Customer Response'}
+                </button>
+                {customerResponse && (
+                  <div style={{background:'#e8f5ea',border:'1px solid #22c55e',borderRadius:7,
+                    padding:10,fontSize:'.85rem',color:'#15803d',fontWeight:700,marginBottom:8}}>
+                    ✅ Customer has responded — answers loaded into the form.
+                  </div>
+                )}
+              </div>
+            )}
+            {shareStatus.startsWith('error') && (
+              <div style={{color:'#c44',fontSize:'.85rem',padding:'12px 0'}}>
+                Error: {shareStatus.slice(6)}<br/>
+                Check that the inspection_shares table exists in Supabase (run inspection-share-schema.sql).
+              </div>
+            )}
+            <button onClick={()=>setShowShareModal(false)}
+              style={{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'7px 20px',
+                cursor:'pointer',fontFamily:'inherit',fontSize:'.85rem',marginTop:4}}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {submitErr && <div style={{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}}>⚠️ {submitErr}</div>}
 
