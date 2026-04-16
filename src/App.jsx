@@ -335,6 +335,18 @@ function emptyData() {
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
+    // Ag Inspection fields
+    inspDate: new Date().toISOString().split('T')[0],
+    inspInspector: "",
+    inspLoans: ["","",""],
+    inspCrops: [],
+    inspLivestock: [],
+    inspInventory: [],
+    inspPastureCond:"", inspPastureCmt:"",
+    inspWaterCond:"", inspWaterCmt:"",
+    inspEquipCond:"", inspEquipCmt:"",
+    inspEnvCmt:"", inspAddlCmt:"",
+    inspPhotos: [],
   };
 }
 
@@ -871,6 +883,685 @@ function ComparisonView({
 }
 
 
+// ── Ag Inspection Tab ─────────────────────────────────────────────────────────
+const INSP_CONDITIONS = ["Excellent","Good","Fair","Poor"];
+const INSP_WATER_COND  = ["Excess","Adequate","Limited"];
+const inspUid = () => Math.random().toString(36).slice(2,9);
+const INSP_SH   = '#1B4332';
+const INSP_TH   = '#2D6A4F';
+const INSP_GOLD = '#C8860A';
+
+const inspCondStyle = c => ({
+  Excellent:{color:'#15803d',bg:'#dcfce7',border:'#86efac'},
+  Good:     {color:'#1d4ed8',bg:'#dbeafe',border:'#93c5fd'},
+  Fair:     {color:'#92400e',bg:'#fef3c7',border:'#fcd34d'},
+  Poor:     {color:'#991b1b',bg:'#fee2e2',border:'#fca5a5'},
+  Excess:   {color:'#1d4ed8',bg:'#dbeafe',border:'#93c5fd'},
+  Adequate: {color:'#15803d',bg:'#dcfce7',border:'#86efac'},
+  Limited:  {color:'#991b1b',bg:'#fee2e2',border:'#fca5a5'},
+}[c] || {color:'#6b7280',bg:'#f3f4f6',border:'#d1d5db'});
+
+const inspFmt$ = v => { const n=parseFloat(v)||0; return n===0?'—':`$${n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`; };
+
+function InspCondPills({ value, onChange, options=INSP_CONDITIONS }) {
+  return (
+    <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
+      {options.map(o => {
+        const cs = inspCondStyle(o); const active = value===o;
+        return (
+          <button key={o} type="button" onClick={()=>onChange(active?'':o)} style={{
+            padding:'2px 9px',borderRadius:999,fontSize:11,fontWeight:700,cursor:'pointer',
+            transition:'all .15s',border:`1.5px solid ${active?cs.border:'#e5e7eb'}`,
+            background:active?cs.bg:'white',color:active?cs.color:'#9ca3af',lineHeight:1.6,
+          }}>{o}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+const INSP_LBL = {fontSize:12,fontWeight:600,color:'#374151',marginBottom:4,display:'block',letterSpacing:.3};
+const INSP_TH_S = {background:INSP_TH,color:'white',padding:'6px 8px',fontSize:11,fontWeight:700,textAlign:'center',whiteSpace:'nowrap',letterSpacing:.3};
+const INSP_TD_S = {padding:'4px 6px',borderBottom:'1px solid #f0fdf4',verticalAlign:'middle'};
+
+function InspCard({ title, children }) {
+  return (
+    <div style={{marginBottom:20,borderRadius:6,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.1)',border:'1px solid #d1fae5'}}>
+      <div style={{background:INSP_SH,padding:'9px 16px'}}>
+        <span style={{color:'white',fontFamily:'inherit',fontWeight:700,fontSize:15,letterSpacing:.5}}>{title}</span>
+      </div>
+      <div style={{background:'white',padding:16}}>{children}</div>
+    </div>
+  );
+}
+
+function InspAddBtn({ label, onClick }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      marginTop:10,background:'#f0fdf4',color:INSP_TH,border:`1.5px dashed ${INSP_TH}`,
+      borderRadius:4,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600,
+    }}>{label}</button>
+  );
+}
+
+const inspInp = (val, onChange, ph='', type='text', extra={}) => (
+  <input type={type} value={val} placeholder={ph} onChange={e=>onChange(e.target.value)} style={{
+    border:'1px solid #d1d5db',borderRadius:4,padding:'4px 7px',fontSize:13,width:'100%',
+    fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'white',...extra,
+  }}/>
+);
+
+const inspTa = (val, onChange, ph, rows=3) => (
+  <textarea value={val} onChange={e=>onChange(e.target.value)} placeholder={ph} rows={rows} style={{
+    border:'1px solid #d1d5db',borderRadius:4,padding:'6px 8px',fontSize:13,width:'100%',
+    fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box',
+  }}/>
+);
+
+// Deviation helpers
+const devPct = (actual, budgeted) => {
+  const a = parseFloat(actual)||0, b = parseFloat(budgeted)||0;
+  if (!b) return null;
+  return ((a - b) / b) * 100;
+};
+const devStyle = pct => {
+  if (pct === null) return {};
+  const abs = Math.abs(pct);
+  if (abs >= 20) return {background:'#fef2f2',borderLeft:'4px solid #dc2626'};
+  if (abs >= 10) return {background:'#fffbeb',borderLeft:'4px solid #f59e0b'};
+  return {background:'#f0fdf4',borderLeft:'4px solid #22c55e'};
+};
+const devBadge = pct => {
+  if (pct === null || Math.abs(pct) < 0.5) return null;
+  const abs = Math.abs(pct); const pos = pct > 0;
+  const color = abs >= 20 ? '#dc2626' : abs >= 10 ? '#d97706' : '#16a34a';
+  return (
+    <span style={{fontSize:10,fontWeight:700,color,background:color+'18',padding:'1px 6px',borderRadius:999,whiteSpace:'nowrap'}}>
+      {pos?'+':''}{pct.toFixed(1)}%
+    </span>
+  );
+};
+
+function InspectionView({ data, setData }) {
+  const fileRef  = React.useRef(null);
+  const cameraRef = React.useRef(null);
+  const printRef = React.useRef(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitted, setSubmitted] = React.useState(false);
+  const [submitErr, setSubmitErr] = React.useState('');
+
+  // Derived from budget — sync when budget changes
+  React.useEffect(() => {
+    if (!data.inspCrops || data.inspCrops.length === 0) {
+      const fromBudget = (data.budgetCrops||[])
+        .filter(r => r.crop || r.acres)
+        .map(r => ({
+          id: inspUid(),
+          budgetedCrop: r.crop||'',
+          budgetedAcres: r.acres||'',
+          budgetedYield: r.yieldPerAcre||'',
+          budgetedUnit: r.unit||'bu',
+          budgetedPrice: r.price||'',
+          location:'', condition:'',
+          actualAcres:'', actualYield:'', valuePerUnit:'',
+          deviationReason:'', substituted:false, substituteCrop:'',
+        }));
+      const rows = fromBudget.length > 0 ? fromBudget : [{
+        id:inspUid(), budgetedCrop:'', budgetedAcres:'', budgetedYield:'',
+        budgetedUnit:'bu', budgetedPrice:'', location:'', condition:'',
+        actualAcres:'', actualYield:'', valuePerUnit:'',
+        deviationReason:'', substituted:false, substituteCrop:'',
+      }];
+      setData(d=>({...d, inspCrops: rows}));
+    }
+    if (!data.inspLivestock || data.inspLivestock.length === 0) {
+      const fromBudget = (data.budgetLivestock||[])
+        .filter(r => r.type || r.head)
+        .map(r => ({
+          id: inspUid(),
+          budgetedType: r.type||'', budgetedHead: r.head||'',
+          budgetedLbs: r.lbs||'', budgetedPrice: r.price||'',
+          location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'',
+          deviationReason:'',
+        }));
+      const rows = fromBudget.length > 0 ? fromBudget : [{
+        id:inspUid(), budgetedType:'', budgetedHead:'', budgetedLbs:'', budgetedPrice:'',
+        location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'', deviationReason:'',
+      }];
+      setData(d=>({...d, inspLivestock: rows}));
+    }
+    if (!data.inspInventory || data.inspInventory.length === 0) {
+      setData(d=>({...d, inspInventory: [{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const set = (field, val) => setData(d=>({...d, [field]:val}));
+  const setLoan = (i,v) => setData(d=>({...d, inspLoans: d.inspLoans.map((x,j)=>j===i?v:x)}));
+  const updCrop = (id,f,v) => setData(d=>({...d, inspCrops: d.inspCrops.map(r=>r.id===id?{...r,[f]:v}:r)}));
+  const updLS   = (id,f,v) => setData(d=>({...d, inspLivestock: d.inspLivestock.map(r=>r.id===id?{...r,[f]:v}:r)}));
+  const updInv  = (id,f,v) => setData(d=>({...d, inspInventory: d.inspInventory.map(r=>r.id===id?{...r,[f]:v}:r)}));
+  const addCrop = () => setData(d=>({...d, inspCrops:[...d.inspCrops,{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}]}));
+  const remCrop = id => setData(d=>({...d, inspCrops: d.inspCrops.filter(r=>r.id!==id)}));
+  const addLS   = () => setData(d=>({...d, inspLivestock:[...d.inspLivestock,{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}]}));
+  const remLS   = id => setData(d=>({...d, inspLivestock: d.inspLivestock.filter(r=>r.id!==id)}));
+  const addInv  = () => setData(d=>({...d, inspInventory:[...d.inspInventory,{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
+  const remInv  = id => setData(d=>({...d, inspInventory: d.inspInventory.filter(r=>r.id!==id)}));
+
+  const handleFiles = e => {
+    Array.from(e.target.files).forEach(f => {
+      const r = new FileReader();
+      r.onload = ev => setData(d=>({...d, inspPhotos:[...(d.inspPhotos||[]),{id:inspUid(),src:ev.target.result,label:'',ts:new Date().toLocaleString()}]}));
+      r.readAsDataURL(f);
+    });
+    e.target.value='';
+  };
+
+  const cropRowTot = r => (parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+  const lsRowTot   = r => (parseFloat(r.actualHead||r.budgetedHead||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+  const invRowTot  = r => (parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
+  const cropTot = (data.inspCrops||[]).reduce((s,r)=>s+cropRowTot(r),0);
+  const lsTot   = (data.inspLivestock||[]).reduce((s,r)=>s+lsRowTot(r),0);
+  const invTot  = (data.inspInventory||[]).reduce((s,r)=>s+invRowTot(r),0);
+  const grand   = cropTot + lsTot + invTot;
+
+  const handlePDF = () => {
+    if (window.html2pdf) {
+      window.html2pdf().set({
+        margin:[10,10,10,10],
+        filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,
+        image:{type:'jpeg',quality:0.92},
+        html2canvas:{scale:2,useCORS:true,logging:false},
+        jsPDF:{unit:'mm',format:'letter',orientation:'portrait'},
+      }).from(printRef.current).save();
+    } else { window.print(); }
+  };
+
+  const EMAIL_CONFIG = {
+    serviceId:  'YOUR_SERVICE_ID',
+    templateId: 'YOUR_TEMPLATE_ID',
+    publicKey:  'YOUR_PUBLIC_KEY',
+    toEmail:    'YOUR_EMAIL@example.com',
+  };
+
+  const handleSubmit = async () => {
+    if (!data.clientName) { setSubmitErr('Please enter a client name on the Balance Sheet tab first.'); return; }
+    setSubmitErr(''); setSubmitting(true);
+    try {
+      if (EMAIL_CONFIG.serviceId === 'YOUR_SERVICE_ID') {
+        setSubmitErr('Email not configured — downloading PDF locally instead.');
+        handlePDF(); return;
+      }
+      const deviations = (data.inspCrops||[]).filter(r => {
+        const p = devPct(r.actualAcres, r.budgetedAcres);
+        return p !== null && Math.abs(p) >= 10;
+      }).map(r => `${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac -> actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) -- ${r.deviationReason||'no reason given'}`).join('\n');
+
+      const body = `AG INSPECTION REPORT\nCustomer: ${data.clientName}\nInspector: ${data.inspInspector||''}\nDate: ${data.inspDate||''}\n\nCROP DEVIATIONS FROM BUDGET:\n${deviations||'None'}\n\nGRAND TOTAL: ${inspFmt$(grand)}\n\nPasture: ${data.inspPastureCond||'—'} ${data.inspPastureCmt||''}\nWater: ${data.inspWaterCond||'—'} ${data.inspWaterCmt||''}\nEquipment: ${data.inspEquipCond||'—'} ${data.inspEquipCmt||''}\nEnvironmental: ${data.inspEnvCmt||''}\nAdditional: ${data.inspAddlCmt||''}`;
+
+      await window.emailjs.send(EMAIL_CONFIG.serviceId, EMAIL_CONFIG.templateId, {
+        to_email: EMAIL_CONFIG.toEmail, customer: data.clientName,
+        inspector: data.inspInspector, date: data.inspDate,
+        grand_total: inspFmt$(grand), body, deviations: deviations||'None',
+      }, EMAIL_CONFIG.publicKey);
+      setSubmitted(true);
+    } catch(err) {
+      setSubmitErr('Submit failed: ' + (err.text||err.message||String(err)));
+    } finally { setSubmitting(false); }
+  };
+
+  const crops = data.inspCrops || [];
+  const lsRows = data.inspLivestock || [];
+  const invRows = data.inspInventory || [];
+  const photos = data.inspPhotos || [];
+  const loans = data.inspLoans || ['','',''];
+
+  if (submitted) return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:48}}>
+      <div style={{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420,boxShadow:'0 4px 20px rgba(0,0,0,0.1)'}}>
+        <div style={{fontSize:52,marginBottom:12}}>✅</div>
+        <div style={{fontWeight:800,fontSize:22,color:INSP_SH,marginBottom:8}}>Report Submitted!</div>
+        <p style={{color:'#6b7280',fontSize:14,lineHeight:1.6,marginBottom:20}}>Inspection report for <strong>{data.clientName}</strong> sent successfully.</p>
+        <button onClick={()=>setSubmitted(false)} style={{background:INSP_SH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer'}}>New Inspection</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}}>
+      {/* EmailJS + html2pdf CDN (loaded once) */}
+      {!window.emailjs && <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"/>}
+      {!window.html2pdf && <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"/>}
+
+      {/* Toolbar */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,gap:10,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:18,color:INSP_SH,fontFamily:"'Playfair Display',serif"}}>Ag Inspection Report</div>
+          <div style={{fontSize:12,color:'#6b7280'}}>Pre-loaded from Budget tab · Fill in actuals below</div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={handlePDF} style={{background:'#f0fdf4',color:INSP_TH,border:`1.5px solid ${INSP_TH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}}>🖨 Save PDF</button>
+          <button onClick={handleSubmit} disabled={submitting} style={{background:INSP_GOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}}>
+            {submitting?'⏳ Sending…':'📤 Submit Report'}
+          </button>
+        </div>
+      </div>
+
+      {submitErr && <div style={{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}}>⚠️ {submitErr}</div>}
+
+      {/* Legend */}
+      <div style={{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}}>
+        {[['#22c55e','On Budget (< 10% deviation)'],['#f59e0b','Minor Deviation (10–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>(
+          <div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}}>
+            <div style={{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}/>
+            {l}
+          </div>
+        ))}
+      </div>
+
+      <div ref={printRef}>
+        {/* Header info */}
+        <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px 24px'}}>
+            <div><label style={INSP_LBL}>CUSTOMER NAME</label>
+              <div style={{padding:'6px 8px',background:'#f0fdf4',borderRadius:4,fontSize:13,fontWeight:600,color:INSP_SH}}>{data.clientName||'—'}</div>
+            </div>
+            <div><label style={INSP_LBL}>DATE OF INSPECTION</label>
+              {inspInp(data.inspDate||'', v=>set('inspDate',v), '', 'date')}
+            </div>
+            <div><label style={INSP_LBL}>INSPECTOR NAME</label>
+              {inspInp(data.inspInspector||'', v=>set('inspInspector',v), 'Enter inspector name')}
+            </div>
+            <div>
+              <label style={INSP_LBL}>LOAN NUMBER(S)</label>
+              <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                {loans.map((l,i)=><div key={i}>{inspInp(l, v=>setLoan(i,v), `Loan ${i+1}`)}</div>)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Crops ── */}
+        <InspCard title="🌱  CROP CONDITION — Budget vs. Actual">
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+              <thead>
+                <tr>
+                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:100}}>Crop</th>
+                  <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Ac</th>
+                  <th style={{...INSP_TH_S,minWidth:80}}>Actual Ac</th>
+                  <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>
+                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
+                  <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
+                  <th style={{...INSP_TH_S,minWidth:100}}>Yield / Acre</th>
+                  <th style={{...INSP_TH_S,minWidth:80}}>Value / Unit</th>
+                  <th style={{...INSP_TH_S,minWidth:85}}>Total Value</th>
+                  <th style={{...INSP_TH_S,width:28}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {crops.map((r,i)=>{
+                  const pct = devPct(r.actualAcres, r.budgetedAcres);
+                  const showDev = pct !== null && Math.abs(pct) >= 10;
+                  const rowBg = i%2===0?'white':'#f9fafb';
+                  const ds = r.actualAcres ? devStyle(pct) : {};
+                  return (
+                    <React.Fragment key={r.id}>
+                      <tr style={{background:ds.background||rowBg,...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
+                        {/* Crop name — editable if blank, shows budget value */}
+                        <td style={INSP_TD_S}>
+                          {r.budgetedCrop
+                            ? <div>
+                                <div style={{fontWeight:600,fontSize:13,color:'#1a1a1a'}}>{r.budgetedCrop}</div>
+                                {r.substituted && (
+                                  <div style={{marginTop:4}}>
+                                    <div style={{fontSize:10,color:'#d97706',fontWeight:700,marginBottom:2}}>SUBSTITUTED →</div>
+                                    {inspInp(r.substituteCrop, v=>updCrop(r.id,'substituteCrop',v), 'Actual crop planted…', 'text', {fontSize:12})}
+                                  </div>
+                                )}
+                                <button type="button" onClick={()=>updCrop(r.id,'substituted',!r.substituted)}
+                                  style={{marginTop:3,fontSize:10,background:'none',border:'none',color:r.substituted?'#dc2626':'#9ca3af',cursor:'pointer',padding:0,fontWeight:600}}>
+                                  {r.substituted?'✕ Remove sub':'↺ Different crop?'}
+                                </button>
+                              </div>
+                            : inspInp(r.budgetedCrop||r.substituteCrop, v=>updCrop(r.id,'budgetedCrop',v), 'Crop name…')
+                          }
+                        </td>
+                        {/* Budget acres — locked from budget */}
+                        <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
+                          <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'—'}</div>
+                          <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
+                        </td>
+                        {/* Actual acres — type to enter */}
+                        <td style={INSP_TD_S}>
+                          <input
+                            type="text"
+                            value={r.actualAcres}
+                            placeholder={r.budgetedAcres||'0'}
+                            onChange={e=>updCrop(r.id,'actualAcres',e.target.value.replace(/[^0-9.]/g,''))}
+                            style={{border:'1.5px solid #6B0E1E',borderRadius:4,padding:'5px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'#fdf9f9',fontWeight:600,textAlign:'center'}}
+                          />
+                        </td>
+                        {/* Deviation badge */}
+                        <td style={{...INSP_TD_S,textAlign:'center'}}>
+                          {r.actualAcres && r.budgetedAcres ? (
+                            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                              {devBadge(pct)}
+                              <div style={{fontSize:10,color:'#6b7280'}}>
+                                {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}
+                                {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac
+                              </div>
+                            </div>
+                          ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
+                        </td>
+                        <td style={INSP_TD_S}>{inspInp(r.location, v=>updCrop(r.id,'location',v), 'Field/Sec')}</td>
+                        <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updCrop(r.id,'condition',v)}/></td>
+                        <td style={INSP_TD_S}>
+                          <div style={{display:'flex',gap:3}}>
+                            {inspInp(r.actualYield||r.budgetedYield, v=>updCrop(r.id,'actualYield',v), r.budgetedYield||'0', 'number', {flex:1})}
+                            <div style={{fontSize:11,color:'#6b7280',alignSelf:'center',whiteSpace:'nowrap'}}>{r.budgetedUnit||'bu'}</div>
+                          </div>
+                          {r.budgetedYield&&<div style={{fontSize:10,color:'#9ca3af'}}>budget: {r.budgetedYield} {r.budgetedUnit}</div>}
+                        </td>
+                        <td style={INSP_TD_S}>{inspInp(r.valuePerUnit||r.budgetedPrice, v=>updCrop(r.id,'valuePerUnit',v), r.budgetedPrice||'$0', 'number')}</td>
+                        <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}}>
+                          {cropRowTot(r)>0?inspFmt$(cropRowTot(r)):'—'}
+                        </td>
+                        <td style={INSP_TD_S}>
+                          <button type="button" onClick={()=>remCrop(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button>
+                        </td>
+                      </tr>
+                      {/* Deviation reason row - only required at >= 20% */}
+                      {pct !== null && Math.abs(pct) >= 20 && (
+                        <tr style={{background:'#fef2f2'}}>
+                          <td colSpan={10} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8}}>
+                              <span style={{fontSize:11,fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
+                                ⛔ Deviation reason (required):
+                              </span>
+                              {inspInp(r.deviationReason, v=>updCrop(r.id,'deviationReason',v),
+                                'Required — explain major deviation from budget…',
+                                'text', {border:'1px solid #fca5a5',background:'white'})}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{background:'#ecfdf5'}}>
+                  <td colSpan={8} style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:INSP_SH,fontSize:13}}>CROP TOTAL</td>
+                  <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}}>{inspFmt$(cropTot)}</td>
+                  <td/>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <InspAddBtn label="+ Add Crop Row" onClick={addCrop}/>
+          <div style={{marginTop:12}}><label style={INSP_LBL}>Comments</label>
+            {inspTa(data.inspCropCmt||'', v=>set('inspCropCmt',v), 'Crop condition observations…')}
+          </div>
+        </InspCard>
+
+        {/* ── Livestock ── */}
+        <InspCard title="🐄  LIVESTOCK CONDITION — Budget vs. Actual">
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+              <thead>
+                <tr>
+                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:120}}>Type</th>
+                  <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Hd</th>
+                  <th style={{...INSP_TH_S,minWidth:80}}>Actual Hd</th>
+                  <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>
+                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
+                  <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
+                  <th style={{...INSP_TH_S,minWidth:90}}>Est. Wt (lbs)</th>
+                  <th style={{...INSP_TH_S,minWidth:80}}>Value / Hd</th>
+                  <th style={{...INSP_TH_S,minWidth:85}}>Total Value</th>
+                  <th style={{...INSP_TH_S,width:28}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lsRows.map((r,i)=>{
+                  const pct = devPct(r.actualHead, r.budgetedHead);
+                  const showDev = pct !== null && Math.abs(pct) >= 10;
+                  const ds = r.actualHead ? devStyle(pct) : {};
+                  return (
+                    <React.Fragment key={r.id}>
+                      <tr style={{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
+                        <td style={INSP_TD_S}>
+                          {r.budgetedType
+                            ? <div style={{fontWeight:600,fontSize:13}}>{r.budgetedType}</div>
+                            : inspInp(r.budgetedType, v=>updLS(r.id,'budgetedType',v), 'Cattle, Hogs…')
+                          }
+                        </td>
+                        <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
+                          <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedHead||'—'}</div>
+                          <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
+                        </td>
+                        <td style={INSP_TD_S}>{inspInp(r.actualHead, v=>updLS(r.id,'actualHead',v), r.budgetedHead||'0','number')}</td>
+                        <td style={{...INSP_TD_S,textAlign:'center'}}>
+                          {r.actualHead && r.budgetedHead ? (
+                            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                              {devBadge(pct)}
+                              <div style={{fontSize:10,color:'#6b7280'}}>{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)>0?'+':'')}{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)).toFixed(0)} hd</div>
+                            </div>
+                          ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
+                        </td>
+                        <td style={INSP_TD_S}>{inspInp(r.location, v=>updLS(r.id,'location',v), 'Pasture/Lot')}</td>
+                        <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updLS(r.id,'condition',v)}/></td>
+                        <td style={INSP_TD_S}>{inspInp(r.estWeight, v=>updLS(r.id,'estWeight',v), r.budgetedLbs||'0','number')}</td>
+                        <td style={INSP_TD_S}>{inspInp(r.valuePerUnit, v=>updLS(r.id,'valuePerUnit',v), r.budgetedPrice||'$0','number')}</td>
+                        <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d'}}>{lsRowTot(r)>0?inspFmt$(lsRowTot(r)):'—'}</td>
+                        <td style={INSP_TD_S}><button type="button" onClick={()=>remLS(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button></td>
+                      </tr>
+                      {pct !== null && Math.abs(pct) >= 20 && (
+                        <tr style={{background:'#fef2f2'}}>
+                          <td colSpan={10} style={{padding:'6px 10px 8px 32px'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8}}>
+                              <span style={{fontSize:11,fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>⛔ Deviation reason (required):</span>
+                              {inspInp(r.deviationReason, v=>updLS(r.id,'deviationReason',v), 'Required — explain major deviation from budget…', 'text', {border:'1px solid #fca5a5',background:'white'})}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{background:'#ecfdf5'}}>
+                  <td colSpan={8} style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:INSP_SH,fontSize:13}}>LIVESTOCK TOTAL</td>
+                  <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}}>{inspFmt$(lsTot)}</td>
+                  <td/>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <InspAddBtn label="+ Add Livestock Row" onClick={addLS}/>
+          <div style={{marginTop:12}}><label style={INSP_LBL}>Comments</label>
+            {inspTa(data.inspLsCmt||'', v=>set('inspLsCmt',v), 'Livestock condition observations…')}
+          </div>
+        </InspCard>
+
+        {/* ── Inventory ── */}
+        <InspCard title="🏚  INVENTORY  (Stored Crop / Feed)">
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+              <thead>
+                <tr>
+                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:130}}>Description</th>
+                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:100}}>Location</th>
+                  <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
+                  <th style={{...INSP_TH_S,minWidth:80}}>Quantity</th>
+                  <th style={{...INSP_TH_S,minWidth:65}}>Unit</th>
+                  <th style={{...INSP_TH_S,minWidth:80}}>Value / Unit</th>
+                  <th style={{...INSP_TH_S,minWidth:85}}>Total Value</th>
+                  <th style={{...INSP_TH_S,width:28}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {invRows.map((r,i)=>(
+                  <tr key={r.id} style={{background:i%2===0?'white':'#f0fdf4'}}>
+                    <td style={INSP_TD_S}>{inspInp(r.description,v=>updInv(r.id,'description',v),'Corn, Soybeans…')}</td>
+                    <td style={INSP_TD_S}>{inspInp(r.location,v=>updInv(r.id,'location',v),'Bin/Facility')}</td>
+                    <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updInv(r.id,'condition',v)}/></td>
+                    <td style={INSP_TD_S}>{inspInp(r.quantity,v=>updInv(r.id,'quantity',v),'0','number')}</td>
+                    <td style={INSP_TD_S}>
+                      <select value={r.unitType||'bu'} onChange={e=>updInv(r.id,'unitType',e.target.value)} style={{border:'1px solid #d1d5db',borderRadius:4,padding:'4px 5px',fontSize:12,width:'100%',background:'white',outline:'none'}}>
+                        {['bu','ton','bale','cwt','lb','gal','head','ea'].map(u=><option key={u}>{u}</option>)}
+                      </select>
+                    </td>
+                    <td style={INSP_TD_S}>{inspInp(r.valuePerUnit,v=>updInv(r.id,'valuePerUnit',v),'$0','number')}</td>
+                    <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d'}}>{invRowTot(r)>0?inspFmt$(invRowTot(r)):'—'}</td>
+                    <td style={INSP_TD_S}><button type="button" onClick={()=>remInv(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{background:'#ecfdf5'}}>
+                  <td colSpan={6} style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:INSP_SH,fontSize:13}}>INVENTORY TOTAL</td>
+                  <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}}>{inspFmt$(invTot)}</td>
+                  <td/>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <InspAddBtn label="+ Add Inventory Row" onClick={addInv}/>
+          <div style={{marginTop:12}}><label style={INSP_LBL}>Comments</label>
+            {inspTa(data.inspInvCmt||'', v=>set('inspInvCmt',v), 'Inventory observations…')}
+          </div>
+        </InspCard>
+
+        {/* ── Simple condition sections ── */}
+        {[
+          ['🟤  PASTURE CONDITIONS','inspPastureCond','inspPastureCmt','Pasture conditions…',INSP_CONDITIONS],
+          ['💧  WATER / IRRIGATION SOURCE','inspWaterCond','inspWaterCmt','Water source / irrigation notes…',INSP_WATER_COND],
+          ['🚜  EQUIPMENT','inspEquipCond','inspEquipCmt','Equipment condition notes…',INSP_CONDITIONS],
+        ].map(([title,condKey,cmtKey,ph,opts])=>(
+          <InspCard key={condKey} title={title}>
+            <div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'0 24px',alignItems:'start'}}>
+              <div style={{minWidth:260}}>
+                <label style={INSP_LBL}>Overall Condition</label>
+                <InspCondPills value={data[condKey]||''} onChange={v=>set(condKey,v)} options={opts}/>
+              </div>
+              <div><label style={INSP_LBL}>Comments</label>{inspTa(data[cmtKey]||'',v=>set(cmtKey,v),ph,2)}</div>
+            </div>
+          </InspCard>
+        ))}
+
+        <InspCard title="🌿  ENVIRONMENTAL OBSERVATIONS">
+          {inspTa(data.inspEnvCmt||'',v=>set('inspEnvCmt',v),'Soil erosion, drainage, weed pressure…',4)}
+        </InspCard>
+
+        <InspCard title="📋  ADDITIONAL OBSERVATIONS / OVERALL OPERATION">
+          {inspTa(data.inspAddlCmt||'',v=>set('inspAddlCmt',v),'Overall operation comments…',4)}
+        </InspCard>
+
+        {/* ── Financial Summary ── */}
+        <div style={{background:INSP_SH,borderRadius:6,padding:'14px 20px',marginBottom:20}}>
+          <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',letterSpacing:2,marginBottom:10,textTransform:'uppercase',fontWeight:700}}>Financial Summary</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+            {[['Crop Value',cropTot],['Livestock Value',lsTot],['Inventory Value',invTot],['GRAND TOTAL',grand]].map(([label,val])=>{
+              const isG = label==='GRAND TOTAL';
+              return (
+                <div key={label} style={{background:isG?'rgba(200,134,10,0.2)':'rgba(255,255,255,0.07)',borderRadius:5,padding:'10px 12px',textAlign:'center',border:`1px solid ${isG?INSP_GOLD:'rgba(255,255,255,0.1)'}`}}>
+                  <div style={{fontSize:10,color:'rgba(255,255,255,0.55)',letterSpacing:.5,marginBottom:4,textTransform:'uppercase'}}>{label}</div>
+                  <div style={{fontSize:isG?20:16,fontWeight:700,color:isG?INSP_GOLD:'white'}}>{inspFmt$(val)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Deviation Summary ── */}
+        {crops.some(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=10; }) && (
+          <div style={{background:'#fffbeb',border:'2px solid #f59e0b',borderRadius:6,padding:16,marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:14,color:'#92400e',marginBottom:10}}>⚠️ Budget Deviation Summary</div>
+            {crops.filter(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return p!==null&&Math.abs(p)>=5; }).map(r=>{
+              const p = devPct(r.actualAcres, r.budgetedAcres);
+              const ac = parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0);
+              return (
+                <div key={r.id} style={{display:'flex',gap:12,alignItems:'flex-start',padding:'6px 0',borderBottom:'1px solid #fcd34d'}}>
+                  <div style={{fontSize:13,fontWeight:700,minWidth:80,color:Math.abs(p)>=20?'#dc2626':'#d97706'}}>{r.budgetedCrop||'—'}</div>
+                  <div style={{fontSize:12,color:'#92400e'}}>
+                    Budget: <strong>{r.budgetedAcres} ac</strong> → Actual: <strong>{r.actualAcres} ac</strong>
+                    <span style={{marginLeft:6,fontWeight:700}}>{ac>0?'+':''}{ac.toFixed(0)} ac ({p.toFixed(1)}%)</span>
+                    {r.substituted && r.substituteCrop && <span style={{marginLeft:6,background:'#fef3c7',padding:'1px 5px',borderRadius:3}}>Substituted: {r.substituteCrop}</span>}
+                  </div>
+                  {r.deviationReason && <div style={{fontSize:11,color:'#78350f',fontStyle:'italic',flex:1}}>"{r.deviationReason}"</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Photos ── */}
+        <div style={{borderRadius:6,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.1)',border:'1px solid #d1fae5',marginBottom:20}}>
+          <div style={{background:INSP_SH,padding:'9px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{color:'white',fontWeight:700,fontSize:15}}>📸  INSPECTION PHOTOS</span>
+            <div style={{display:'flex',gap:8}}>
+              <button type="button" onClick={()=>cameraRef.current?.click()} style={{background:'rgba(255,255,255,0.14)',color:'white',border:'1px solid rgba(255,255,255,0.35)',borderRadius:4,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>📷 Camera</button>
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{background:'rgba(255,255,255,0.14)',color:'white',border:'1px solid rgba(255,255,255,0.35)',borderRadius:4,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>📁 Upload</button>
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleFiles} style={{display:'none'}}/>
+              <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleFiles} style={{display:'none'}}/>
+            </div>
+          </div>
+          <div style={{background:'white',padding:16}}>
+            {photos.length===0 ? (
+              <div style={{textAlign:'center',padding:24,color:'#9ca3af',fontSize:14}}>No photos yet — use Camera or Upload above</div>
+            ) : (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:12}}>
+                {photos.map(ph=>(
+                  <div key={ph.id} style={{border:'1px solid #e5e7eb',borderRadius:6,overflow:'hidden',position:'relative'}}>
+                    <img src={ph.src} alt={ph.label||'Photo'} style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
+                    <div style={{padding:'6px 8px'}}>
+                      <input value={ph.label} onChange={e=>setData(d=>({...d,inspPhotos:d.inspPhotos.map(x=>x.id===ph.id?{...x,label:e.target.value}:x)}))}
+                        placeholder="Add caption…" style={{border:'1px solid #e5e7eb',borderRadius:4,padding:'3px 6px',fontSize:11,width:'100%',boxSizing:'border-box',outline:'none',fontFamily:'inherit'}}/>
+                      <div style={{fontSize:10,color:'#9ca3af',marginTop:2}}>{ph.ts}</div>
+                    </div>
+                    <button type="button" onClick={()=>setData(d=>({...d,inspPhotos:d.inspPhotos.filter(x=>x.id!==ph.id)}))}
+                      style={{position:'absolute',top:5,right:5,background:'rgba(185,28,28,0.8)',color:'white',border:'none',borderRadius:999,width:22,height:22,cursor:'pointer',fontSize:14,lineHeight:'22px',textAlign:'center'}}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Signature */}
+        <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,border:'1px solid #d1fae5'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:28}}>
+            <div>
+              <label style={INSP_LBL}>INSPECTOR SIGNATURE</label>
+              <div style={{borderBottom:'2px solid #374151',height:44,marginTop:8}}/>
+              <div style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Signature</div>
+            </div>
+            <div>
+              <label style={INSP_LBL}>DATE</label>
+              <div style={{borderBottom:'2px solid #374151',height:44,marginTop:8,display:'flex',alignItems:'flex-end',paddingBottom:6,fontSize:14,color:'#374151'}}>
+                {data.inspDate ? new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
+              </div>
+              <div style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Date of Inspection</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom submit */}
+      <div style={{textAlign:'center',padding:'20px 0 32px'}}>
+        <button onClick={handleSubmit} disabled={submitting} style={{background:INSP_SH,color:'white',border:'none',borderRadius:6,padding:'13px 40px',fontWeight:700,fontSize:16,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 3px 12px rgba(27,67,50,0.3)'}}>
+          {submitting?'⏳ Generating & Sending…':'📤 Submit Inspection Report'}
+        </button>
+        <div style={{fontSize:11,color:'#9ca3af',marginTop:8}}>Generates a PDF and emails it</div>
+      </div>
+    </div>
+  );
+}
+
+
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
@@ -1068,34 +1759,6 @@ export default function BalanceSheet() {
       if (stored) setUserFolders(JSON.parse(stored));
     } catch {}
   }, []);
-
-  // Load linked entities net worth whenever the list changes
-  useEffect(() => {
-    async function fetchAllLinkedNW() {
-      const entities = data.linkedEntities || [];
-      if (!entities.length) { setLinkedEntityNWMap({}); return; }
-      const newMap = {};
-      for (const name of entities) {
-        try {
-          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
-          const result = await storage.list(prefix);
-          if (result && result.keys && result.keys.length > 0) {
-            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
-            const item = await storage.get(sorted[0]);
-            if (item) {
-              const p = JSON.parse(item.value);
-              const m = numVal;
-              const ta = [p.cashGlacier,...(p.cashOther||[]).map(r=>r.amount),(p.receivables||[]).map(r=>r.amount),(p.farmProducts||[]).map(r=>String(m(r.quantity)*m(r.pricePerUnit))),(p.realEstate||[]).map(r=>String(m(r.acres)*m(r.valuePerAcre))),(p.vehicles||[]).map(r=>r.value),(p.machinery||[]).map(r=>r.value),(p.otherAssets||[]).map(r=>r.amount)].flat().reduce((s,v)=>s+m(v),0);
-              const tl = [(p.operatingNotes||[]).map(r=>r.balance),(p.intermediatDebt||[]).map(r=>r.principal),(p.reMortgages||[]).map(r=>r.principal),(p.otherLiabilities||[]).map(r=>r.balance)].flat().reduce((s,v)=>s+m(v),0);
-              newMap[name] = ta - tl;
-            }
-          }
-        } catch {}
-      }
-      setLinkedEntityNWMap(newMap);
-    }
-    fetchAllLinkedNW();
-  }, [JSON.stringify(data.linkedEntities)]);
 
   // Load available entities for the link picker
   useEffect(() => {
@@ -1702,6 +2365,33 @@ export default function BalanceSheet() {
       "TOTAL LIABILITIES":tl, "WORKING CAPITAL":tc-tcl, "NET WORTH":ta-tl
     };
   }
+
+  // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
+  useEffect(() => {
+    async function fetchAllLinkedNW() {
+      const entities = data.linkedEntities || [];
+      if (!entities.length) { setLinkedEntityNWMap({}); return; }
+      const newMap = {};
+      for (const name of entities) {
+        try {
+          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
+          const result = await storage.list(prefix);
+          if (result && result.keys && result.keys.length > 0) {
+            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
+            const item = await storage.get(sorted[0]);
+            if (item) {
+              const p = JSON.parse(item.value);
+              const totals = sheetTotals(p);
+              newMap[name] = totals["NET WORTH"] || 0;
+            }
+          }
+        } catch {}
+      }
+      setLinkedEntityNWMap(newMap);
+    }
+    fetchAllLinkedNW();
+  }, [JSON.stringify(data.linkedEntities), savedSheets.length]);
+
 
   const loadComparisonSheets = async () => {
     if (!data.clientName) return;
@@ -3424,6 +4114,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
           Year Comparison
         </button>
+        <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
+          onClick={()=>setActiveTab("inspection")}>
+          🌾 Ag Inspection
+        </button>
       </div>
 
       {activeTab === "balance" && (
@@ -3563,6 +4257,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             />
           </div>
         </div>
+      )}
+
+      {activeTab === "inspection" && (
+        <InspectionView data={data} setData={setData} />
       )}
     </div>
   );
