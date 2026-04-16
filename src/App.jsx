@@ -1866,6 +1866,7 @@ export default function BalanceSheet() {
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]);
   const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
+  const [showInspHistory, setShowInspHistory] = useState(false);
   const [pendingResponses, setPendingResponses] = useState({}); // { clientName: shareRecord }
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -4533,6 +4534,113 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               </button>
             </div>
           )}
+
+          {/* ── Save Inspection Results ── */}
+          <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,
+            padding:"14px 18px",margin:"12px 12px 0",display:"flex",alignItems:"center",
+            gap:12,flexWrap:"wrap"}}>
+            <span style={{fontSize:"1.2rem"}}>💾</span>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:".88rem",color:"#2d5a8e"}}>Save Inspection Results</div>
+              <div style={{fontSize:".75rem",color:"#666",marginTop:2}}>
+                Save a snapshot of the current inspection with a date so you can review it later.
+              </div>
+            </div>
+            <input type="date"
+              defaultValue={data.inspDate || new Date().toISOString().slice(0,10)}
+              id="insp-save-date"
+              style={{border:"1.5px solid #c0d8f0",borderRadius:6,padding:"6px 10px",
+                fontSize:".85rem",fontFamily:"inherit",color:"#1a1a1a"}} />
+            <button
+              onClick={()=>{
+                const dateVal = document.getElementById('insp-save-date').value
+                  || data.inspDate
+                  || new Date().toISOString().slice(0,10);
+                const snapshot = {
+                  date: dateVal,
+                  savedAt: new Date().toISOString(),
+                  crops: (data.inspCrops||[]).map(r=>({...r})),
+                  livestock: (data.inspLivestock||[]).map(r=>({...r})),
+                };
+                setData(d=>{
+                  const existing = d.inspResults || [];
+                  // Replace if same date exists, otherwise add
+                  const filtered = existing.filter(r=>r.date !== dateVal);
+                  return {...d, inspResults: [...filtered, snapshot]};
+                });
+                // Auto-save the balance sheet
+                const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
+                const savePayload = {...data, inspResults: [...(data.inspResults||[]).filter(r=>r.date!==dateVal), snapshot], _savedAt: new Date().toISOString()};
+                storage.set(key, JSON.stringify(savePayload))
+                  .then(()=>alert('Inspection results saved for ' + dateVal))
+                  .catch(e=>alert('Save error: ' + e.message));
+              }}
+              style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,
+                padding:"7px 16px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+                fontSize:".85rem",flexShrink:0}}>
+              Save Results
+            </button>
+            {(data.inspResults||[]).length > 0 && (
+              <button
+                onClick={()=>setShowInspHistory(h=>!h)}
+                style={{background:"none",border:"1.5px solid #2d5a8e",color:"#2d5a8e",
+                  borderRadius:7,padding:"6px 14px",fontWeight:700,cursor:"pointer",
+                  fontFamily:"inherit",fontSize:".82rem",flexShrink:0}}>
+                {showInspHistory ? "Hide History" : "View History (" + (data.inspResults||[]).length + ")"}
+              </button>
+            )}
+          </div>
+
+          {/* ── Inspection History ── */}
+          {showInspHistory && (data.inspResults||[]).length > 0 && (
+            <div style={{margin:"0 12px",background:"white",border:"1px solid #c0d8f0",
+              borderRadius:"0 0 10px 10px",overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:".85rem"}}>
+                <thead>
+                  <tr style={{background:"#e8f0fb"}}>
+                    <th style={{padding:"8px 14px",textAlign:"left",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Inspection Date</th>
+                    <th style={{padding:"8px 14px",textAlign:"left",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Crops</th>
+                    <th style={{padding:"8px 14px",textAlign:"left",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Saved</th>
+                    <th style={{padding:"8px 14px",textAlign:"center",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Load</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...(data.inspResults||[])].sort((a,b)=>b.date.localeCompare(a.date)).map((snap,i)=>(
+                    <tr key={snap.date} style={{borderTop:"1px solid #e8e8e8",background:i%2===0?"white":"#f8faff"}}>
+                      <td style={{padding:"10px 14px",fontWeight:700,color:"#1a1a1a"}}>{snap.date}</td>
+                      <td style={{padding:"10px 14px",color:"#555",fontSize:".82rem"}}>
+                        {(snap.crops||[]).filter(r=>r.budgetedCrop).map(r=>
+                          r.budgetedCrop + (r.actualAcres ? " (" + r.actualAcres + " ac)" : "")
+                        ).join(", ") || "—"}
+                      </td>
+                      <td style={{padding:"10px 14px",color:"#888",fontSize:".78rem"}}>
+                        {snap.savedAt ? new Date(snap.savedAt).toLocaleDateString() : "—"}
+                      </td>
+                      <td style={{padding:"10px 14px",textAlign:"center"}}>
+                        <button
+                          onClick={()=>{
+                            if (!window.confirm("Load inspection from " + snap.date + "? This will replace current inspection data.")) return;
+                            setData(d=>({
+                              ...d,
+                              inspDate: snap.date,
+                              inspCrops: snap.crops || d.inspCrops,
+                              inspLivestock: snap.livestock || d.inspLivestock,
+                            }));
+                            setShowInspHistory(false);
+                          }}
+                          style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:5,
+                            padding:"4px 12px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+                            fontSize:".78rem"}}>
+                          Load
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <InspectionView data={data} setData={setData} />
         </div>
       )}
