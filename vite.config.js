@@ -24,12 +24,12 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // Force the service worker to take control immediately on update
         skipWaiting: true,
         clientsClaim: true,
-        // Only cache static assets — never cache index.html so code changes deploy instantly
         globPatterns: ['**/*.{js,css,ico,png,svg}'],
         navigateFallback: null,
+        // Never precache index.html — always fetch fresh from network
+        globIgnores: ['**/index.html'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
