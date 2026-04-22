@@ -1151,48 +1151,59 @@ function InspectionView({ data, setData }) {
   const [submitted, setSubmitted] = React.useState(false);
   const [submitErr, setSubmitErr] = React.useState('');
 
-  // Derived from budget — sync when budget changes
-  React.useEffect(() => {
-    if (!data.inspCrops || data.inspCrops.length === 0) {
-      const fromBudget = (data.budgetCrops||[])
-        .filter(r => r.crop || r.acres)
-        .map(r => ({
-          id: inspUid(),
-          budgetedCrop: r.crop||'',
-          budgetedAcres: r.acres||'',
-          budgetedYield: r.yieldPerAcre||'',
-          budgetedUnit: r.unit||'bu',
-          budgetedPrice: r.price||'',
-          location:'', condition:'',
-          actualAcres:'', actualYield:'', valuePerUnit:'',
-          deviationReason:'', substituted:false, substituteCrop:'',
-        }));
-      const rows = fromBudget.length > 0 ? fromBudget : [{
-        id:inspUid(), budgetedCrop:'', budgetedAcres:'', budgetedYield:'',
-        budgetedUnit:'bu', budgetedPrice:'', location:'', condition:'',
-        actualAcres:'', actualYield:'', valuePerUnit:'',
-        deviationReason:'', substituted:false, substituteCrop:'',
-      }];
-      setData(d=>({...d, inspCrops: rows}));
-    }
-    if (!data.inspLivestock || data.inspLivestock.length === 0) {
-      const fromBudget = (data.budgetLivestock||[])
-        .filter(r => r.type || r.head)
-        .map(r => ({
-          id: inspUid(),
-          budgetedType: r.type||'', budgetedHead: r.head||'',
-          budgetedLbs: r.lbs||'', budgetedPrice: r.price||'',
-          location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'',
-          deviationReason:'',
-        }));
-      const rows = fromBudget.length > 0 ? fromBudget : [{
-        id:inspUid(), budgetedType:'', budgetedHead:'', budgetedLbs:'', budgetedPrice:'',
-        location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'', deviationReason:'',
-      }];
-      setData(d=>({...d, inspLivestock: rows}));
-    }
+  const [showLoadPrompt, setShowLoadPrompt] = React.useState(
+    // Show prompt only if there is previous inspection data saved
+    !!(data.inspCrops && data.inspCrops.length > 0 && data.inspCrops.some(r => r.actualAcres || r.condition))
+  );
+
+  const isPost = (data.inspHarvestType||'pre') === 'post';
+
+  const loadFromBudget = () => {
+    const cropRows = isPost ? [{
+      id:inspUid(), budgetedCrop:'', budgetedAcres:'', budgetedYield:'',
+      budgetedUnit:'bu', budgetedPrice:'', location:'', condition:'',
+      actualAcres:'', actualYield:'', valuePerUnit:'', deviationReason:'', substituted:false, substituteCrop:'',
+    }] : (data.budgetCrops||[]).filter(r => r.crop || r.acres).map(r => ({
+      id: inspUid(),
+      budgetedCrop: r.crop||'', budgetedAcres: r.acres||'',
+      budgetedYield: r.yieldPerAcre||'', budgetedUnit: r.unit||'bu',
+      budgetedPrice: r.price||'', location:'', condition:'',
+      actualAcres:'', actualYield:'', valuePerUnit:'',
+      deviationReason:'', substituted:false, substituteCrop:'',
+    }));
+    const lsRows = (data.budgetLivestock||[]).filter(r => r.type || r.head).map(r => ({
+      id: inspUid(),
+      budgetedType: r.type||'', budgetedHead: r.head||'',
+      budgetedLbs: r.lbs||'', budgetedPrice: r.price||'',
+      location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'',
+      deviationReason:'',
+    }));
+    setData(d => ({
+      ...d,
+      inspCrops: cropRows.length > 0 ? cropRows : [{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}],
+      inspLivestock: lsRows.length > 0 ? lsRows : [{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}],
+      inspInventory: [{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}],
+      inspPastureCond:'', inspPastureCmt:'', inspWaterCond:'', inspWaterCmt:'',
+      inspEquipCond:'', inspEquipCmt:'', inspEnvCmt:'', inspAddlCmt:'',
+    }));
+    setShowLoadPrompt(false);
+  };
+
+  const keepLastInspection = () => {
+    // Ensure inventory exists if missing
     if (!data.inspInventory || data.inspInventory.length === 0) {
       setData(d=>({...d, inspInventory: [{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
+    }
+    setShowLoadPrompt(false);
+  };
+
+  // First-time init: no previous data at all
+  React.useEffect(() => {
+    const hasCrops = data.inspCrops && data.inspCrops.length > 0;
+    const hasLS = data.inspLivestock && data.inspLivestock.length > 0;
+    if (!hasCrops && !hasLS) {
+      // Fresh sheet — auto-load from budget without prompting
+      loadFromBudget();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1733,6 +1744,29 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
       </div>
 
       <div ref={printRef}>
+        {/* ── Load prompt ── */}
+        {showLoadPrompt && (
+          <div style={{background:'#fff8e0',border:'1px solid #f0d060',borderRadius:8,
+            padding:'14px 18px',marginBottom:16,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+            <span style={{fontSize:'1.2rem'}}>📋</span>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:'.9rem',color:'#7a5a00'}}>Previous inspection data found</div>
+              <div style={{fontSize:'.78rem',color:'#666',marginTop:2}}>
+                Would you like to load the last inspection, or start fresh{isPost ? ' (post-harvest — crop projections will be blank)' : ' from the current budget'}?
+              </div>
+            </div>
+            <button onClick={keepLastInspection}
+              style={{background:'white',border:'1.5px solid #d1a000',borderRadius:7,padding:'7px 16px',
+                fontWeight:700,fontSize:'.82rem',cursor:'pointer',color:'#7a5a00',fontFamily:'inherit'}}>
+              Keep Last Inspection
+            </button>
+            <button onClick={loadFromBudget}
+              style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 16px',
+                fontWeight:700,fontSize:'.82rem',cursor:'pointer',fontFamily:'inherit'}}>
+              {isPost ? 'Start Fresh (Post-Harvest)' : 'Load from Budget'}
+            </button>
+          </div>
+        )}
         {/* Header info */}
         <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}}>
           {/* Harvest type toggle */}
