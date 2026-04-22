@@ -281,6 +281,48 @@ const fmt = (v) => v === "" || v === null || v === undefined
   : "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 const numVal = (v) => Number((v || "").toString().replace(/[^0-9.-]/g, "")) || 0;
 
+
+const DEFAULT_COMMODITY_PRICES = [
+  // CROPS
+  {category:"Crops", name:"Winter Wheat", price:"5", unit:"bu"},
+  {category:"Crops", name:"Spring Wheat", price:"5.5", unit:"bu"},
+  {category:"Crops", name:"Durum", price:"6", unit:"bu"},
+  {category:"Crops", name:"Barley (Feed)", price:"3", unit:"bu"},
+  {category:"Crops", name:"Malt Barley", price:"5.5", unit:"bu"},
+  {category:"Crops", name:"Organic Winter Wheat", price:"8", unit:"bu"},
+  {category:"Crops", name:"Organic Spring Wheat", price:"10", unit:"bu"},
+  {category:"Crops", name:"Chickpeas", price:"18", unit:"bu"},
+  {category:"Crops", name:"Lentils", price:"16.8", unit:"bu"},
+  {category:"Crops", name:"Canola", price:"10", unit:"bu"},
+  {category:"Crops", name:"Yellow Peas", price:"6.5", unit:"bu"},
+  {category:"Crops", name:"Green Peas", price:"9", unit:"bu"},
+  {category:"Crops", name:"Hay", price:"125", unit:"ton"},
+  {category:"Crops", name:"Straw", price:"40", unit:"ton"},
+  // LIVESTOCK
+  {category:"Livestock", name:"Steers under 600#", price:"3.6", unit:"lb"},
+  {category:"Livestock", name:"Heifers under 600#", price:"3.4", unit:"lb"},
+  {category:"Livestock", name:"900# Steers", price:"3", unit:"lb"},
+  {category:"Livestock", name:"800# Steers", price:"3.1", unit:"lb"},
+  {category:"Livestock", name:"900# Heifers", price:"2.9", unit:"lb"},
+  {category:"Livestock", name:"800# Heifers", price:"3", unit:"lb"},
+  {category:"Livestock", name:"Bred Heifers", price:"3000", unit:"hd"},
+  {category:"Livestock", name:"Bred Cows", price:"2500", unit:"hd"},
+  {category:"Livestock", name:"Cull Cows", price:"1.4", unit:"lb"},
+  {category:"Livestock", name:"Bulls", price:"1.75", unit:"lb"},
+  {category:"Livestock", name:"Lambs - Fats", price:"1.5", unit:"lb"},
+];
+
+function loadCommodityPrices() {
+  try {
+    const stored = localStorage.getItem("fbmt_commodityPrices");
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return DEFAULT_COMMODITY_PRICES.map((p,i) => ({...p, id:i}));
+}
+function saveCommodityPrices(prices) {
+  try { localStorage.setItem("fbmt_commodityPrices", JSON.stringify(prices)); } catch {}
+}
+
 const STORAGE_PREFIX = "fbmt_bs:";
 
 const STEPS = [
@@ -338,6 +380,7 @@ function emptyData() {
     // Ag Inspection fields
     inspDate: new Date().toISOString().split('T')[0],
     inspInspector: "",
+    inspHarvestType: "pre",  // "pre" or "post"
     inspLoans: ["","",""],
     inspCrops: [],
     inspLivestock: [],
@@ -407,6 +450,88 @@ function RunningTotal({ assets, liabilities }) {
 
 
 // ─── BudgetView ───────────────────────────────────────────────────────────────
+
+// ── Commodity dropdown with keyboard navigation ───────────────────────────────
+function CommodityDropdown({ value, onChange, commodityPrices, category, placeholder }) {
+  const [open, setOpen] = React.useState(false);
+  const [highlight, setHighlight] = React.useState(0);
+  const [query, setQuery] = React.useState(value || "");
+  const ref = React.useRef(null);
+
+  // Sync query when value changes externally
+  React.useEffect(() => { setQuery(value || ""); }, [value]);
+
+  // Close on outside click
+  React.useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const items = commodityPrices
+    .filter(p => !category || p.category === category)
+    .filter(p => p.name && (!query || p.name.toLowerCase().includes(query.toLowerCase())))
+    .sort((a,b) => a.name.localeCompare(b.name));
+
+  const select = (item) => {
+    onChange(item.name);
+    setQuery(item.name);
+    setOpen(false);
+    setHighlight(0);
+  };
+
+  const onKeyDown = (e) => {
+    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
+      setOpen(true); setHighlight(0); return;
+    }
+    if (!open) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setHighlight(h => Math.min(h+1, items.length-1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight(h => Math.max(h-1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (items[highlight]) select(items[highlight]); }
+    else if (e.key === "Escape") { setOpen(false); }
+  };
+
+  return (
+    <div ref={ref} style={{position:"relative",flex:1}}>
+      <input
+        className="text-input"
+        type="text"
+        value={query}
+        placeholder={placeholder || "Type or select..."}
+        autoComplete="off"
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setHighlight(0); }}
+        onFocus={() => { setOpen(true); setHighlight(0); }}
+        onKeyDown={onKeyDown}
+        style={{width:"100%",paddingRight:22}}
+      />
+      <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
+        fontSize:9,color:"#aaa",pointerEvents:"none",lineHeight:1}}>▼</span>
+      {open && items.length > 0 && (
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
+          border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
+          zIndex:999,maxHeight:200,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
+          {items.map((item,idx) => (
+            <div key={item.id}
+              onMouseDown={() => select(item)}
+              onMouseEnter={() => setHighlight(idx)}
+              style={{padding:"7px 12px",cursor:"pointer",fontSize:".85rem",
+                background: idx === highlight ? "#f5e8ea" : "white",
+                color: idx === highlight ? "#6B0E1E" : "#1a1a1a",
+                fontWeight: idx === highlight ? 600 : 400,
+                display:"flex",justifyContent:"space-between",alignItems:"center",
+                borderBottom:"1px solid #f5f5f5"}}>
+              <span>{item.name}</span>
+              <span style={{fontSize:".75rem",color:"#888",marginLeft:8}}>
+                ${item.price}/{item.unit}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BudgetView({
   data, budgetCropTotal, budgetLivestockTotal, budgetMiscTotal,
   budgetTotalIncome, budgetOperatingExpenses,
@@ -416,7 +541,7 @@ function BudgetView({
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
-  setArr, removeRow, addRow
+  setArr, removeRow, addRow, lookupPrice, commodityPrices
 }) {
   return (
     <div className="budget-wrap">
@@ -441,7 +566,9 @@ function BudgetView({
           </div>
           {data.budgetCrops.map((r, i) => {
             const share = numVal(r.share || "100");
-            const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(r.price) * (share / 100);
+            const defaultPrice = !r.contracted ? lookupPrice(r.crop) : null;
+            const effectivePrice = r.contracted ? r.price : (defaultPrice || r.price);
+            const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(effectivePrice) * (share / 100);
             return (
               <div key={i} className="bg-row" data-rowkey={`budgetCrops-${i}`}>
                 <span className="row-num">{i+1}</span>
@@ -451,10 +578,14 @@ function BudgetView({
                       onChange={e => setArr("budgetCrops",i,"acres",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
-                <div className="input-group" style={{flex:1}}>
-                  <input className="text-input" type="text" value={r.crop}
-                    placeholder="e.g., winter wheat"
-                    onChange={e => setArr("budgetCrops",i,"crop",e.target.value)} />
+                <div className="input-group" style={{flex:1,position:"relative"}}>
+                  <CommodityDropdown
+                    value={r.crop}
+                    onChange={v => setArr("budgetCrops",i,"crop",v)}
+                    commodityPrices={commodityPrices}
+                    category="Crops"
+                    placeholder="Type or select crop..."
+                  />
                 </div>
                 <div className="input-group" style={{width:90,flexShrink:0}}>
                   <div className="input-wrap">
@@ -469,12 +600,33 @@ function BudgetView({
                     <option>ton</option><option>cwt</option><option>bale</option>
                   </select>
                 </div>
-                <div className="input-group" style={{width:100,flexShrink:0}}>
-                  <div className="input-wrap">
+                {/* Contracted checkbox BEFORE price */}
+                <div style={{width:90,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
+                    tabIndex={0}
+                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
+                    style={{width:15,height:15,accentColor:"#6B0E1E",cursor:"pointer"}} />
+                  <label htmlFor={"bc-con-"+i} style={{fontSize:".72rem",color:"#6B0E1E",cursor:"pointer",fontWeight:r.contracted?700:400}}>
+                    {r.contracted ? "Contracted" : "Contract?"}
+                  </label>
+                </div>
+                {/* Price — locked to commodity list unless contracted */}
+                <div className="input-group" style={{width:105,flexShrink:0}}>
+                  <div className="input-wrap" title={!r.contracted&&defaultPrice ? "Price locked to commodity list. Check 'Contracted' to override." : ""}>
                     <span className="prefix">$</span>
-                    <input type="text" value={r.price} placeholder="0.00"
-                      onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
+                    {r.contracted ? (
+                      <input type="text" value={r.price} placeholder="0.00"
+                        onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
+                    ) : (
+                      <input type="text" value={defaultPrice || r.price} placeholder="0.00"
+                        readOnly={!!defaultPrice}
+                        style={{background:defaultPrice?"#f5f5f5":undefined, color:defaultPrice?"#555":undefined, cursor:defaultPrice?"not-allowed":"text"}}
+                        onChange={e => !defaultPrice && setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
+                    )}
                   </div>
+                  {!r.contracted && defaultPrice && (
+                    <div style={{fontSize:".65rem",color:"#888",textAlign:"center",marginTop:1}}>list price</div>
+                  )}
                 </div>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
                   <div className="input-wrap">
@@ -482,14 +634,6 @@ function BudgetView({
                       onChange={e => setArr("budgetCrops",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
-                </div>
-                <div style={{width:85,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
-                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
-                    style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
-                  <label htmlFor={"bc-con-"+i} style={{fontSize:".75rem",color:"#555",cursor:"pointer"}}>
-                    {r.contracted ? "Yes" : ""}
-                  </label>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
@@ -516,7 +660,9 @@ function BudgetView({
             <span style={{width:32}}></span>
           </div>
           {data.budgetLivestock.map((r, i) => {
-            const rv = numVal(r.head) * numVal(r.lbs) * numVal(r.price);
+            const defaultPrice = lookupPrice(r.type);
+            const effectivePrice = defaultPrice || r.price;
+            const rv = numVal(r.head) * numVal(r.lbs) * numVal(effectivePrice);
             return (
               <div key={i} className="bg-row" data-rowkey={`budgetLivestock-${i}`}>
                 <span className="row-num">{i+1}</span>
@@ -538,11 +684,14 @@ function BudgetView({
                   </div>
                 </div>
                 <div className="input-group" style={{width:110,flexShrink:0}}>
-                  <div className="input-wrap">
+                  <div className="input-wrap" title={defaultPrice ? "Price locked to commodity list" : ""}>
                     <span className="prefix">$</span>
-                    <input type="text" value={r.price} placeholder="0.00"
-                      onChange={e => setArr("budgetLivestock",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <input type="text" value={effectivePrice} placeholder="0.00"
+                      readOnly={!!defaultPrice}
+                      style={{background:defaultPrice?"#f5f5f5":undefined,color:defaultPrice?"#555":undefined,cursor:defaultPrice?"not-allowed":"text"}}
+                      onChange={e => !defaultPrice && setArr("budgetLivestock",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
+                  {defaultPrice && <div style={{fontSize:".65rem",color:"#888",textAlign:"center",marginTop:1}}>list price</div>}
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetLivestock",i)}>x</button>
@@ -1076,6 +1225,7 @@ function InspectionView({ data, setData }) {
           inspAddlCmt: data.inspAddlCmt || "",
           clientName: data.clientName,
           inspDate: data.inspDate,
+          inspHarvestType: data.inspHarvestType || 'pre',
         },
         response: null,
       };
@@ -1575,6 +1725,26 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
       <div ref={printRef}>
         {/* Header info */}
         <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}}>
+          {/* Harvest type toggle */}
+          <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
+            <span style={{fontSize:11,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.06em',marginRight:4}}>Inspection Type:</span>
+            {['pre','post'].map(type => (
+              <button key={type} type="button"
+                onClick={()=>set('inspHarvestType',type)}
+                style={{padding:'6px 18px',borderRadius:20,border:'none',cursor:'pointer',
+                  fontWeight:700,fontSize:12,fontFamily:'inherit',
+                  background:(data.inspHarvestType||'pre')===type ? (type==='pre'?'#1a4731':'#6B0E1E') : '#f3f4f6',
+                  color:(data.inspHarvestType||'pre')===type ? 'white' : '#6b7280',
+                  transition:'all .15s'}}>
+                {type==='pre' ? '🌱 Pre-Harvest' : '🌾 Post-Harvest'}
+              </button>
+            ))}
+            {(data.inspHarvestType||'pre')==='post' && (
+              <span style={{fontSize:11,color:'#6B0E1E',fontStyle:'italic',marginLeft:4}}>
+                Budget columns hidden for post-harvest
+              </span>
+            )}
+          </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px 24px'}}>
             <div><label style={INSP_LBL}>CUSTOMER NAME</label>
               <div style={{padding:'6px 8px',background:'#f0fdf4',borderRadius:4,fontSize:13,fontWeight:600,color:INSP_SH}}>{data.clientName||'—'}</div>
@@ -1595,9 +1765,9 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
               <thead>
                 <tr>
                   <th style={{...INSP_TH_S,textAlign:'left',minWidth:100}}>Crop</th>
-                  <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Ac</th>
-                  <th style={{...INSP_TH_S,minWidth:80}}>Actual Ac</th>
-                  <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>
+                  {(data.inspHarvestType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Ac</th>}
+                  <th style={{...INSP_TH_S,minWidth:80}}>{(data.inspHarvestType||'pre')==='post' ? 'Actual Ac' : 'Actual Ac'}</th>
+                  {(data.inspHarvestType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>}
                   <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
                   <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
                   <th style={{...INSP_TH_S,minWidth:100}}>Yield / Acre</th>
@@ -1608,10 +1778,11 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
               </thead>
               <tbody>
                 {crops.map((r,i)=>{
-                  const pct = devPct(r.actualAcres, r.budgetedAcres);
-                  const showDev = pct !== null && Math.abs(pct) >= 10;
+                  const isPost = (data.inspHarvestType||'pre')==='post';
+                  const pct = !isPost ? devPct(r.actualAcres, r.budgetedAcres) : null;
+                  const showDev = !isPost && pct !== null && Math.abs(pct) >= 10;
                   const rowBg = i%2===0?'white':'#f9fafb';
-                  const ds = r.actualAcres ? devStyle(pct) : {};
+                  const ds = !isPost && r.actualAcres ? devStyle(pct) : {};
                   return (
                     <React.Fragment key={r.id}>
                       <tr style={{background:ds.background||rowBg,...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
@@ -1634,33 +1805,37 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
                             : inspInp(r.budgetedCrop||r.substituteCrop, v=>updCrop(r.id,'budgetedCrop',v), 'Crop name…')
                           }
                         </td>
-                        {/* Budget acres — locked from budget */}
-                        <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
-                          <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'—'}</div>
-                          <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
-                        </td>
+                        {/* Budget acres — locked, hidden in post-harvest */}
+                        {(data.inspHarvestType||'pre')==='pre' && (
+                          <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
+                            <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'—'}</div>
+                            <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
+                          </td>
+                        )}
                         {/* Actual acres — type to enter */}
                         <td style={INSP_TD_S}>
                           <input
                             type="text"
                             value={r.actualAcres}
-                            placeholder={r.budgetedAcres||'0'}
+                            placeholder={(data.inspHarvestType||'pre')==='pre' ? (r.budgetedAcres||'0') : '0'}
                             onChange={e=>updCrop(r.id,'actualAcres',e.target.value.replace(/[^0-9.]/g,''))}
                             style={{border:'1.5px solid #6B0E1E',borderRadius:4,padding:'5px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'#fdf9f9',fontWeight:600,textAlign:'center'}}
                           />
                         </td>
-                        {/* Deviation badge */}
-                        <td style={{...INSP_TD_S,textAlign:'center'}}>
-                          {r.actualAcres && r.budgetedAcres ? (
-                            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                              {devBadge(pct)}
-                              <div style={{fontSize:10,color:'#6b7280'}}>
-                                {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}
-                                {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac
+                        {/* Deviation badge — pre-harvest only */}
+                        {(data.inspHarvestType||'pre')==='pre' && (
+                          <td style={{...INSP_TD_S,textAlign:'center'}}>
+                            {r.actualAcres && r.budgetedAcres ? (
+                              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                                {devBadge(pct)}
+                                <div style={{fontSize:10,color:'#6b7280'}}>
+                                  {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}
+                                  {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac
+                                </div>
                               </div>
-                            </div>
-                          ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
-                        </td>
+                            ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
+                          </td>
+                        )}
                         <td style={INSP_TD_S}>{inspInp(r.location, v=>updCrop(r.id,'location',v), 'Field/Sec')}</td>
                         <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updCrop(r.id,'condition',v)}/></td>
                         <td style={INSP_TD_S}>
@@ -1678,8 +1853,8 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
                           <button type="button" onClick={()=>remCrop(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button>
                         </td>
                       </tr>
-                      {/* Deviation reason row - only required at >= 20% */}
-                      {r.actualAcres && pct !== null && Math.abs(pct) >= 20 && (
+                      {/* Deviation reason row - only required at >= 20% in pre-harvest */}
+                      {!isPost && r.actualAcres && pct !== null && Math.abs(pct) >= 20 && (
                         <tr style={{background:'#fef2f2'}}>
                           <td colSpan={10} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -2093,6 +2268,9 @@ export default function BalanceSheet() {
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]);
   const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
   const [showInspHistory, setShowInspHistory] = useState(false);
+  const [commodityPrices, setCommodityPrices] = useState(() => loadCommodityPrices());
+  const [showPriceList, setShowPriceList] = useState(false);
+  const [editingPrice, setEditingPrice] = useState(null); // { id, field, value }
   const [pendingResponses, setPendingResponses] = useState({}); // { clientName: shareRecord }
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -3034,6 +3212,22 @@ export default function BalanceSheet() {
   }, [data.inspShareId]);
 
   // ── Corp Personal Debt Loader ──────────────────────────────────────────────
+  // ── Commodity price lookup ───────────────────────────────────────────────────
+  const lookupPrice = (name) => {
+    if (!name) return null;
+    const needle = name.toLowerCase().trim();
+    const match = commodityPrices.find(p =>
+      needle.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(needle)
+    );
+    return match ? match.price : null;
+  };
+
+  const updateCommodityPrice = (id, field, value) => {
+    const updated = commodityPrices.map(p => p.id === id ? {...p, [field]: value} : p);
+    setCommodityPrices(updated);
+    saveCommodityPrices(updated);
+  };
+
   const loadCorpPersonalDebt = async () => {
     if (!data.clientName) return;
     try {
@@ -4645,6 +4839,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 </strong>
               </div>
             </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>setShowPriceList(true)}
+                style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+                📋 Price List
+              </button>
             <button className="btn btn-save" onClick={saveSheet}
               disabled={!data.clientName || saveStatus === "saving"}>
               {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save"}
@@ -4653,7 +4852,99 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{fontSize:".85rem"}}>
               Print Budget
             </button>
+            </div>
           </div>
+
+          {/* ── Price List Modal ── */}
+          {showPriceList && (
+            <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+              <div style={{background:"white",borderRadius:14,padding:28,maxWidth:620,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:"1.05rem",color:"#1a1a1a"}}>Commodity Price List</div>
+                    <div style={{fontSize:".75rem",color:"#888",marginTop:2}}>
+                      First Bank of Montana · Prices auto-fill on the Budget tab · Edit any price to update
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>{
+                      const newId = commodityPrices.length;
+                      const updated = [...commodityPrices,{id:newId,category:"Crops",name:"",price:"",unit:"bu"}];
+                      setCommodityPrices(updated);
+                      saveCommodityPrices(updated);
+                    }} style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"4px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+                      + Add
+                    </button>
+                    <button onClick={()=>{
+                      if(window.confirm("Reset to FBMT default prices? Your edits will be lost.")) {
+                        const defaults = DEFAULT_COMMODITY_PRICES.map((p,i)=>({...p,id:i}));
+                        setCommodityPrices(defaults);
+                        saveCommodityPrices(defaults);
+                      }
+                    }} style={{background:"none",border:"1px solid #ddd",borderRadius:6,padding:"4px 12px",color:"#888",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
+                      Reset to Defaults
+                    </button>
+                  </div>
+                </div>
+
+                {["Crops","Livestock"].map(cat => (
+                  <div key={cat} style={{marginBottom:16}}>
+                    <div style={{background:"#6B0E1E",color:"white",fontWeight:700,fontSize:".8rem",padding:"6px 12px",borderRadius:"6px 6px 0 0",letterSpacing:".05em",textTransform:"uppercase"}}>
+                      {cat}
+                    </div>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:".85rem"}}>
+                      <thead>
+                        <tr style={{background:"#f5f0f0"}}>
+                          <th style={{padding:"7px 12px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Commodity</th>
+                          <th style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Price</th>
+                          <th style={{padding:"7px 12px",textAlign:"center",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Unit</th>
+                          <th style={{width:36}}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {commodityPrices.filter(p=>p.category===cat).map((p,i)=>(
+                          <tr key={p.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"white":"#fafafa"}}>
+                            <td style={{padding:"6px 12px"}}>
+                              <input type="text" value={p.name}
+                                onChange={e=>updateCommodityPrice(p.id,"name",e.target.value)}
+                                style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".85rem",width:"100%",fontFamily:"inherit",outline:"none"}} />
+                            </td>
+                            <td style={{padding:"6px 12px"}}>
+                              <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
+                                <span style={{color:"#888",fontSize:".85rem"}}>$</span>
+                                <input type="text" value={p.price}
+                                  onChange={e=>updateCommodityPrice(p.id,"price",e.target.value.replace(/[^0-9.]/g,""))}
+                                  style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".9rem",width:80,textAlign:"right",fontFamily:"inherit",outline:"none",fontWeight:700,color:"#6B0E1E"}} />
+                              </div>
+                            </td>
+                            <td style={{padding:"6px 12px",textAlign:"center"}}>
+                              <select value={p.unit} onChange={e=>updateCommodityPrice(p.id,"unit",e.target.value)}
+                                style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 6px",fontSize:".8rem",fontFamily:"inherit",outline:"none",background:"white"}}>
+                                {["bu","lb","ton","cwt","bale","hd"].map(u=><option key={u}>{u}</option>)}
+                              </select>
+                            </td>
+                            <td style={{padding:"4px 8px",textAlign:"center"}}>
+                              <button onClick={()=>{
+                                const updated = commodityPrices.filter(x=>x.id!==p.id);
+                                setCommodityPrices(updated);
+                                saveCommodityPrices(updated);
+                              }} style={{background:"#fee2e2",color:"#b91c1c",border:"none",borderRadius:4,padding:"2px 7px",cursor:"pointer",fontSize:12}}>×</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+
+                <div style={{fontSize:".72rem",color:"#aaa",marginBottom:12}}>
+                  Prices save automatically. When a crop or livestock type matches a name in this list, the price auto-fills and locks. Check "Contracted" on a crop row to override with a custom price.
+                </div>
+                <button onClick={()=>setShowPriceList(false)} className="btn btn-secondary" style={{width:"100%"}}>Close</button>
+              </div>
+            </div>
+          )}
+
           <div className="budget-body">
             <BudgetView
               data={data}
@@ -4678,6 +4969,8 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               setArr={setArr}
               removeRow={removeRow}
               addRow={addRow}
+              lookupPrice={lookupPrice}
+              commodityPrices={commodityPrices}
             />
           </div>
         </div>

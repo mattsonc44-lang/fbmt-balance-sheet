@@ -173,9 +173,9 @@ export default function CustomerInspectionForm() {
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
               <thead><tr>
                 <th style={{...INSP_TH_S,textAlign:'left',minWidth:100}}>Crop</th>
-                <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Ac</th>
+                {!isPost && <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Ac</th>}
                 <th style={{...INSP_TH_S,minWidth:80}}>Actual Ac</th>
-                <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>
+                {!isPost && <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>}
                 <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
                 <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
                 <th style={{...INSP_TH_S,minWidth:100}}>Yield / Acre</th>
@@ -193,16 +193,16 @@ export default function CustomerInspectionForm() {
                     <React.Fragment key={r.id||i}>
                       <tr style={{background:ds.background||rowBg,...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
                         <td style={INSP_TD_S}><div style={{fontWeight:600,fontSize:13}}>{r.budgetedCrop||'---'}</div></td>
-                        <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}><div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'---'}</div><div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div></td>
+                        {!isPost && <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}><div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'---'}</div><div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div></td>}
                         <td style={INSP_TD_S}>{actInp(r.actualAcres,v=>updCrop(r.id,'actualAcres',v),r.budgetedAcres||'0')}</td>
-                        <td style={{...INSP_TD_S,textAlign:'center'}}>
+                        {!isPost && <td style={{...INSP_TD_S,textAlign:'center'}}>
                           {r.actualAcres&&r.budgetedAcres?(
                             <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
                               {devBadge(pct)}
                               <div style={{fontSize:10,color:'#6b7280'}}>{(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}{(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac</div>
                             </div>
                           ):<span style={{color:'#d1d5db'}}>---</span>}
-                        </td>
+                        </td>}
                         <td style={INSP_TD_S}>{inp(r.location,v=>updCrop(r.id,'location',v),'Field/Sec')}</td>
                         <td style={INSP_TD_S}><CondPills value={r.condition} onChange={v=>updCrop(r.id,'condition',v)}/></td>
                         <td style={INSP_TD_S}>
@@ -215,9 +215,9 @@ export default function CustomerInspectionForm() {
                         <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}><div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>${r.budgetedPrice||'---'}</div><div style={{fontSize:10,color:'#9ca3af'}}>locked</div></td>
                         <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}}>{totalVal>0?'$'+Math.round(totalVal).toLocaleString():'---'}</td>
                       </tr>
-                      {showReason&&(
+                      {!isPost&&showReason&&(
                         <tr style={{background:'#fef2f2'}}>
-                          <td colSpan={9} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
+                          <td colSpan={isPost?7:9} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
                               <span style={{fontSize:11,fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>Deviation reason (required):</span>
                               <input type="text" value={r.deviationReason} placeholder="Required - explain major deviation from budget..." onChange={e=>updCrop(r.id,'deviationReason',e.target.value)} style={{flex:1,border:'1px solid #fca5a5',borderRadius:4,padding:'5px 8px',fontSize:13,fontFamily:'inherit',outline:'none',background:'white'}}/>
@@ -274,7 +274,7 @@ export default function CustomerInspectionForm() {
                         <td style={INSP_TD_S}><CondPills value={r.condition} onChange={v=>updLS(r.id,'condition',v)}/></td>
                         <td style={INSP_TD_S}>{actInp(r.estWeight,v=>updLS(r.id,'estWeight',v),'0 lbs')}</td>
                       </tr>
-                      {showReason&&(
+                      {!isPost&&showReason&&(
                         <tr style={{background:'#fef2f2'}}>
                           <td colSpan={6} style={{padding:'6px 10px 8px 32px'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
