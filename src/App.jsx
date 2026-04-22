@@ -1321,7 +1321,14 @@ function InspectionView({ data, setData }) {
   };
 
   const cropRowTot = r => (parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
-  const lsRowTot   = r => (parseFloat(r.actualHead||r.budgetedHead||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+  const lsRowTot   = r => {
+    const head  = parseFloat(r.actualHead||r.budgetedHead||0);
+    const lbs   = parseFloat(r.estWeight||r.budgetedLbs||0);
+    const price = parseFloat(r.valuePerUnit||r.budgetedPrice||0);
+    // If weight is entered, calc = head × lbs × price/lb
+    // If no weight (flat price per head), calc = head × price
+    return lbs > 0 ? head * lbs * price : head * price;
+  };
   const invRowTot  = r => (parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
   const cropTot = (data.inspCrops||[]).reduce((s,r)=>s+cropRowTot(r),0);
   const lsTot   = (data.inspLivestock||[]).reduce((s,r)=>s+lsRowTot(r),0);
@@ -1843,25 +1850,55 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
         )}
         {/* Header info */}
         <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}}>
-          {/* Harvest type toggle */}
-          <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
-            <span style={{fontSize:11,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.06em',marginRight:4}}>Inspection Type:</span>
-            {['pre','post'].map(type => (
-              <button key={type} type="button"
-                onClick={()=>set('inspHarvestType',type)}
-                style={{padding:'6px 18px',borderRadius:20,border:'none',cursor:'pointer',
-                  fontWeight:700,fontSize:12,fontFamily:'inherit',
-                  background:(data.inspHarvestType||'pre')===type ? (type==='pre'?'#1a4731':'#6B0E1E') : '#f3f4f6',
-                  color:(data.inspHarvestType||'pre')===type ? 'white' : '#6b7280',
-                  transition:'all .15s'}}>
-                {type==='pre' ? '🌱 Pre-Harvest' : '🌾 Post-Harvest'}
-              </button>
-            ))}
-            {(data.inspHarvestType||'pre')==='post' && (
-              <span style={{fontSize:11,color:'#6B0E1E',fontStyle:'italic',marginLeft:4}}>
-                Budget columns hidden for post-harvest
-              </span>
-            )}
+          {/* Inspection type toggles */}
+          <div style={{display:'flex',gap:16,marginBottom:16,alignItems:'flex-start',flexWrap:'wrap'}}>
+            {/* Crop / Harvest */}
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:5}}>Crop Inspection</div>
+              <div style={{display:'flex',gap:6}}>
+                {[['pre','🌱 Pre-Harvest','#1a4731'],['post','🌾 Post-Harvest','#6B0E1E']].map(([val,label,clr]) => (
+                  <button key={val} type="button"
+                    onClick={()=>set('inspHarvestType',val)}
+                    style={{padding:'6px 14px',borderRadius:20,border:'none',cursor:'pointer',
+                      fontWeight:700,fontSize:12,fontFamily:'inherit',transition:'all .15s',
+                      background:(data.inspHarvestType||'pre')===val ? clr : '#f3f4f6',
+                      color:(data.inspHarvestType||'pre')===val ? 'white' : '#6b7280'}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Divider */}
+            <div style={{width:1,background:'#e5e7eb',alignSelf:'stretch',margin:'0 4px'}}/>
+            {/* Cattle / Calving */}
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:5}}>Cattle Inspection</div>
+              <div style={{display:'flex',gap:6}}>
+                {[['pre','🐄 Pre-Calving','#1a4731'],['post','🐂 Post-Calving','#6B0E1E']].map(([val,label,clr]) => (
+                  <button key={val} type="button"
+                    onClick={()=>set('inspCattleType',val)}
+                    style={{padding:'6px 14px',borderRadius:20,border:'none',cursor:'pointer',
+                      fontWeight:700,fontSize:12,fontFamily:'inherit',transition:'all .15s',
+                      background:(data.inspCattleType||'pre')===val ? clr : '#f3f4f6',
+                      color:(data.inspCattleType||'pre')===val ? 'white' : '#6b7280'}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Status hints */}
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignSelf:'center',marginLeft:4}}>
+              {(data.inspHarvestType||'pre')==='post' && (
+                <span style={{fontSize:10,color:'#6B0E1E',fontStyle:'italic',background:'#fdf5f5',padding:'3px 8px',borderRadius:10}}>
+                  Budget Ac hidden
+                </span>
+              )}
+              {(data.inspCattleType||'pre')==='post' && (
+                <span style={{fontSize:10,color:'#6B0E1E',fontStyle:'italic',background:'#fdf5f5',padding:'3px 8px',borderRadius:10}}>
+                  Budget Head hidden
+                </span>
+              )}
+            </div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px 24px'}}>
             <div><label style={INSP_LBL}>CUSTOMER NAME</label>
@@ -2012,9 +2049,9 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
               <thead>
                 <tr>
                   <th style={{...INSP_TH_S,textAlign:'left',minWidth:120}}>Type</th>
-                  <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Hd</th>
+                  {(data.inspCattleType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Hd</th>}
                   <th style={{...INSP_TH_S,minWidth:80}}>Actual Hd</th>
-                  <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>
+                  {(data.inspCattleType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>}
                   <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
                   <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
                   <th style={{...INSP_TH_S,minWidth:90}}>Est. Wt (lbs)</th>
@@ -2025,9 +2062,10 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
               </thead>
               <tbody>
                 {lsRows.map((r,i)=>{
-                  const pct = devPct(r.actualHead, r.budgetedHead);
-                  const showDev = pct !== null && Math.abs(pct) >= 10;
-                  const ds = r.actualHead ? devStyle(pct) : {};
+                  const isPostC = (data.inspCattleType||'pre')==='post';
+                  const pct = !isPostC ? devPct(r.actualHead, r.budgetedHead) : null;
+                  const showDev = !isPostC && pct !== null && Math.abs(pct) >= 10;
+                  const ds = !isPostC && r.actualHead ? devStyle(pct) : {};
                   return (
                     <React.Fragment key={r.id}>
                       <tr style={{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
@@ -2037,19 +2075,23 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
                             : inspInp(r.budgetedType, v=>updLS(r.id,'budgetedType',v), 'Cattle, Hogs…')
                           }
                         </td>
-                        <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
-                          <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedHead||'—'}</div>
-                          <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
-                        </td>
-                        <td style={INSP_TD_S}>{inspInp(r.actualHead, v=>updLS(r.id,'actualHead',v), r.budgetedHead||'0','number')}</td>
-                        <td style={{...INSP_TD_S,textAlign:'center'}}>
-                          {r.actualHead && r.budgetedHead ? (
-                            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                              {devBadge(pct)}
-                              <div style={{fontSize:10,color:'#6b7280'}}>{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)>0?'+':'')}{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)).toFixed(0)} hd</div>
-                            </div>
+                        {!isPostC && (
+                          <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
+                            <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedHead||'—'}</div>
+                            <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
+                          </td>
+                        )}
+                        <td style={INSP_TD_S}>{inspInp(r.actualHead, v=>updLS(r.id,'actualHead',v), isPostC?'0':(r.budgetedHead||'0'),'number')}</td>
+                        {!isPostC && (
+                          <td style={{...INSP_TD_S,textAlign:'center'}}>
+                            {r.actualHead && r.budgetedHead ? (
+                              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                                {devBadge(pct)}
+                                <div style={{fontSize:10,color:'#6b7280'}}>{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)>0?'+':'')}{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)).toFixed(0)} hd</div>
+                              </div>
                           ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
-                        </td>
+                          </td>
+                        )}
                         <td style={INSP_TD_S}>{inspInp(r.location, v=>updLS(r.id,'location',v), 'Pasture/Lot')}</td>
                         <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updLS(r.id,'condition',v)}/></td>
                         <td style={INSP_TD_S}>{inspInp(r.estWeight, v=>updLS(r.id,'estWeight',v), r.budgetedLbs||'0','number')}</td>
@@ -2057,7 +2099,7 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
                         <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d'}}>{lsRowTot(r)>0?inspFmt$(lsRowTot(r)):'—'}</td>
                         <td style={INSP_TD_S}><button type="button" onClick={()=>remLS(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button></td>
                       </tr>
-                      {r.actualHead && pct !== null && Math.abs(pct) >= 20 && (
+                      {!isPostC && r.actualHead && pct !== null && Math.abs(pct) >= 20 && (
                         <tr style={{background:'#fef2f2'}}>
                           <td colSpan={10} style={{padding:'6px 10px 8px 32px'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
