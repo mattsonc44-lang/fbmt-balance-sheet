@@ -457,9 +457,18 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
   const [highlight, setHighlight] = React.useState(0);
   const [query, setQuery] = React.useState(value || "");
   const ref = React.useRef(null);
+  const listRef = React.useRef(null);
+  const itemRefs = React.useRef([]);
 
   // Sync query when value changes externally
   React.useEffect(() => { setQuery(value || ""); }, [value]);
+
+  // Scroll highlighted item into view
+  React.useEffect(() => {
+    if (open && itemRefs.current[highlight]) {
+      itemRefs.current[highlight].scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [highlight, open]);
 
   // Close on outside click
   React.useEffect(() => {
@@ -507,11 +516,12 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
       <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
         fontSize:9,color:"#aaa",pointerEvents:"none",lineHeight:1}}>▼</span>
       {open && items.length > 0 && (
-        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
+        <div ref={listRef} style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
           border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
           zIndex:999,maxHeight:200,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
           {items.map((item,idx) => (
             <div key={item.id}
+              ref={el => itemRefs.current[idx] = el}
               onMouseDown={() => select(item)}
               onMouseEnter={() => setHighlight(idx)}
               style={{padding:"7px 12px",cursor:"pointer",fontSize:".85rem",
