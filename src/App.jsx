@@ -381,6 +381,7 @@ function emptyData() {
     inspDate: new Date().toISOString().split('T')[0],
     inspInspector: "",
     inspHarvestType: "pre",  // "pre" or "post"
+    inspCattleType: "pre",   // "pre" or "post" calving
     inspLoans: ["","",""],
     inspCrops: [],
     inspLivestock: [],
@@ -1151,62 +1152,53 @@ function InspectionView({ data, setData }) {
   const [submitted, setSubmitted] = React.useState(false);
   const [submitErr, setSubmitErr] = React.useState('');
 
-  const [showLoadPrompt, setShowLoadPrompt] = React.useState(
-    // Show prompt only if there is previous inspection data saved
-    !!(data.inspCrops && data.inspCrops.length > 0 && data.inspCrops.some(r => r.actualAcres || r.condition))
+  // ── Inspection setup wizard ──────────────────────────────────────────────────
+  const hasPreviousInsp = !!(data.inspCrops && data.inspCrops.length > 0 &&
+    data.inspCrops.some(r => r.actualAcres || r.condition || r.budgetedCrop));
+  const [inspWizard, setInspWizard] = React.useState(
+    hasPreviousInsp ? 'ask_load' : 'ask_harvest'
   );
+  // null = wizard done/dismissed
 
   const isPost = (data.inspHarvestType||'pre') === 'post';
 
-  const loadFromBudget = () => {
-    const cropRows = isPost ? [{
-      id:inspUid(), budgetedCrop:'', budgetedAcres:'', budgetedYield:'',
-      budgetedUnit:'bu', budgetedPrice:'', location:'', condition:'',
-      actualAcres:'', actualYield:'', valuePerUnit:'', deviationReason:'', substituted:false, substituteCrop:'',
-    }] : (data.budgetCrops||[]).filter(r => r.crop || r.acres).map(r => ({
-      id: inspUid(),
-      budgetedCrop: r.crop||'', budgetedAcres: r.acres||'',
-      budgetedYield: r.yieldPerAcre||'', budgetedUnit: r.unit||'bu',
-      budgetedPrice: r.price||'', location:'', condition:'',
-      actualAcres:'', actualYield:'', valuePerUnit:'',
-      deviationReason:'', substituted:false, substituteCrop:'',
-    }));
-    const lsRows = (data.budgetLivestock||[]).filter(r => r.type || r.head).map(r => ({
-      id: inspUid(),
-      budgetedType: r.type||'', budgetedHead: r.head||'',
-      budgetedLbs: r.lbs||'', budgetedPrice: r.price||'',
-      location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'',
-      deviationReason:'',
-    }));
-    setData(d => ({
-      ...d,
-      inspCrops: cropRows.length > 0 ? cropRows : [{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}],
-      inspLivestock: lsRows.length > 0 ? lsRows : [{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}],
-      inspInventory: [{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}],
+  const blankCropRow = () => ({id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''});
+  const blankLSRow   = () => ({id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''});
+  const blankInvRow  = () => ({id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''});
+
+  const applyInspSetup = (harvestType, cattleType, loadBudget) => {
+    const isPostH = harvestType === 'post';
+    const isPostC = cattleType === 'post';
+    set('inspHarvestType', harvestType);
+    set('inspCattleType', cattleType);
+    const cropRows = (isPostH || !loadBudget)
+      ? [blankCropRow()]
+      : (data.budgetCrops||[]).filter(r=>r.crop||r.acres).map(r=>({
+          id:inspUid(), budgetedCrop:r.crop||'', budgetedAcres:r.acres||'',
+          budgetedYield:r.yieldPerAcre||'', budgetedUnit:r.unit||'bu',
+          budgetedPrice:r.price||'', location:'', condition:'',
+          actualAcres:'', actualYield:'', valuePerUnit:'',
+          deviationReason:'', substituted:false, substituteCrop:'',
+        })) || [blankCropRow()];
+    const lsRows = (isPostC || !loadBudget)
+      ? [blankLSRow()]
+      : (data.budgetLivestock||[]).filter(r=>r.type||r.head).map(r=>({
+          id:inspUid(), budgetedType:r.type||'', budgetedHead:r.head||'',
+          budgetedLbs:r.lbs||'', budgetedPrice:r.price||'',
+          location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'',
+          deviationReason:'',
+        })) || [blankLSRow()];
+    setData(d=>({...d,
+      inspHarvestType: harvestType,
+      inspCattleType: cattleType,
+      inspCrops: cropRows.length > 0 ? cropRows : [blankCropRow()],
+      inspLivestock: lsRows.length > 0 ? lsRows : [blankLSRow()],
+      inspInventory: [blankInvRow()],
       inspPastureCond:'', inspPastureCmt:'', inspWaterCond:'', inspWaterCmt:'',
       inspEquipCond:'', inspEquipCmt:'', inspEnvCmt:'', inspAddlCmt:'',
     }));
-    setShowLoadPrompt(false);
+    setInspWizard(null);
   };
-
-  const keepLastInspection = () => {
-    // Ensure inventory exists if missing
-    if (!data.inspInventory || data.inspInventory.length === 0) {
-      setData(d=>({...d, inspInventory: [{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
-    }
-    setShowLoadPrompt(false);
-  };
-
-  // First-time init: no previous data at all
-  React.useEffect(() => {
-    const hasCrops = data.inspCrops && data.inspCrops.length > 0;
-    const hasLS = data.inspLivestock && data.inspLivestock.length > 0;
-    if (!hasCrops && !hasLS) {
-      // Fresh sheet — auto-load from budget without prompting
-      loadFromBudget();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const set = (field, val) => setData(d=>({...d, [field]:val}));
   const [showShareModal, setShowShareModal] = React.useState(false);
@@ -1744,27 +1736,109 @@ ${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIO
       </div>
 
       <div ref={printRef}>
-        {/* ── Load prompt ── */}
-        {showLoadPrompt && (
-          <div style={{background:'#fff8e0',border:'1px solid #f0d060',borderRadius:8,
-            padding:'14px 18px',marginBottom:16,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-            <span style={{fontSize:'1.2rem'}}>📋</span>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:'.9rem',color:'#7a5a00'}}>Previous inspection data found</div>
-              <div style={{fontSize:'.78rem',color:'#666',marginTop:2}}>
-                Would you like to load the last inspection, or start fresh{isPost ? ' (post-harvest — crop projections will be blank)' : ' from the current budget'}?
+        {/* ── Inspection Setup Wizard ── */}
+        {inspWizard && (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',
+            zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <div style={{background:'white',borderRadius:14,padding:32,maxWidth:480,width:'100%',
+              boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
+              <div style={{fontWeight:800,fontSize:16,color:INSP_SH,marginBottom:6,fontFamily:"'Playfair Display',serif"}}>
+                Ag Inspection Setup
               </div>
+
+              {/* Step 1: Load previous? */}
+              {inspWizard==='ask_load' && (
+                <div>
+                  <div style={{fontSize:14,color:'#555',marginBottom:20,lineHeight:1.6}}>
+                    Previous inspection data exists for <strong>{data.clientName}</strong>.<br/>
+                    Would you like to load it?
+                  </div>
+                  <div style={{display:'flex',gap:10}}>
+                    <button onClick={()=>{
+                        // Keep existing data, just dismiss
+                        if (!data.inspInventory || data.inspInventory.length===0)
+                          setData(d=>({...d,inspInventory:[{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
+                        setInspWizard(null);
+                      }}
+                      style={{flex:1,background:'#1a4731',color:'white',border:'none',borderRadius:8,
+                        padding:12,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                      Yes — Load Previous
+                    </button>
+                    <button onClick={()=>setInspWizard('ask_harvest')}
+                      style={{flex:1,background:'none',border:'2px solid #6B0E1E',color:'#6B0E1E',
+                        borderRadius:8,padding:12,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                      No — Start Fresh
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Harvest type */}
+              {inspWizard==='ask_harvest' && (
+                <div>
+                  <div style={{fontSize:14,color:'#555',marginBottom:6,lineHeight:1.6}}>
+                    Select inspection type for crops:
+                  </div>
+                  <div style={{display:'flex',gap:10,marginBottom:20}}>
+                    {[['pre','🌱 Pre-Harvest','Load crop projections from the budget'],
+                      ['post','🌾 Post-Harvest','Start blank — enter actuals only']].map(([val,label,desc])=>(
+                      <button key={val} onClick={()=>setInspWizard('ask_harvest_'+val)}
+                        style={{flex:1,background:'none',border:'2px solid #e5e7eb',color:'#1a1a1a',
+                          borderRadius:8,padding:'12px 8px',cursor:'pointer',fontFamily:'inherit',
+                          textAlign:'center',transition:'all .15s'}}
+                        onMouseOver={e=>{e.currentTarget.style.borderColor='#1a4731';e.currentTarget.style.background='#f0fdf4';}}
+                        onMouseOut={e=>{e.currentTarget.style.borderColor='#e5e7eb';e.currentTarget.style.background='none';}}>
+                        <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{label}</div>
+                        <div style={{fontSize:11,color:'#6b7280'}}>{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {hasPreviousInsp && (
+                    <button onClick={()=>setInspWizard('ask_load')}
+                      style={{background:'none',border:'none',color:'#9ca3af',fontSize:12,
+                        cursor:'pointer',fontFamily:'inherit',textDecoration:'underline'}}>
+                      ← Back
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Step 3: Cattle type (after harvest selection) */}
+              {(inspWizard==='ask_harvest_pre'||inspWizard==='ask_harvest_post') && (
+                <div>
+                  <div style={{fontSize:13,color:'#1a4731',fontWeight:700,marginBottom:4}}>
+                    {inspWizard==='ask_harvest_pre' ? '🌱 Pre-Harvest selected' : '🌾 Post-Harvest selected'}
+                  </div>
+                  <div style={{fontSize:14,color:'#555',marginBottom:6,lineHeight:1.6,marginTop:12}}>
+                    Select inspection type for livestock:
+                  </div>
+                  <div style={{display:'flex',gap:10,marginBottom:20}}>
+                    {[['pre','🐄 Pre-Calving','Load cattle numbers from the budget'],
+                      ['post','🐂 Post-Calving','Start blank — enter actuals only']].map(([val,label,desc])=>(
+                      <button key={val}
+                        onClick={()=>applyInspSetup(
+                          inspWizard==='ask_harvest_pre'?'pre':'post',
+                          val,
+                          true
+                        )}
+                        style={{flex:1,background:'none',border:'2px solid #e5e7eb',color:'#1a1a1a',
+                          borderRadius:8,padding:'12px 8px',cursor:'pointer',fontFamily:'inherit',
+                          textAlign:'center',transition:'all .15s'}}
+                        onMouseOver={e=>{e.currentTarget.style.borderColor='#6B0E1E';e.currentTarget.style.background='#fdf5f5';}}
+                        onMouseOut={e=>{e.currentTarget.style.borderColor='#e5e7eb';e.currentTarget.style.background='none';}}>
+                        <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{label}</div>
+                        <div style={{fontSize:11,color:'#6b7280'}}>{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={()=>setInspWizard('ask_harvest')}
+                    style={{background:'none',border:'none',color:'#9ca3af',fontSize:12,
+                      cursor:'pointer',fontFamily:'inherit',textDecoration:'underline'}}>
+                    ← Back
+                  </button>
+                </div>
+              )}
             </div>
-            <button onClick={keepLastInspection}
-              style={{background:'white',border:'1.5px solid #d1a000',borderRadius:7,padding:'7px 16px',
-                fontWeight:700,fontSize:'.82rem',cursor:'pointer',color:'#7a5a00',fontFamily:'inherit'}}>
-              Keep Last Inspection
-            </button>
-            <button onClick={loadFromBudget}
-              style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 16px',
-                fontWeight:700,fontSize:'.82rem',cursor:'pointer',fontFamily:'inherit'}}>
-              {isPost ? 'Start Fresh (Post-Harvest)' : 'Load from Budget'}
-            </button>
           </div>
         )}
         {/* Header info */}
