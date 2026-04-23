@@ -2427,6 +2427,10 @@ export default function BalanceSheet() {
   const [availableEntities, setAvailableEntities] = useState([]);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]);
   const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
+  const [taxReconData, setTaxReconData] = useState(null);
+  const [taxReconLoading, setTaxReconLoading] = useState(false);
+  const [taxReconError, setTaxReconError] = useState("");
+  const [taxDragOver, setTaxDragOver] = useState(false);
   const [showInspHistory, setShowInspHistory] = useState(false);
   const [commodityPrices, setCommodityPrices] = useState(() => loadCommodityPrices());
   const [showPriceList, setShowPriceList] = useState(false);
@@ -3386,6 +3390,122 @@ export default function BalanceSheet() {
     const updated = commodityPrices.map(p => p.id === id ? {...p, [field]: value} : p);
     setCommodityPrices(updated);
     saveCommodityPrices(updated);
+  };
+
+  // ── Tax Reconciliation ───────────────────────────────────────────────────────
+  const processTaxPDF = async (file) => {
+    setTaxReconLoading(true);
+    setTaxReconError("");
+    setTaxReconData(null);
+    try {
+      // Convert PDF to base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Build balance sheet snapshot for comparison
+      const bsSnap = {
+        totalAssets, totalLTAssets, totalCurrentAssets,
+        totalLiabilities: n(data.operatingNotes?.reduce((s,r)=>s+n(r.balance),0)||0) +
+          data.intermediatDebt?.reduce((s,r)=>s+n(r.principal),0) +
+          data.reMortgages?.reduce((s,r)=>s+n(r.principal),0),
+        netWorth: totalAssets - (n(data.operatingNotes?.reduce((s,r)=>s+n(r.balance),0)||0) +
+          (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0) +
+          (data.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)),
+        budgetTotalIncome,
+        budgetTotalExpenses,
+        budgetNetIncome: budgetTotalIncome - budgetTotalExpenses,
+        machineryVal: machVal,
+        realEstateVal: reTotal,
+      };
+
+      const prompt = `You are an agricultural loan officer analyzing a tax return for reconciliation against a balance sheet.
+
+Extract all key financial figures from this tax return and return ONLY valid JSON (no markdown, no explanation).
+
+Balance sheet figures for comparison:
+- Total Assets: $${Math.round(bsSnap.totalAssets).toLocaleString()}
+- Total Liabilities: $${Math.round(bsSnap.totalLiabilities).toLocaleString()}
+- Net Worth: $${Math.round(bsSnap.netWorth).toLocaleString()}
+- Budget Income: $${Math.round(bsSnap.budgetTotalIncome).toLocaleString()}
+- Budget Expenses: $${Math.round(bsSnap.budgetTotalExpenses).toLocaleString()}
+- Budget Net Income: $${Math.round(bsSnap.budgetNetIncome).toLocaleString()}
+- Machinery/Equipment: $${Math.round(bsSnap.machineryVal).toLocaleString()}
+- Real Estate: $${Math.round(bsSnap.realEstateVal).toLocaleString()}
+
+Return this exact JSON structure:
+{
+  "formType": "1040 Schedule F" or "1065" or "1120S" etc,
+  "taxYear": 2024,
+  "taxpayerName": "name from return",
+  "ein": "EIN if found",
+  "fields": [
+    {"label": "Gross Farm Income", "value": 0},
+    {"label": "Total Farm Expenses", "value": 0},
+    {"label": "Net Farm Profit/Loss", "value": 0},
+    {"label": "Interest Expense", "value": 0},
+    {"label": "Depreciation", "value": 0},
+    {"label": "Total Gross Income", "value": 0},
+    {"label": "Adjusted Gross Income", "value": 0}
+  ],
+  "reconciliation": [
+    {
+      "label": "Farm Income",
+      "bsValue": ${Math.round(bsSnap.budgetTotalIncome)},
+      "taxValue": 0,
+      "flag": "ok|medium|high",
+      "note": "brief note"
+    },
+    {
+      "label": "Net Farm Income",
+      "bsValue": ${Math.round(bsSnap.budgetNetIncome)},
+      "taxValue": 0,
+      "flag": "ok|medium|high",
+      "note": ""
+    },
+    {
+      "label": "Implied Debt (from interest ÷ 6%)",
+      "bsValue": ${Math.round(bsSnap.totalLiabilities)},
+      "taxValue": null,
+      "flag": "ok",
+      "note": "calculate as interest expense / 0.06 for comparison"
+    }
+  ],
+  "commentary": "2-4 sentence plain-English summary for the loan officer noting any significant discrepancies between the tax return and the balance sheet, and what they might mean. Focus on income verification, debt coverage, and any red flags."
+}
+
+Flag rules: "high" if variance >25% or >$50,000, "medium" if variance 10-25%, "ok" otherwise.
+Fill in all taxValue fields from the actual tax return. Use null if a figure cannot be found.`;
+
+      const resp = await fetch("/.netlify/functions/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 2000,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+              { type: "text", text: prompt }
+            ]
+          }]
+        })
+      });
+
+      if (!resp.ok) throw new Error("API error: " + resp.status);
+      const json = await resp.json();
+      const text = json.content?.filter(b=>b.type==="text").map(b=>b.text).join("") || "";
+      const clean = text.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+      setTaxReconData(parsed);
+    } catch(e) {
+      setTaxReconError("Error processing PDF: " + e.message + ". Make sure it is a readable (not scanned image) PDF.");
+    }
+    setTaxReconLoading(false);
   };
 
   const loadCorpPersonalDebt = async () => {
@@ -4917,6 +5037,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
           Year Comparison
         </button>
+        <button className={"tab-btn" + (activeTab === "taxrecon" ? " tab-active" : "")}
+          onClick={()=>setActiveTab("taxrecon")}>
+          Tax Reconciliation
+        </button>
         <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
           onClick={()=>setActiveTab("inspection")}>
           Ag Inspection{hasCustomerResponse ? " 📬" : ""}
@@ -5158,6 +5282,158 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               BOLD_ROWS={BOLD_ROWS}
             />
           </div>
+        </div>
+      )}
+
+      {activeTab === "taxrecon" && (
+        <div style={{maxWidth:900,margin:"0 auto",padding:20}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
+            <div>
+              <div style={{fontWeight:800,fontSize:18,color:"#1a1a1a"}}>Tax Return Reconciliation</div>
+              <div style={{fontSize:".82rem",color:"#888",marginTop:2}}>
+                {data.clientName} — Compare tax return figures against the balance sheet
+              </div>
+            </div>
+            {taxReconData && (
+              <button onClick={()=>{setTaxReconData(null);setTaxReconError("");}}
+                className="btn btn-secondary" style={{fontSize:".82rem"}}>
+                Clear / Upload New
+              </button>
+            )}
+          </div>
+
+          {/* Drop zone */}
+          {!taxReconData && !taxReconLoading && (
+            <div
+              onDragOver={e=>{e.preventDefault();setTaxDragOver(true);}}
+              onDragLeave={()=>setTaxDragOver(false)}
+              onDrop={async e=>{
+                e.preventDefault(); setTaxDragOver(false);
+                const file = e.dataTransfer.files[0];
+                if (file && file.type==="application/pdf") processTaxPDF(file);
+                else setTaxReconError("Please drop a PDF file.");
+              }}
+              style={{border:`2.5px dashed ${taxDragOver?"#6B0E1E":"#c0c0c0"}`,
+                borderRadius:12,padding:48,textAlign:"center",cursor:"pointer",
+                background:taxDragOver?"#fdf5f5":"#fafafa",transition:"all .2s"}}
+              onClick={()=>document.getElementById("tax-pdf-input").click()}>
+              <div style={{fontSize:"3rem",marginBottom:12}}>📄</div>
+              <div style={{fontWeight:700,fontSize:"1.1rem",color:"#1a1a1a",marginBottom:6}}>
+                Drop Tax Return PDF Here
+              </div>
+              <div style={{fontSize:".85rem",color:"#888",marginBottom:16}}>
+                Supports 1040 Schedule F, 1065 Partnership, 1120S S-Corp, or any farm tax return
+              </div>
+              <button className="btn btn-primary" style={{pointerEvents:"none"}}>
+                Browse PDF
+              </button>
+              <input id="tax-pdf-input" type="file" accept="application/pdf"
+                style={{display:"none"}}
+                onChange={e=>{
+                  const file = e.target.files[0];
+                  if (file) processTaxPDF(file);
+                  e.target.value="";
+                }} />
+            </div>
+          )}
+
+          {/* Loading */}
+          {taxReconLoading && (
+            <div style={{textAlign:"center",padding:60}}>
+              <div style={{fontSize:"2rem",marginBottom:12}}>🤖</div>
+              <div style={{fontWeight:700,color:"#6B0E1E",marginBottom:6}}>Analyzing tax return...</div>
+              <div style={{fontSize:".82rem",color:"#888"}}>AI is extracting figures from the PDF</div>
+            </div>
+          )}
+
+          {/* Error */}
+          {taxReconError && !taxReconLoading && (
+            <div style={{background:"#fce8e8",border:"1px solid #f0c0c0",borderRadius:8,padding:16,color:"#7a1a1a",fontSize:".9rem"}}>
+              ⚠️ {taxReconError}
+            </div>
+          )}
+
+          {/* Results */}
+          {taxReconData && !taxReconLoading && (
+            <div>
+              {/* Tax return summary */}
+              <div style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,padding:20,marginBottom:20}}>
+                <div style={{fontWeight:700,fontSize:"1rem",color:"#1a1a1a",marginBottom:4}}>
+                  📋 {taxReconData.formType} — Tax Year {taxReconData.taxYear}
+                </div>
+                <div style={{fontSize:".78rem",color:"#888",marginBottom:16}}>
+                  {taxReconData.taxpayerName && `Taxpayer: ${taxReconData.taxpayerName}`}
+                  {taxReconData.ein && ` · EIN: ${taxReconData.ein}`}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
+                  {taxReconData.fields.map((f,i)=>(
+                    <div key={i} style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px"}}>
+                      <div style={{fontSize:".72rem",fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:".05em",marginBottom:3}}>{f.label}</div>
+                      <div style={{fontWeight:700,fontSize:"1rem",color:f.value<0?"#c44":"#1a1a1a"}}>{typeof f.value==="number" ? fmt(f.value) : f.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reconciliation table */}
+              <div style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden",marginBottom:20}}>
+                <div style={{background:"#1a1a1a",color:"white",padding:"12px 20px",fontWeight:700,fontSize:".9rem"}}>
+                  Balance Sheet vs. Tax Return — Reconciliation
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:".88rem"}}>
+                  <thead>
+                    <tr style={{background:"#f5f5f5"}}>
+                      <th style={{padding:"10px 16px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Item</th>
+                      <th style={{padding:"10px 16px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Balance Sheet</th>
+                      <th style={{padding:"10px 16px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Tax Return</th>
+                      <th style={{padding:"10px 16px",textAlign:"center",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Variance</th>
+                      <th style={{padding:"10px 16px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Flag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taxReconData.reconciliation.map((row,i)=>{
+                      const variance = row.taxValue !== null && row.bsValue !== null ? row.taxValue - row.bsValue : null;
+                      const pct = row.bsValue && row.bsValue !== 0 ? Math.abs(variance/row.bsValue*100) : null;
+                      const flagColor = row.flag==="high" ? "#dc2626" : row.flag==="medium" ? "#d97706" : "#16a34a";
+                      const flagBg = row.flag==="high" ? "#fef2f2" : row.flag==="medium" ? "#fffbeb" : "#f0fdf4";
+                      return (
+                        <tr key={i} style={{borderTop:"1px solid #f0f0f0",background:i%2===0?"white":"#fafafa"}}>
+                          <td style={{padding:"10px 16px",fontWeight:600}}>{row.label}</td>
+                          <td style={{padding:"10px 16px",textAlign:"right",color:"#555"}}>{row.bsValue!==null ? fmt(row.bsValue) : "—"}</td>
+                          <td style={{padding:"10px 16px",textAlign:"right",color:"#555"}}>{row.taxValue!==null ? fmt(row.taxValue) : "—"}</td>
+                          <td style={{padding:"10px 16px",textAlign:"center"}}>
+                            {variance!==null ? (
+                              <span style={{fontWeight:700,color:Math.abs(variance)<1000?"#16a34a":variance>0?"#2d5a8e":"#c44"}}>
+                                {variance>0?"+":""}{fmt(variance)}
+                                {pct!==null && <span style={{fontSize:".72rem",marginLeft:4,color:"#888"}}>({pct.toFixed(0)}%)</span>}
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td style={{padding:"10px 16px"}}>
+                            {row.flag && row.flag !== "ok" && (
+                              <span style={{fontSize:".75rem",fontWeight:700,color:flagColor,background:flagBg,padding:"2px 8px",borderRadius:10}}>
+                                {row.flag==="high" ? "⚠️ Review" : "ℹ️ Note"}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* AI Commentary */}
+              {taxReconData.commentary && (
+                <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,padding:20}}>
+                  <div style={{fontWeight:700,fontSize:".9rem",color:"#2d5a8e",marginBottom:10}}>🤖 AI Analysis</div>
+                  <div style={{fontSize:".88rem",color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
+                    {taxReconData.commentary}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
