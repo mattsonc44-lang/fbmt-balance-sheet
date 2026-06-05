@@ -1649,6 +1649,35 @@ async function supaLogout() {
   try { localStorage.removeItem('fbmt_session'); } catch {}
 }
 
+function isTokenExpired() {
+  if (!currentSession?.access_token) return true;
+  try {
+    const payload = JSON.parse(atob(currentSession.access_token.split('.')[1]));
+    // Expired or expiring in next 60 seconds
+    return !payload.exp || (payload.exp * 1000 < Date.now() + 60000);
+  } catch { return false; } // non-JWT key format — assume still valid
+}
+
+async function refreshSession() {
+  if (!currentSession?.refresh_token) return null;
+  try {
+    const resp = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: currentSession.refresh_token }),
+    });
+    if (!resp.ok) {
+      currentSession = null;
+      try { localStorage.removeItem('fbmt_session'); } catch {}
+      return null;
+    }
+    const data = await resp.json();
+    currentSession = data;
+    try { localStorage.setItem('fbmt_session', JSON.stringify(data)); } catch {}
+    return data;
+  } catch { return null; }
+}
+
 async function supaGetProfile() {
   if (!currentSession?.access_token) return null;
   const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*&id=eq.' + currentSession.user.id, { headers: supaHeaders() });
@@ -1801,6 +1830,25 @@ export default function BalanceSheet() {
   useEffect(() => {
     if (session?.access_token) supaGetProfile().then(p => setProfile(p)).catch(() => {});
   }, [session?.access_token]);
+
+  // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
+  useEffect(() => {
+    if (!session) return;
+    const doRefresh = async () => {
+      if (isTokenExpired()) {
+        const newSession = await refreshSession();
+        if (newSession) setSession({ ...newSession });
+        else { setSession(null); setProfile(null); }
+      }
+    };
+    doRefresh(); // check immediately on mount
+    const interval = setInterval(async () => {
+      const newSession = await refreshSession();
+      if (newSession) setSession({ ...newSession });
+      else { setSession(null); setProfile(null); }
+    }, 50 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [!!session]);
 
   // Auto-check for customer response when a sheet with a shareId is open
   useEffect(() => {
