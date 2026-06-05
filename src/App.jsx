@@ -281,48 +281,6 @@ const fmt = (v) => v === "" || v === null || v === undefined
   : "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 const numVal = (v) => Number((v || "").toString().replace(/[^0-9.-]/g, "")) || 0;
 
-
-const DEFAULT_COMMODITY_PRICES = [
-  // CROPS
-  {category:"Crops", name:"Winter Wheat", price:"5", unit:"bu"},
-  {category:"Crops", name:"Spring Wheat", price:"5.5", unit:"bu"},
-  {category:"Crops", name:"Durum", price:"6", unit:"bu"},
-  {category:"Crops", name:"Barley (Feed)", price:"3", unit:"bu"},
-  {category:"Crops", name:"Malt Barley", price:"5.5", unit:"bu"},
-  {category:"Crops", name:"Organic Winter Wheat", price:"8", unit:"bu"},
-  {category:"Crops", name:"Organic Spring Wheat", price:"10", unit:"bu"},
-  {category:"Crops", name:"Chickpeas", price:"18", unit:"bu"},
-  {category:"Crops", name:"Lentils", price:"16.8", unit:"bu"},
-  {category:"Crops", name:"Canola", price:"10", unit:"bu"},
-  {category:"Crops", name:"Yellow Peas", price:"6.5", unit:"bu"},
-  {category:"Crops", name:"Green Peas", price:"9", unit:"bu"},
-  {category:"Crops", name:"Hay", price:"125", unit:"ton"},
-  {category:"Crops", name:"Straw", price:"40", unit:"ton"},
-  // LIVESTOCK
-  {category:"Livestock", name:"Steers under 600#", price:"3.6", unit:"lb"},
-  {category:"Livestock", name:"Heifers under 600#", price:"3.4", unit:"lb"},
-  {category:"Livestock", name:"900# Steers", price:"3", unit:"lb"},
-  {category:"Livestock", name:"800# Steers", price:"3.1", unit:"lb"},
-  {category:"Livestock", name:"900# Heifers", price:"2.9", unit:"lb"},
-  {category:"Livestock", name:"800# Heifers", price:"3", unit:"lb"},
-  {category:"Livestock", name:"Bred Heifers", price:"3000", unit:"hd"},
-  {category:"Livestock", name:"Bred Cows", price:"2500", unit:"hd"},
-  {category:"Livestock", name:"Cull Cows", price:"1.4", unit:"lb"},
-  {category:"Livestock", name:"Bulls", price:"1.75", unit:"lb"},
-  {category:"Livestock", name:"Lambs - Fats", price:"1.5", unit:"lb"},
-];
-
-function loadCommodityPrices() {
-  try {
-    const stored = localStorage.getItem("fbmt_commodityPrices");
-    if (stored) return JSON.parse(stored);
-  } catch {}
-  return DEFAULT_COMMODITY_PRICES.map((p,i) => ({...p, id:i}));
-}
-function saveCommodityPrices(prices) {
-  try { localStorage.setItem("fbmt_commodityPrices", JSON.stringify(prices)); } catch {}
-}
-
 const STORAGE_PREFIX = "fbmt_bs:";
 
 const STEPS = [
@@ -377,21 +335,6 @@ function emptyData() {
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
-    // Ag Inspection fields
-    inspDate: new Date().toISOString().split('T')[0],
-    inspInspector: "",
-    inspHarvestType: "pre",  // "pre" or "post"
-    inspCattleType: "pre",   // "pre" or "post" calving
-    inspLoans: ["","",""],
-    inspCrops: [],
-    inspLivestock: [],
-    inspShareId: "",
-    inspInventory: [],
-    inspPastureCond:"", inspPastureCmt:"",
-    inspWaterCond:"", inspWaterCmt:"",
-    inspEquipCond:"", inspEquipCmt:"",
-    inspEnvCmt:"", inspAddlCmt:"",
-    inspPhotos: [],
   };
 }
 
@@ -451,98 +394,6 @@ function RunningTotal({ assets, liabilities }) {
 
 
 // ─── BudgetView ───────────────────────────────────────────────────────────────
-
-// ── Commodity dropdown with keyboard navigation ───────────────────────────────
-function CommodityDropdown({ value, onChange, commodityPrices, category, placeholder }) {
-  const [open, setOpen] = React.useState(false);
-  const [highlight, setHighlight] = React.useState(0);
-  const [query, setQuery] = React.useState(value || "");
-  const ref = React.useRef(null);
-  const listRef = React.useRef(null);
-  const itemRefs = React.useRef([]);
-
-  // Sync query when value changes externally
-  React.useEffect(() => { setQuery(value || ""); }, [value]);
-
-  // Scroll highlighted item into view
-  React.useEffect(() => {
-    if (open && itemRefs.current[highlight]) {
-      itemRefs.current[highlight].scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
-  }, [highlight, open]);
-
-  // Close on outside click
-  React.useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const items = commodityPrices
-    .filter(p => !category || p.category === category)
-    .filter(p => p.name && (!query || p.name.toLowerCase().includes(query.toLowerCase())))
-    .sort((a,b) => a.name.localeCompare(b.name));
-
-  const select = (item) => {
-    onChange(item.name);
-    setQuery(item.name);
-    setOpen(false);
-    setHighlight(0);
-  };
-
-  const onKeyDown = (e) => {
-    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
-      setOpen(true); setHighlight(0); return;
-    }
-    if (!open) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); setHighlight(h => Math.min(h+1, items.length-1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight(h => Math.max(h-1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (items[highlight]) select(items[highlight]); }
-    else if (e.key === "Escape") { setOpen(false); }
-  };
-
-  return (
-    <div ref={ref} style={{position:"relative",flex:1}}>
-      <input
-        className="text-input"
-        type="text"
-        value={query}
-        placeholder={placeholder || "Type or select..."}
-        autoComplete="off"
-        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setHighlight(0); }}
-        onFocus={() => { setOpen(true); setHighlight(0); }}
-        onKeyDown={onKeyDown}
-        style={{width:"100%",paddingRight:22}}
-      />
-      <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
-        fontSize:9,color:"#aaa",pointerEvents:"none",lineHeight:1}}>▼</span>
-      {open && items.length > 0 && (
-        <div ref={listRef} style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
-          border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
-          zIndex:999,maxHeight:200,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
-          {items.map((item,idx) => (
-            <div key={item.id}
-              ref={el => itemRefs.current[idx] = el}
-              onMouseDown={() => select(item)}
-              onMouseEnter={() => setHighlight(idx)}
-              style={{padding:"7px 12px",cursor:"pointer",fontSize:".85rem",
-                background: idx === highlight ? "#f5e8ea" : "white",
-                color: idx === highlight ? "#6B0E1E" : "#1a1a1a",
-                fontWeight: idx === highlight ? 600 : 400,
-                display:"flex",justifyContent:"space-between",alignItems:"center",
-                borderBottom:"1px solid #f5f5f5"}}>
-              <span>{item.name}</span>
-              <span style={{fontSize:".75rem",color:"#888",marginLeft:8}}>
-                ${item.price}/{item.unit}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function BudgetView({
   data, budgetCropTotal, budgetLivestockTotal, budgetMiscTotal,
   budgetTotalIncome, budgetOperatingExpenses,
@@ -552,7 +403,7 @@ function BudgetView({
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
-  setArr, removeRow, addRow, lookupPrice, commodityPrices
+  setArr, removeRow, addRow
 }) {
   return (
     <div className="budget-wrap">
@@ -577,9 +428,7 @@ function BudgetView({
           </div>
           {data.budgetCrops.map((r, i) => {
             const share = numVal(r.share || "100");
-            const defaultPrice = !r.contracted ? lookupPrice(r.crop) : null;
-            const effectivePrice = r.contracted ? r.price : (defaultPrice || r.price);
-            const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(effectivePrice) * (share / 100);
+            const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(r.price) * (share / 100);
             return (
               <div key={i} className="bg-row" data-rowkey={`budgetCrops-${i}`}>
                 <span className="row-num">{i+1}</span>
@@ -589,14 +438,10 @@ function BudgetView({
                       onChange={e => setArr("budgetCrops",i,"acres",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
-                <div className="input-group" style={{flex:1,position:"relative"}}>
-                  <CommodityDropdown
-                    value={r.crop}
-                    onChange={v => setArr("budgetCrops",i,"crop",v)}
-                    commodityPrices={commodityPrices}
-                    category="Crops"
-                    placeholder="Type or select crop..."
-                  />
+                <div className="input-group" style={{flex:1}}>
+                  <input className="text-input" type="text" value={r.crop}
+                    placeholder="e.g., winter wheat"
+                    onChange={e => setArr("budgetCrops",i,"crop",e.target.value)} />
                 </div>
                 <div className="input-group" style={{width:90,flexShrink:0}}>
                   <div className="input-wrap">
@@ -611,33 +456,12 @@ function BudgetView({
                     <option>ton</option><option>cwt</option><option>bale</option>
                   </select>
                 </div>
-                {/* Contracted checkbox BEFORE price */}
-                <div style={{width:90,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
-                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
-                    tabIndex={0}
-                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
-                    style={{width:15,height:15,accentColor:"#6B0E1E",cursor:"pointer"}} />
-                  <label htmlFor={"bc-con-"+i} style={{fontSize:".72rem",color:"#6B0E1E",cursor:"pointer",fontWeight:r.contracted?700:400}}>
-                    {r.contracted ? "Contracted" : "Contract?"}
-                  </label>
-                </div>
-                {/* Price — locked to commodity list unless contracted */}
-                <div className="input-group" style={{width:105,flexShrink:0}}>
-                  <div className="input-wrap" title={!r.contracted&&defaultPrice ? "Price locked to commodity list. Check 'Contracted' to override." : ""}>
+                <div className="input-group" style={{width:100,flexShrink:0}}>
+                  <div className="input-wrap">
                     <span className="prefix">$</span>
-                    {r.contracted ? (
-                      <input type="text" value={r.price} placeholder="0.00"
-                        onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
-                    ) : (
-                      <input type="text" value={defaultPrice || r.price} placeholder="0.00"
-                        readOnly={!!defaultPrice}
-                        style={{background:defaultPrice?"#f5f5f5":undefined, color:defaultPrice?"#555":undefined, cursor:defaultPrice?"not-allowed":"text"}}
-                        onChange={e => !defaultPrice && setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
-                    )}
+                    <input type="text" value={r.price} placeholder="0.00"
+                      onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
-                  {!r.contracted && defaultPrice && (
-                    <div style={{fontSize:".65rem",color:"#888",textAlign:"center",marginTop:1}}>list price</div>
-                  )}
                 </div>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
                   <div className="input-wrap">
@@ -645,6 +469,14 @@ function BudgetView({
                       onChange={e => setArr("budgetCrops",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
+                </div>
+                <div style={{width:85,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
+                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
+                    style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
+                  <label htmlFor={"bc-con-"+i} style={{fontSize:".75rem",color:"#555",cursor:"pointer"}}>
+                    {r.contracted ? "Yes" : ""}
+                  </label>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
@@ -671,9 +503,7 @@ function BudgetView({
             <span style={{width:32}}></span>
           </div>
           {data.budgetLivestock.map((r, i) => {
-            const defaultPrice = lookupPrice(r.type);
-            const effectivePrice = defaultPrice || r.price;
-            const rv = numVal(r.head) * numVal(r.lbs) * numVal(effectivePrice);
+            const rv = numVal(r.head) * numVal(r.lbs) * numVal(r.price);
             return (
               <div key={i} className="bg-row" data-rowkey={`budgetLivestock-${i}`}>
                 <span className="row-num">{i+1}</span>
@@ -695,14 +525,11 @@ function BudgetView({
                   </div>
                 </div>
                 <div className="input-group" style={{width:110,flexShrink:0}}>
-                  <div className="input-wrap" title={defaultPrice ? "Price locked to commodity list" : ""}>
+                  <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={effectivePrice} placeholder="0.00"
-                      readOnly={!!defaultPrice}
-                      style={{background:defaultPrice?"#f5f5f5":undefined,color:defaultPrice?"#555":undefined,cursor:defaultPrice?"not-allowed":"text"}}
-                      onChange={e => !defaultPrice && setArr("budgetLivestock",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <input type="text" value={r.price} placeholder="0.00"
+                      onChange={e => setArr("budgetLivestock",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
-                  {defaultPrice && <div style={{fontSize:".65rem",color:"#888",textAlign:"center",marginTop:1}}>list price</div>}
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetLivestock",i)}>x</button>
@@ -1044,1269 +871,50 @@ function ComparisonView({
 }
 
 
-// ── Ag Inspection Tab ─────────────────────────────────────────────────────────
-const INSP_CONDITIONS = ["Excellent","Good","Fair","Poor"];
-const INSP_WATER_COND  = ["Excess","Adequate","Limited"];
-const inspUid = () => Math.random().toString(36).slice(2,9);
-const INSP_SH   = '#1B4332';
-const INSP_TH   = '#2D6A4F';
-const INSP_GOLD = '#C8860A';
-
-const inspCondStyle = c => ({
-  Excellent:{color:'#15803d',bg:'#dcfce7',border:'#86efac'},
-  Good:     {color:'#1d4ed8',bg:'#dbeafe',border:'#93c5fd'},
-  Fair:     {color:'#92400e',bg:'#fef3c7',border:'#fcd34d'},
-  Poor:     {color:'#991b1b',bg:'#fee2e2',border:'#fca5a5'},
-  Excess:   {color:'#1d4ed8',bg:'#dbeafe',border:'#93c5fd'},
-  Adequate: {color:'#15803d',bg:'#dcfce7',border:'#86efac'},
-  Limited:  {color:'#991b1b',bg:'#fee2e2',border:'#fca5a5'},
-}[c] || {color:'#6b7280',bg:'#f3f4f6',border:'#d1d5db'});
-
-const inspFmt$ = v => { const n=parseFloat(v)||0; return n===0?'—':`$${n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`; };
-
-function InspCondPills({ value, onChange, options=INSP_CONDITIONS }) {
-  return (
-    <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
-      {options.map(o => {
-        const cs = inspCondStyle(o); const active = value===o;
-        return (
-          <button key={o} type="button" onClick={()=>onChange(active?'':o)} style={{
-            padding:'2px 9px',borderRadius:999,fontSize:11,fontWeight:700,cursor:'pointer',
-            transition:'all .15s',border:`1.5px solid ${active?cs.border:'#e5e7eb'}`,
-            background:active?cs.bg:'white',color:active?cs.color:'#9ca3af',lineHeight:1.6,
-          }}>{o}</button>
-        );
-      })}
-    </div>
-  );
-}
-
-const INSP_LBL = {fontSize:12,fontWeight:600,color:'#374151',marginBottom:4,display:'block',letterSpacing:.3};
-const INSP_TH_S = {background:INSP_TH,color:'white',padding:'6px 8px',fontSize:11,fontWeight:700,textAlign:'center',whiteSpace:'nowrap',letterSpacing:.3};
-const INSP_TD_S = {padding:'4px 6px',borderBottom:'1px solid #f0fdf4',verticalAlign:'middle'};
-
-function InspCard({ title, children }) {
-  return (
-    <div style={{marginBottom:20,borderRadius:6,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.1)',border:'1px solid #d1fae5'}}>
-      <div style={{background:INSP_SH,padding:'9px 16px'}}>
-        <span style={{color:'white',fontFamily:'inherit',fontWeight:700,fontSize:15,letterSpacing:.5}}>{title}</span>
-      </div>
-      <div style={{background:'white',padding:16}}>{children}</div>
-    </div>
-  );
-}
-
-function InspAddBtn({ label, onClick }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      marginTop:10,background:'#f0fdf4',color:INSP_TH,border:`1.5px dashed ${INSP_TH}`,
-      borderRadius:4,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600,
-    }}>{label}</button>
-  );
-}
-
-const inspInp = (val, onChange, ph='', type='text', extra={}) => (
-  <input type={type} value={val} placeholder={ph} onChange={e=>onChange(e.target.value)} style={{
-    border:'1px solid #d1d5db',borderRadius:4,padding:'4px 7px',fontSize:13,width:'100%',
-    fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'white',...extra,
-  }}/>
-);
-
-const inspTa = (val, onChange, ph, rows=3) => (
-  <textarea value={val} onChange={e=>onChange(e.target.value)} placeholder={ph} rows={rows} style={{
-    border:'1px solid #d1d5db',borderRadius:4,padding:'6px 8px',fontSize:13,width:'100%',
-    fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box',
-  }}/>
-);
-
-// Deviation helpers
-const devPct = (actual, budgeted) => {
-  if (!actual && actual !== 0) return null; // no actual value entered yet
-  const a = parseFloat(actual)||0, b = parseFloat(budgeted)||0;
-  if (!b) return null;
-  return ((a - b) / b) * 100;
-};
-const devStyle = pct => {
-  if (pct === null) return {};
-  const abs = Math.abs(pct);
-  if (abs >= 20) return {background:'#fef2f2',borderLeft:'4px solid #dc2626'};
-  if (abs >= 10) return {background:'#fffbeb',borderLeft:'4px solid #f59e0b'};
-  return {background:'#f0fdf4',borderLeft:'4px solid #22c55e'};
-};
-const devBadge = pct => {
-  if (pct === null || Math.abs(pct) < 0.5) return null;
-  const abs = Math.abs(pct); const pos = pct > 0;
-  const color = abs >= 20 ? '#dc2626' : abs >= 10 ? '#d97706' : '#16a34a';
-  return (
-    <span style={{fontSize:10,fontWeight:700,color,background:color+'18',padding:'1px 6px',borderRadius:999,whiteSpace:'nowrap'}}>
-      {pos?'+':''}{pct.toFixed(1)}%
-    </span>
-  );
-};
-
-function InspectionView({ data, setData }) {
-  const fileRef  = React.useRef(null);
-  const cameraRef = React.useRef(null);
-  const printRef = React.useRef(null);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [submitted, setSubmitted] = React.useState(false);
-  const [submitErr, setSubmitErr] = React.useState('');
-
-  // ── Inspection setup wizard ──────────────────────────────────────────────────
-  const hasPreviousInsp = !!(data.inspCrops && data.inspCrops.length > 0 &&
-    data.inspCrops.some(r => r.actualAcres || r.condition || r.budgetedCrop));
-  const [inspWizard, setInspWizard] = React.useState(
-    hasPreviousInsp ? 'ask_load' : 'ask_harvest'
-  );
-  // null = wizard done/dismissed
-
-  const isPost = (data.inspHarvestType||'pre') === 'post';
-
-  const blankCropRow = () => ({id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''});
-  const blankLSRow   = () => ({id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''});
-  const blankInvRow  = () => ({id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''});
-
-  const applyInspSetup = (harvestType, cattleType, loadBudget) => {
-    const isPostH = harvestType === 'post';
-    const isPostC = cattleType === 'post';
-    set('inspHarvestType', harvestType);
-    set('inspCattleType', cattleType);
-    const cropRows = (isPostH || !loadBudget)
-      ? [blankCropRow()]
-      : (data.budgetCrops||[]).filter(r=>r.crop||r.acres).map(r=>({
-          id:inspUid(), budgetedCrop:r.crop||'', budgetedAcres:r.acres||'',
-          budgetedYield:r.yieldPerAcre||'', budgetedUnit:r.unit||'bu',
-          budgetedPrice:r.price||'', location:'', condition:'',
-          actualAcres:'', actualYield:'', valuePerUnit:'',
-          deviationReason:'', substituted:false, substituteCrop:'',
-        })) || [blankCropRow()];
-    const lsRows = (isPostC || !loadBudget)
-      ? [blankLSRow()]
-      : (data.budgetLivestock||[]).filter(r=>r.type||r.head).map(r=>({
-          id:inspUid(), budgetedType:r.type||'', budgetedHead:r.head||'',
-          budgetedLbs:r.lbs||'', budgetedPrice:r.price||'',
-          location:'', condition:'', actualHead:'', estWeight:'', valuePerUnit:'',
-          deviationReason:'',
-        })) || [blankLSRow()];
-    setData(d=>({...d,
-      inspHarvestType: harvestType,
-      inspCattleType: cattleType,
-      inspCrops: cropRows.length > 0 ? cropRows : [blankCropRow()],
-      inspLivestock: lsRows.length > 0 ? lsRows : [blankLSRow()],
-      inspInventory: [blankInvRow()],
-      inspPastureCond:'', inspPastureCmt:'', inspWaterCond:'', inspWaterCmt:'',
-      inspEquipCond:'', inspEquipCmt:'', inspEnvCmt:'', inspAddlCmt:'',
-    }));
-    setInspWizard(null);
-  };
-
-  const set = (field, val) => setData(d=>({...d, [field]:val}));
-  const [showShareModal, setShowShareModal] = React.useState(false);
-  const [shareLink, setShareLink] = React.useState('');
-  const [sharePin, setSharePin] = React.useState('');
-  const [shareStatus, setShareStatus] = React.useState(''); // 'generating'|'ready'|'error'
-  const [checkingResponse, setCheckingResponse] = React.useState(false);
-  const [customerResponse, setCustomerResponse] = React.useState(null);
-  const setLoan = (i,v) => setData(d=>({...d, inspLoans: d.inspLoans.map((x,j)=>j===i?v:x)}));
-  const updCrop = (id,f,v) => setData(d=>({...d, inspCrops: d.inspCrops.map(r=>r.id===id?{...r,[f]:v}:r)}));
-  const updLS   = (id,f,v) => setData(d=>({...d, inspLivestock: d.inspLivestock.map(r=>r.id===id?{...r,[f]:v}:r)}));
-  const updInv  = (id,f,v) => setData(d=>({...d, inspInventory: d.inspInventory.map(r=>r.id===id?{...r,[f]:v}:r)}));
-
-  const generateShare = async () => {
-    setShareStatus('generating');
-    setShowShareModal(true);
-    try {
-      // Generate random share ID and PIN
-      const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
-      const pin = String(Math.floor(100000 + Math.random() * 900000));
-      const payload = {
-        share_id: shareId,
-        pin,
-        client_name: data.clientName,
-        as_of_date: data.asOfDate || data.inspDate || new Date().toISOString().slice(0,10),
-        insp_data: {
-          inspCrops: data.inspCrops || [],
-          inspLivestock: data.inspLivestock || [],
-          inspInventory: data.inspInventory || [],
-          inspPastureCond: data.inspPastureCond || "",
-          inspPastureCmt: data.inspPastureCmt || "",
-          inspWaterCond: data.inspWaterCond || "",
-          inspWaterCmt: data.inspWaterCmt || "",
-          inspEquipCond: data.inspEquipCond || "",
-          inspEquipCmt: data.inspEquipCmt || "",
-          inspEnvCmt: data.inspEnvCmt || "",
-          inspAddlCmt: data.inspAddlCmt || "",
-          clientName: data.clientName,
-          inspDate: data.inspDate,
-          inspHarvestType: data.inspHarvestType || 'pre',
-        },
-        response: null,
-      };
-      const resp = await fetch(SUPABASE_URL + '/rest/v1/inspection_shares', {
-        method: 'POST',
-        headers: { ...supaHeaders(), 'Prefer': 'return=representation' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      const origin = window.location.origin;
-      setShareLink(origin + '/inspect?id=' + shareId);
-      setSharePin(pin);
-      setShareStatus('ready');
-      // Save shareId to balance sheet data so we can check later
-      setData(d => ({...d, inspShareId: shareId}));
-      // Auto-save so inspShareId persists across page reloads
-      const saveKey = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + (data.asOfDate||new Date().toISOString().slice(0,10));
-      const savePayload = {...data, inspShareId: shareId, _savedAt: new Date().toISOString()};
-      storage.set(saveKey, JSON.stringify(savePayload)).catch(()=>{});
-    } catch(e) {
-      setShareStatus('error:' + e.message);
-    }
-  };
-
-  const checkCustomerResponse = async () => {
-    setCheckingResponse(true);
-    try {
-      const sid = data.inspShareId || (shareLink ? shareLink.split('id=')[1] : null);
-      if (!sid) {
-        alert('No share link found. Use "Share with Customer" first.');
-        setCheckingResponse(false);
-        return;
-      }
-      const resp = await fetch(
-        SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + sid + '&select=response,responded_at',
-        { headers: supaHeaders() }
-      );
-      const rows = await resp.json();
-      if (rows[0]?.response) {
-        const cr = rows[0].response;
-        setCustomerResponse(cr);
-        setData(d => ({
-          ...d,
-          inspCrops: (d.inspCrops||[]).map((r,i) => { const c = cr.crops?.[i]||{}; return {...r, actualAcres:c.actualAcres||r.actualAcres, condition:c.condition||r.condition, actualYield:c.actualYield||r.actualYield, location:c.location||r.location, deviationReason:c.deviationReason||r.deviationReason}; }),
-          inspLivestock: (d.inspLivestock||[]).map((r,i) => { const l = cr.livestock?.[i]||{}; return {...r, actualHead:l.actualHead||r.actualHead, condition:l.condition||r.condition, estWeight:l.estWeight||r.estWeight, deviationReason:l.deviationReason||r.deviationReason}; }),
-          inspInventory: cr.inventory?.length ? cr.inventory : d.inspInventory,
-          inspPastureCond: cr.pastureCond || d.inspPastureCond,
-          inspPastureCmt: cr.pastureCmt || d.inspPastureCmt,
-          inspWaterCond: cr.waterCond || d.inspWaterCond,
-          inspWaterCmt: cr.waterCmt || d.inspWaterCmt,
-          inspEquipCond: cr.equipCond || d.inspEquipCond,
-          inspEquipCmt: cr.equipCmt || d.inspEquipCmt,
-          inspEnvCmt: cr.envCmt || d.inspEnvCmt,
-          inspAddlCmt: cr.addlCmt || d.inspAddlCmt,
-        }));
-        alert('✅ Customer response loaded! Their answers have been filled in.');
-      } else {
-        alert('No response yet — the customer has not submitted the form.');
-      }
-    } catch(e) {
-      alert('Error: ' + e.message);
-    }
-    setCheckingResponse(false);
-  };
-
-  const addCrop = () => setData(d=>({...d, inspCrops:[...d.inspCrops,{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}]}));
-  const remCrop = id => setData(d=>({...d, inspCrops: d.inspCrops.filter(r=>r.id!==id)}));
-  const addLS   = () => setData(d=>({...d, inspLivestock:[...d.inspLivestock,{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}]}));
-  const remLS   = id => setData(d=>({...d, inspLivestock: d.inspLivestock.filter(r=>r.id!==id)}));
-  const addInv  = () => setData(d=>({...d, inspInventory:[...d.inspInventory,{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
-  const remInv  = id => setData(d=>({...d, inspInventory: d.inspInventory.filter(r=>r.id!==id)}));
-
-  const handleFiles = e => {
-    Array.from(e.target.files).forEach(f => {
-      const r = new FileReader();
-      r.onload = ev => setData(d=>({...d, inspPhotos:[...(d.inspPhotos||[]),{id:inspUid(),src:ev.target.result,label:'',ts:new Date().toLocaleString()}]}));
-      r.readAsDataURL(f);
-    });
-    e.target.value='';
-  };
-
-  const cropRowTot = r => (parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
-  const lsRowTot   = r => {
-    const head  = parseFloat(r.actualHead||r.budgetedHead||0);
-    const lbs   = parseFloat(r.estWeight||r.budgetedLbs||0);
-    const price = parseFloat(r.valuePerUnit||r.budgetedPrice||0);
-    // If weight is entered, calc = head × lbs × price/lb
-    // If no weight (flat price per head), calc = head × price
-    return lbs > 0 ? head * lbs * price : head * price;
-  };
-  const invRowTot  = r => (parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
-  const cropTot = (data.inspCrops||[]).reduce((s,r)=>s+cropRowTot(r),0);
-  const lsTot   = (data.inspLivestock||[]).reduce((s,r)=>s+lsRowTot(r),0);
-  const invTot  = (data.inspInventory||[]).reduce((s,r)=>s+invRowTot(r),0);
-  const grand   = cropTot + lsTot + invTot;
-
-  const handlePDF = () => {
-    const W = window.open('','_blank','width=900,height=1100');
-    if (!W) return;
-    const pFmt = v => { const n = parseFloat(v)||0; return n > 0 ? '$'+Math.round(n).toLocaleString() : '—'; };
-    const pct  = (a,b) => { const av=parseFloat(a)||0,bv=parseFloat(b)||0; if(!bv)return null; return((av-bv)/bv)*100; };
-    const badgeColor = p => p===null?'#6b7280':Math.abs(p)>=20?'#dc2626':Math.abs(p)>=10?'#d97706':'#16a34a';
-    const badgeBg    = p => p===null?'#f3f4f6':Math.abs(p)>=20?'#fef2f2':Math.abs(p)>=10?'#fffbeb':'#f0fdf4';
-    const rowBorderColor = p => p===null?'transparent':Math.abs(p)>=20?'#dc2626':Math.abs(p)>=10?'#f59e0b':'#22c55e';
-
-    // Build crop rows
-    const cropRows = (data.inspCrops||[]).filter(r=>r.budgetedCrop).map((r,i)=>{
-      const p = pct(r.actualAcres,r.budgetedAcres);
-      const tot = (parseFloat(r.actualAcres||r.budgetedAcres)||0)*(parseFloat(r.actualYield||r.budgetedYield)||0)*(parseFloat(r.budgetedPrice)||0);
-      const bg = i%2===0?'white':'#f9fafb';
-      const devHtml = r.actualAcres&&r.budgetedAcres && p!==null
-        ? `<span style="font-size:10px;font-weight:700;color:${badgeColor(p)};background:${badgeBg(p)};padding:1px 6px;border-radius:999px">${p>0?'+':''}${p.toFixed(1)}%</span><br/><span style="font-size:10px;color:#6b7280">${(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}${(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac</span>`
-        : '—';
-      const reasonRow = r.actualAcres&&p!==null&&Math.abs(p)>=20
-        ? `<tr style="background:#fef2f2"><td colspan="9" style="padding:5px 10px 7px 28px;font-size:11px;color:#dc2626;border-bottom:1px solid #f0f0f0"><strong>Deviation reason:</strong> ${r.deviationReason||'<em style="color:#aaa">not provided</em>'}</td></tr>`
-        : '';
-      return `<tr style="background:${bg};border-left:3px solid ${p!==null&&r.actualAcres?rowBorderColor(p):'transparent'}">
-        <td style="padding:7px 10px;font-weight:600;font-size:12px">${r.budgetedCrop}</td>
-        <td style="padding:7px 10px;text-align:center;background:#f8f6f2;font-size:12px;color:#6b7280">${r.budgetedAcres||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px;font-weight:${r.actualAcres?700:400};color:${r.actualAcres?'#1a1a1a':'#9ca3af'}">${r.actualAcres||'—'}</td>
-        <td style="padding:7px 10px;text-align:center">${devHtml}</td>
-        <td style="padding:7px 10px;font-size:12px">${r.location||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.condition||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.actualYield||r.budgetedYield||'—'} ${r.budgetedUnit||'bu'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px;background:#f8f6f2;color:#6b7280">$${r.budgetedPrice||'—'}</td>
-        <td style="padding:7px 10px;text-align:right;font-weight:700;font-size:12px;color:#15803d">${tot>0?'$'+Math.round(tot).toLocaleString():'—'}</td>
-      </tr>${reasonRow}`;
-    }).join('');
-    const cropTotal = (data.inspCrops||[]).reduce((s,r)=>s+(parseFloat(r.actualAcres||r.budgetedAcres)||0)*(parseFloat(r.actualYield||r.budgetedYield)||0)*(parseFloat(r.budgetedPrice)||0),0);
-
-    // Build livestock rows
-    const lsRows = (data.inspLivestock||[]).filter(r=>r.budgetedType).map((r,i)=>{
-      const p = pct(r.actualHead,r.budgetedHead);
-      const bg = i%2===0?'white':'#f9fafb';
-      const devHtml = r.actualHead&&r.budgetedHead&&p!==null
-        ? `<span style="font-size:10px;font-weight:700;color:${badgeColor(p)};background:${badgeBg(p)};padding:1px 6px;border-radius:999px">${p>0?'+':''}${p.toFixed(1)}%</span>`
-        : '—';
-      const reasonRow = r.actualHead&&p!==null&&Math.abs(p)>=20
-        ? `<tr style="background:#fef2f2"><td colspan="6" style="padding:5px 10px 7px 28px;font-size:11px;color:#dc2626"><strong>Deviation reason:</strong> ${r.deviationReason||'<em style="color:#aaa">not provided</em>'}</td></tr>`
-        : '';
-      return `<tr style="background:${bg};border-left:3px solid ${p!==null&&r.actualHead?rowBorderColor(p):'transparent'}">
-        <td style="padding:7px 10px;font-weight:600;font-size:12px">${r.budgetedType}</td>
-        <td style="padding:7px 10px;text-align:center;background:#f8f6f2;font-size:12px;color:#6b7280">${r.budgetedHead||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px;font-weight:${r.actualHead?700:400}">${r.actualHead||'—'}</td>
-        <td style="padding:7px 10px;text-align:center">${devHtml}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.condition||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.estWeight?r.estWeight+' lbs':'—'}</td>
-      </tr>${reasonRow}`;
-    }).join('');
-
-    // Build inventory rows
-    const invRowsHtml = (data.inspInventory||[]).filter(r=>r.description||r.quantity).map((r,i)=>{
-      const tot=(parseFloat(r.quantity)||0)*(parseFloat(r.valuePerUnit)||0);
-      return `<tr style="background:${i%2===0?'white':'#f0fdf4'}">
-        <td style="padding:7px 10px;font-size:12px">${r.description||'—'}</td>
-        <td style="padding:7px 10px;font-size:12px">${r.location||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;font-size:12px">${r.condition||'—'}</td>
-        <td style="padding:7px 10px;text-align:right;font-size:12px">${r.quantity||'—'} ${r.unitType||'bu'}</td>
-        <td style="padding:7px 10px;text-align:right;font-size:12px">$${r.valuePerUnit||'—'}</td>
-        <td style="padding:7px 10px;text-align:right;font-weight:700;font-size:12px;color:#15803d">${tot>0?'$'+Math.round(tot).toLocaleString():'—'}</td>
-      </tr>`;
-    }).join('');
-    const invTotal=(data.inspInventory||[]).reduce((s,r)=>s+(parseFloat(r.quantity)||0)*(parseFloat(r.valuePerUnit)||0),0);
-
-    const condBlock = (label,cond,cmt) => cond||cmt ? `
-      <tr style="border-bottom:1px solid #e5e7eb">
-        <td style="padding:9px 14px;font-weight:700;font-size:12px;white-space:nowrap;width:180px">${label}</td>
-        <td style="padding:9px 14px"><span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${cond==='Excellent'||cond==='Adequate'?'#dcfce7':cond==='Good'?'#dbeafe':cond==='Fair'||cond==='Limited'?'#fef9c3':cond==='Poor'?'#fee2e2':'#f3f4f6'};color:${cond==='Excellent'||cond==='Adequate'?'#15803d':cond==='Good'?'#1d4ed8':cond==='Fair'||cond==='Limited'?'#92400e':cond==='Poor'?'#b91c1c':'#6b7280'}">${cond||'—'}</span></td>
-        <td style="padding:9px 14px;font-size:12px;color:#374151">${cmt||'—'}</td>
-      </tr>` : '';
-
-    const deviationSummary = (data.inspCrops||[]).filter(r=>{ const p=pct(r.actualAcres,r.budgetedAcres); return r.actualAcres&&p!==null&&Math.abs(p)>=10; });
-
-    const html = `<!DOCTYPE html><html><head><title>Ag Inspection — ${data.clientName||'Report'}</title>
-<style>
-  @page { size: letter; margin: 0.6in 0.5in; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; font-size: 12px; }
-  .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 3px solid #6B0E1E; }
-  .logo-box { border: 2px solid #6B0E1E; padding: 6px 10px; text-align: center; }
-  .logo-first { font-size: 14px; font-weight: 900; color: #6B0E1E; line-height: 1.2; }
-  .logo-sub { font-size: 8px; color: #888; }
-  .report-title { text-align: center; flex: 1; padding: 0 20px; }
-  .report-title h1 { font-size: 17px; font-weight: 900; text-decoration: underline; color: #1a1a1a; margin-bottom: 3px; }
-  .report-title h2 { font-size: 13px; font-weight: 700; color: #6B0E1E; }
-  .meta-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 24px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
-  .meta-item label { font-size: 9px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 3px; }
-  .meta-item .val { font-size: 12px; font-weight: 700; color: #1a1a1a; }
-  .section { margin-bottom: 16px; }
-  .section-head { background: #1a4731; color: white; padding: 7px 12px; font-weight: 700; font-size: 12px; border-radius: 5px 5px 0 0; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: #1a4731; color: white; padding: 6px 9px; font-size: 10px; font-weight: 700; text-align: center; border-right: 1px solid rgba(255,255,255,.15); }
-  th.left { text-align: left; }
-  th.dark { background: #374151; }
-  td { border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
-  .tfoot-row td { background: #ecfdf5; font-weight: 700; text-align: right; padding: 7px 10px; color: #1a4731; }
-  .cond-table td { padding: 8px 14px; border-bottom: 1px solid #e5e7eb; }
-  .summary-box { background: #1a4731; color: white; border-radius: 6px; padding: 12px 18px; margin: 16px 0; display: flex; justify-content: space-between; align-items: center; }
-  .summary-item { text-align: center; }
-  .summary-item .s-label { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
-  .summary-item .s-val { font-size: 16px; font-weight: 900; }
-  .sig-block { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
-  .sig-line { border-top: 1.5px solid #1a1a1a; margin-top: 32px; padding-top: 4px; font-size: 10px; color: #6b7280; }
-  .dev-alert { background: #fef2f2; border-left: 3px solid #dc2626; padding: 8px 12px; margin-bottom: 12px; border-radius: 0 5px 5px 0; }
-  .dev-alert-title { font-size: 10px; font-weight: 700; color: #dc2626; margin-bottom: 4px; }
-  .dev-row { font-size: 11px; color: #374151; padding: 2px 0; }
-</style>
-</head><body>
-
-<div class="page-header">
-  <div class="logo-box">
-    <div class="logo-first">FIRST<br/>BANK<br/>of Montana</div>
-    <div class="logo-sub">www.1stbmt.com</div>
-  </div>
-  <div class="report-title">
-    <h1>Agricultural Inspection Report</h1>
-    <h2>First Bank of Montana</h2>
-  </div>
-  <div style="text-align:right;font-size:11px;min-width:120px">
-    <div style="font-weight:700">Date of Inspection</div>
-    <div style="font-size:14px;font-weight:900;color:#6B0E1E">${data.inspDate||'—'}</div>
-  </div>
-</div>
-
-<div class="meta-grid">
-  <div class="meta-item"><label>Customer Name</label><div class="val">${data.clientName||'—'}</div></div>
-  <div class="meta-item"><label>Inspector</label><div class="val">${data.inspInspector||'—'}</div></div>
-  <div class="meta-item"><label>Inspection Date</label><div class="val">${data.inspDate||'—'}</div></div>
-</div>
-
-${deviationSummary.length>0?`
-<div class="dev-alert">
-  <div class="dev-alert-title">⚠️ BUDGET DEVIATIONS REQUIRING ATTENTION</div>
-  ${deviationSummary.map(r=>{const p=pct(r.actualAcres,r.budgetedAcres);return`<div class="dev-row">${r.budgetedCrop}: Budgeted ${r.budgetedAcres} ac → Actual ${r.actualAcres} ac (${p>0?'+':''}${p.toFixed(1)}%)${r.deviationReason?' — '+r.deviationReason:''}</div>`;}).join('')}
-</div>`:''}
-
-${cropRows?`
-<div class="section">
-  <div class="section-head">🌱  CROP CONDITION — Budget vs. Actual</div>
-  <table>
-    <thead><tr>
-      <th class="left" style="min-width:90px">Crop</th>
-      <th class="dark" style="min-width:65px">Budget Ac</th>
-      <th style="min-width:65px">Actual Ac</th>
-      <th style="min-width:65px">Deviation</th>
-      <th class="left" style="min-width:80px">Location</th>
-      <th style="min-width:80px">Condition</th>
-      <th style="min-width:80px">Yield/Acre</th>
-      <th class="dark" style="min-width:70px">Budget Price</th>
-      <th style="min-width:75px">Total Value</th>
-    </tr></thead>
-    <tbody>${cropRows}</tbody>
-    <tr class="tfoot-row"><td colspan="8" style="text-align:right;padding:7px 10px;font-size:12px">CROP TOTAL</td><td style="padding:7px 10px;text-align:right;font-size:13px;color:#15803d">$${Math.round(cropTotal).toLocaleString()}</td></tr>
-  </table>
-</div>`:''}
-
-${lsRows?`
-<div class="section">
-  <div class="section-head">🐄  LIVESTOCK CONDITION — Budget vs. Actual</div>
-  <table>
-    <thead><tr>
-      <th class="left" style="min-width:100px">Type</th>
-      <th class="dark" style="min-width:65px">Budget Head</th>
-      <th style="min-width:65px">Actual Head</th>
-      <th style="min-width:65px">Deviation</th>
-      <th style="min-width:80px">Condition</th>
-      <th style="min-width:80px">Est. Weight</th>
-    </tr></thead>
-    <tbody>${lsRows}</tbody>
-  </table>
-</div>`:''}
-
-${invRowsHtml?`
-<div class="section">
-  <div class="section-head">🏚  INVENTORY (Stored Crop / Feed)</div>
-  <table>
-    <thead><tr>
-      <th class="left">Description</th><th class="left">Location</th>
-      <th>Condition</th><th style="text-align:right">Quantity</th>
-      <th style="text-align:right">Value/Unit</th><th style="text-align:right">Total Value</th>
-    </tr></thead>
-    <tbody>${invRowsHtml}</tbody>
-    <tr class="tfoot-row"><td colspan="5">INVENTORY TOTAL</td><td style="padding:7px 10px;color:#15803d">$${Math.round(invTotal).toLocaleString()}</td></tr>
-  </table>
-</div>`:''}
-
-<div class="section">
-  <div class="section-head">📋  FARM CONDITIONS</div>
-  <table class="cond-table">
-    <thead><tr>
-      <th class="left" style="width:180px">Category</th>
-      <th class="left" style="width:120px">Condition</th>
-      <th class="left">Comments</th>
-    </tr></thead>
-    <tbody>
-      ${condBlock('🟤 Pasture',data.inspPastureCond,data.inspPastureCmt)}
-      ${condBlock('💧 Water / Irrigation',data.inspWaterCond,data.inspWaterCmt)}
-      ${condBlock('🚜 Equipment',data.inspEquipCond,data.inspEquipCmt)}
-    </tbody>
-  </table>
-</div>
-
-${data.inspEnvCmt?`<div class="section"><div class="section-head">🌿  ENVIRONMENTAL OBSERVATIONS</div><div style="padding:12px 14px;font-size:12px;line-height:1.6;border:1px solid #e5e7eb;border-top:none">${data.inspEnvCmt}</div></div>`:''}
-${data.inspAddlCmt?`<div class="section"><div class="section-head">📋  ADDITIONAL OBSERVATIONS</div><div style="padding:12px 14px;font-size:12px;line-height:1.6;border:1px solid #e5e7eb;border-top:none">${data.inspAddlCmt}</div></div>`:''}
-
-<div class="summary-box">
-  <div class="summary-item"><div class="s-label">Crop Total</div><div class="s-val">$${Math.round(cropTotal).toLocaleString()}</div></div>
-  <div class="summary-item"><div class="s-label">Inventory Total</div><div class="s-val">$${Math.round(invTotal).toLocaleString()}</div></div>
-  <div class="summary-item"><div class="s-label">Grand Total</div><div class="s-val">$${Math.round(cropTotal+invTotal).toLocaleString()}</div></div>
-</div>
-
-<div class="sig-block">
-  <div><div class="sig-line">Customer Signature / Date</div></div>
-  <div><div class="sig-line">Loan Officer Signature / Date</div></div>
-</div>
-
-<div style="margin-top:14px;font-size:9px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px">
-  First Bank of Montana · Agricultural Inspection Report · ${data.clientName||''} · ${data.inspDate||''}
-</div>
-
-</body></html>`;
-
-    W.document.write(html);
-    W.document.close();
-    W.focus();
-    // Auto-detect paper size: measure content height and pick letter vs legal
-    setTimeout(()=>{
-      try {
-        const bodyH = W.document.body.scrollHeight;
-        // Letter printable area at 96dpi with 0.6in margins ≈ 940px
-        // Legal printable area at 96dpi with 0.6in margins ≈ 1228px
-        const useLegal = bodyH > 920;
-        const pageStyle = W.document.createElement('style');
-        pageStyle.textContent = useLegal
-          ? '@page { size: legal portrait; margin: 0.5in; }'
-          : '@page { size: letter portrait; margin: 0.6in 0.5in; }';
-        W.document.head.appendChild(pageStyle);
-        // Show a small indicator in the window title
-        W.document.title = (useLegal ? '[Legal] ' : '[Letter] ') + 'Ag Inspection — ' + ('' + (data.clientName||'Report'));
-      } catch {}
-      W.print();
-    }, 500);
-  };
-
-  const EMAIL_CONFIG = {
-    serviceId:  'YOUR_SERVICE_ID',
-    templateId: 'YOUR_TEMPLATE_ID',
-    publicKey:  'YOUR_PUBLIC_KEY',
-    toEmail:    'YOUR_EMAIL@example.com',
-  };
-
-  const handleSubmit = async () => {
-    if (!data.clientName) { setSubmitErr('Please enter a client name on the Balance Sheet tab first.'); return; }
-    setSubmitErr(''); setSubmitting(true);
-    try {
-      if (EMAIL_CONFIG.serviceId === 'YOUR_SERVICE_ID') {
-        setSubmitErr('Email not configured — downloading PDF locally instead.');
-        handlePDF(); return;
-      }
-      const deviations = (data.inspCrops||[]).filter(r => {
-        const p = devPct(r.actualAcres, r.budgetedAcres);
-        return r.actualAcres && p !== null && Math.abs(p) >= 10;
-      }).map(r => `${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac -> actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) -- ${r.deviationReason||'no reason given'}`).join('\n');
-
-      const body = `AG INSPECTION REPORT\nCustomer: ${data.clientName}\nInspector: ${data.inspInspector||''}\nDate: ${data.inspDate||''}\n\nCROP DEVIATIONS FROM BUDGET:\n${deviations||'None'}\n\nGRAND TOTAL: ${inspFmt$(grand)}\n\nPasture: ${data.inspPastureCond||'—'} ${data.inspPastureCmt||''}\nWater: ${data.inspWaterCond||'—'} ${data.inspWaterCmt||''}\nEquipment: ${data.inspEquipCond||'—'} ${data.inspEquipCmt||''}\nEnvironmental: ${data.inspEnvCmt||''}\nAdditional: ${data.inspAddlCmt||''}`;
-
-      await window.emailjs.send(EMAIL_CONFIG.serviceId, EMAIL_CONFIG.templateId, {
-        to_email: EMAIL_CONFIG.toEmail, customer: data.clientName,
-        inspector: data.inspInspector, date: data.inspDate,
-        grand_total: inspFmt$(grand), body, deviations: deviations||'None',
-      }, EMAIL_CONFIG.publicKey);
-      setSubmitted(true);
-    } catch(err) {
-      setSubmitErr('Submit failed: ' + (err.text||err.message||String(err)));
-    } finally { setSubmitting(false); }
-  };
-
-  const crops = data.inspCrops || [];
-  const lsRows = data.inspLivestock || [];
-  const invRows = data.inspInventory || [];
-  const photos = data.inspPhotos || [];
-  const loans = data.inspLoans || ['','',''];
-
-  if (submitted) return (
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:48}}>
-      <div style={{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420,boxShadow:'0 4px 20px rgba(0,0,0,0.1)'}}>
-        <div style={{fontSize:52,marginBottom:12}}>✅</div>
-        <div style={{fontWeight:800,fontSize:22,color:INSP_SH,marginBottom:8}}>Report Submitted!</div>
-        <p style={{color:'#6b7280',fontSize:14,lineHeight:1.6,marginBottom:20}}>Inspection report for <strong>{data.clientName}</strong> sent successfully.</p>
-        <button onClick={()=>setSubmitted(false)} style={{background:INSP_SH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer'}}>New Inspection</button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}}>
-      {/* EmailJS + html2pdf CDN (loaded once) */}
-      {!window.emailjs && <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"/>}
-      {!window.html2pdf && <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"/>}
-
-      {/* Toolbar */}
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,gap:10,flexWrap:'wrap'}}>
-        <div>
-          <div style={{fontWeight:800,fontSize:18,color:INSP_SH,fontFamily:"'Playfair Display',serif"}}>Ag Inspection Report</div>
-          <div style={{fontSize:12,color:'#6b7280'}}>Pre-loaded from Budget tab · Fill in actuals below</div>
-        </div>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <button onClick={generateShare}
-            style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,
-              padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}}>
-            🔗 Share with Customer
-          </button>
-          {(data.inspShareId || shareLink) && (
-            <button onClick={checkCustomerResponse} disabled={checkingResponse}
-              style={{background:checkingResponse?'#e5e7eb':'#e8f5ea',color:checkingResponse?'#9ca3af':'#15803d',
-                border:'1.5px solid '+(checkingResponse?'#d1d5db':'#22c55e'),borderRadius:5,
-                padding:'7px 14px',fontWeight:700,fontSize:12,cursor:checkingResponse?'wait':'pointer'}}>
-              {checkingResponse ? '⏳ Checking...' : '📬 Check Response'}
-            </button>
-          )}
-          <button onClick={handlePDF} style={{background:'#f0fdf4',color:INSP_TH,border:`1.5px solid ${INSP_TH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}}>🖨 Save PDF</button>
-        </div>
-      </div>
-
-      {/* ── Share Modal ── */}
-      {showShareModal && (
-        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',
-          zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-          <div style={{background:'white',borderRadius:14,padding:28,maxWidth:480,width:'100%',
-            boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
-            <div style={{fontWeight:700,fontSize:'1.05rem',marginBottom:6,color:'#1a1a1a'}}>
-              Share Inspection with Customer
-            </div>
-            {shareStatus === 'generating' && (
-              <div style={{color:'#6b7280',padding:'20px 0',textAlign:'center'}}>Generating secure link...</div>
-            )}
-            {shareStatus === 'ready' && (
-              <div>
-                <div style={{fontSize:'.85rem',color:'#555',marginBottom:16}}>
-                  Send your customer the link and PIN below. They fill in actual acres, conditions and yields, then submit. You can load their response back here anytime.
-                </div>
-                <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:8,padding:14,marginBottom:12}}>
-                  <div style={{fontSize:'.72rem',fontWeight:700,color:'#2d5a8e',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Share Link</div>
-                  <div style={{fontSize:'.82rem',wordBreak:'break-all',color:'#1a1a1a',fontFamily:'monospace',marginBottom:8}}>{shareLink}</div>
-                  <button onClick={()=>navigator.clipboard.writeText(shareLink).then(()=>alert('Copied!'))}
-                    style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,padding:'4px 10px',fontSize:'.75rem',cursor:'pointer',fontWeight:600}}>
-                    Copy Link
-                  </button>
-                </div>
-                <div style={{background:'#f5e8ea',border:'1px solid #e0b0b8',borderRadius:8,padding:14,marginBottom:14}}>
-                  <div style={{fontSize:'.72rem',fontWeight:700,color:'#6B0E1E',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Customer PIN</div>
-                  <div style={{fontSize:'2rem',fontWeight:900,letterSpacing:'.25em',color:'#6B0E1E',fontFamily:'monospace'}}>{sharePin}</div>
-                  <div style={{fontSize:'.72rem',color:'#888',marginTop:4}}>Customer must enter this to open the form</div>
-                </div>
-                <button onClick={()=>{
-                    const subject = encodeURIComponent('Inspection Form - ' + data.clientName);
-                    const body = encodeURIComponent('Please fill out your crop inspection form below.\n\n'+'Click the link to open your form:\n'+shareLink+'\n\n'+'Your PIN: '+sharePin+'\n\n'+'Steps:\n1. Click the link above\n2. Enter your PIN when prompted\n3. Fill in your actual acres, yields, and conditions\n4. Submit the form\n\n'+'Thank you,\nFirst Bank of Montana\n'+(window.location.origin));
-                    window.location.href = 'mailto:?subject=' + subject + '&body=' + body;
-                  }}
-                  style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:7,
-                    padding:'10px 0',fontWeight:700,fontSize:'.9rem',cursor:'pointer',marginBottom:8}}>
-                  📧 Open in Email (Outlook / Mail)
-                </button>
-                <button onClick={checkCustomerResponse} disabled={checkingResponse}
-                  style={{width:'100%',background:'none',border:'1.5px solid #22c55e',borderRadius:7,
-                    padding:'8px 0',fontWeight:700,fontSize:'.88rem',cursor:'pointer',color:'#15803d',marginBottom:8}}>
-                  {checkingResponse ? 'Checking...' : '🔄 Check for Customer Response'}
-                </button>
-                {customerResponse && (
-                  <div style={{background:'#e8f5ea',border:'1px solid #22c55e',borderRadius:7,
-                    padding:10,fontSize:'.85rem',color:'#15803d',fontWeight:700,marginBottom:8}}>
-                    ✅ Customer has responded — answers loaded into the form.
-                  </div>
-                )}
-              </div>
-            )}
-            {shareStatus.startsWith('error') && (
-              <div style={{color:'#c44',fontSize:'.85rem',padding:'12px 0'}}>
-                Error: {shareStatus.slice(6)}<br/>
-                Check that the inspection_shares table exists in Supabase (run inspection-share-schema.sql).
-              </div>
-            )}
-            <button onClick={()=>setShowShareModal(false)}
-              style={{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'7px 20px',
-                cursor:'pointer',fontFamily:'inherit',fontSize:'.85rem',marginTop:4}}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-
-      {submitErr && <div style={{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}}>⚠️ {submitErr}</div>}
-
-      {/* Legend */}
-      <div style={{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}}>
-        {[['#22c55e','On Budget (< 10% deviation)'],['#f59e0b','Minor Deviation (10–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>(
-          <div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}}>
-            <div style={{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}/>
-            {l}
-          </div>
-        ))}
-      </div>
-
-      <div ref={printRef}>
-        {/* ── Inspection Setup Wizard ── */}
-        {inspWizard && (
-          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',
-            zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-            <div style={{background:'white',borderRadius:14,padding:32,maxWidth:480,width:'100%',
-              boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
-              <div style={{fontWeight:800,fontSize:16,color:INSP_SH,marginBottom:6,fontFamily:"'Playfair Display',serif"}}>
-                Ag Inspection Setup
-              </div>
-
-              {/* Step 1: Load previous? */}
-              {inspWizard==='ask_load' && (
-                <div>
-                  <div style={{fontSize:14,color:'#555',marginBottom:20,lineHeight:1.6}}>
-                    Previous inspection data exists for <strong>{data.clientName}</strong>.<br/>
-                    Would you like to load it?
-                  </div>
-                  <div style={{display:'flex',gap:10}}>
-                    <button onClick={()=>{
-                        // Keep existing data, just dismiss
-                        if (!data.inspInventory || data.inspInventory.length===0)
-                          setData(d=>({...d,inspInventory:[{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
-                        setInspWizard(null);
-                      }}
-                      style={{flex:1,background:'#1a4731',color:'white',border:'none',borderRadius:8,
-                        padding:12,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
-                      Yes — Load Previous
-                    </button>
-                    <button onClick={()=>setInspWizard('ask_harvest')}
-                      style={{flex:1,background:'none',border:'2px solid #6B0E1E',color:'#6B0E1E',
-                        borderRadius:8,padding:12,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
-                      No — Start Fresh
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 2: Harvest type */}
-              {inspWizard==='ask_harvest' && (
-                <div>
-                  <div style={{fontSize:14,color:'#555',marginBottom:6,lineHeight:1.6}}>
-                    Select inspection type for crops:
-                  </div>
-                  <div style={{display:'flex',gap:10,marginBottom:20}}>
-                    {[['pre','🌱 Pre-Harvest','Load crop projections from the budget'],
-                      ['post','🌾 Post-Harvest','Start blank — enter actuals only']].map(([val,label,desc])=>(
-                      <button key={val} onClick={()=>setInspWizard('ask_harvest_'+val)}
-                        style={{flex:1,background:'none',border:'2px solid #e5e7eb',color:'#1a1a1a',
-                          borderRadius:8,padding:'12px 8px',cursor:'pointer',fontFamily:'inherit',
-                          textAlign:'center',transition:'all .15s'}}
-                        onMouseOver={e=>{e.currentTarget.style.borderColor='#1a4731';e.currentTarget.style.background='#f0fdf4';}}
-                        onMouseOut={e=>{e.currentTarget.style.borderColor='#e5e7eb';e.currentTarget.style.background='none';}}>
-                        <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{label}</div>
-                        <div style={{fontSize:11,color:'#6b7280'}}>{desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                  {hasPreviousInsp && (
-                    <button onClick={()=>setInspWizard('ask_load')}
-                      style={{background:'none',border:'none',color:'#9ca3af',fontSize:12,
-                        cursor:'pointer',fontFamily:'inherit',textDecoration:'underline'}}>
-                      ← Back
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Step 3: Cattle type (after harvest selection) */}
-              {(inspWizard==='ask_harvest_pre'||inspWizard==='ask_harvest_post') && (
-                <div>
-                  <div style={{fontSize:13,color:'#1a4731',fontWeight:700,marginBottom:4}}>
-                    {inspWizard==='ask_harvest_pre' ? '🌱 Pre-Harvest selected' : '🌾 Post-Harvest selected'}
-                  </div>
-                  <div style={{fontSize:14,color:'#555',marginBottom:6,lineHeight:1.6,marginTop:12}}>
-                    Select inspection type for livestock:
-                  </div>
-                  <div style={{display:'flex',gap:10,marginBottom:20}}>
-                    {[['pre','🐄 Pre-Calving','Load cattle numbers from the budget'],
-                      ['post','🐂 Post-Calving','Start blank — enter actuals only']].map(([val,label,desc])=>(
-                      <button key={val}
-                        onClick={()=>applyInspSetup(
-                          inspWizard==='ask_harvest_pre'?'pre':'post',
-                          val,
-                          true
-                        )}
-                        style={{flex:1,background:'none',border:'2px solid #e5e7eb',color:'#1a1a1a',
-                          borderRadius:8,padding:'12px 8px',cursor:'pointer',fontFamily:'inherit',
-                          textAlign:'center',transition:'all .15s'}}
-                        onMouseOver={e=>{e.currentTarget.style.borderColor='#6B0E1E';e.currentTarget.style.background='#fdf5f5';}}
-                        onMouseOut={e=>{e.currentTarget.style.borderColor='#e5e7eb';e.currentTarget.style.background='none';}}>
-                        <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{label}</div>
-                        <div style={{fontSize:11,color:'#6b7280'}}>{desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={()=>setInspWizard('ask_harvest')}
-                    style={{background:'none',border:'none',color:'#9ca3af',fontSize:12,
-                      cursor:'pointer',fontFamily:'inherit',textDecoration:'underline'}}>
-                    ← Back
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {/* Header info */}
-        <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}}>
-          {/* Inspection type toggles */}
-          <div style={{display:'flex',gap:16,marginBottom:16,alignItems:'flex-start',flexWrap:'wrap'}}>
-            {/* Crop / Harvest */}
-            <div>
-              <div style={{fontSize:10,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:5}}>Crop Inspection</div>
-              <div style={{display:'flex',gap:6}}>
-                {[['pre','🌱 Pre-Harvest','#1a4731'],['post','🌾 Post-Harvest','#6B0E1E']].map(([val,label,clr]) => (
-                  <button key={val} type="button"
-                    onClick={()=>set('inspHarvestType',val)}
-                    style={{padding:'6px 14px',borderRadius:20,border:'none',cursor:'pointer',
-                      fontWeight:700,fontSize:12,fontFamily:'inherit',transition:'all .15s',
-                      background:(data.inspHarvestType||'pre')===val ? clr : '#f3f4f6',
-                      color:(data.inspHarvestType||'pre')===val ? 'white' : '#6b7280'}}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* Divider */}
-            <div style={{width:1,background:'#e5e7eb',alignSelf:'stretch',margin:'0 4px'}}/>
-            {/* Cattle / Calving */}
-            <div>
-              <div style={{fontSize:10,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:5}}>Cattle Inspection</div>
-              <div style={{display:'flex',gap:6}}>
-                {[['pre','🐄 Pre-Calving','#1a4731'],['post','🐂 Post-Calving','#6B0E1E']].map(([val,label,clr]) => (
-                  <button key={val} type="button"
-                    onClick={()=>set('inspCattleType',val)}
-                    style={{padding:'6px 14px',borderRadius:20,border:'none',cursor:'pointer',
-                      fontWeight:700,fontSize:12,fontFamily:'inherit',transition:'all .15s',
-                      background:(data.inspCattleType||'pre')===val ? clr : '#f3f4f6',
-                      color:(data.inspCattleType||'pre')===val ? 'white' : '#6b7280'}}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* Status hints */}
-            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignSelf:'center',marginLeft:4}}>
-              {(data.inspHarvestType||'pre')==='post' && (
-                <span style={{fontSize:10,color:'#6B0E1E',fontStyle:'italic',background:'#fdf5f5',padding:'3px 8px',borderRadius:10}}>
-                  Budget Ac hidden
-                </span>
-              )}
-              {(data.inspCattleType||'pre')==='post' && (
-                <span style={{fontSize:10,color:'#6B0E1E',fontStyle:'italic',background:'#fdf5f5',padding:'3px 8px',borderRadius:10}}>
-                  Budget Head hidden
-                </span>
-              )}
-            </div>
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px 24px'}}>
-            <div><label style={INSP_LBL}>CUSTOMER NAME</label>
-              <div style={{padding:'6px 8px',background:'#f0fdf4',borderRadius:4,fontSize:13,fontWeight:600,color:INSP_SH}}>{data.clientName||'—'}</div>
-            </div>
-            <div><label style={INSP_LBL}>DATE OF INSPECTION</label>
-              {inspInp(data.inspDate||'', v=>set('inspDate',v), '', 'date')}
-            </div>
-            <div><label style={INSP_LBL}>INSPECTOR NAME</label>
-              {inspInp(data.inspInspector||'', v=>set('inspInspector',v), 'Enter inspector name')}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Crops ── */}
-        <InspCard title="🌱  CROP CONDITION — Budget vs. Actual">
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
-              <thead>
-                <tr>
-                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:100}}>Crop</th>
-                  {(data.inspHarvestType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Ac</th>}
-                  <th style={{...INSP_TH_S,minWidth:80}}>{(data.inspHarvestType||'pre')==='post' ? 'Actual Ac' : 'Actual Ac'}</th>
-                  {(data.inspHarvestType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>}
-                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
-                  <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
-                  <th style={{...INSP_TH_S,minWidth:100}}>Yield / Acre</th>
-                  <th style={{...INSP_TH_S,minWidth:80}}>Value / Unit</th>
-                  <th style={{...INSP_TH_S,minWidth:85}}>Total Value</th>
-                  <th style={{...INSP_TH_S,width:28}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {crops.map((r,i)=>{
-                  const isPost = (data.inspHarvestType||'pre')==='post';
-                  const pct = !isPost ? devPct(r.actualAcres, r.budgetedAcres) : null;
-                  const showDev = !isPost && pct !== null && Math.abs(pct) >= 10;
-                  const rowBg = i%2===0?'white':'#f9fafb';
-                  const ds = !isPost && r.actualAcres ? devStyle(pct) : {};
-                  return (
-                    <React.Fragment key={r.id}>
-                      <tr style={{background:ds.background||rowBg,...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
-                        {/* Crop name — editable if blank, shows budget value */}
-                        <td style={INSP_TD_S}>
-                          {r.budgetedCrop
-                            ? <div>
-                                <div style={{fontWeight:600,fontSize:13,color:'#1a1a1a'}}>{r.budgetedCrop}</div>
-                                {r.substituted && (
-                                  <div style={{marginTop:4}}>
-                                    <div style={{fontSize:10,color:'#d97706',fontWeight:700,marginBottom:2}}>SUBSTITUTED →</div>
-                                    {inspInp(r.substituteCrop, v=>updCrop(r.id,'substituteCrop',v), 'Actual crop planted…', 'text', {fontSize:12})}
-                                  </div>
-                                )}
-                                <button type="button" onClick={()=>updCrop(r.id,'substituted',!r.substituted)}
-                                  style={{marginTop:3,fontSize:10,background:'none',border:'none',color:r.substituted?'#dc2626':'#9ca3af',cursor:'pointer',padding:0,fontWeight:600}}>
-                                  {r.substituted?'✕ Remove sub':'↺ Different crop?'}
-                                </button>
-                              </div>
-                            : inspInp(r.budgetedCrop||r.substituteCrop, v=>updCrop(r.id,'budgetedCrop',v), 'Crop name…')
-                          }
-                        </td>
-                        {/* Budget acres — locked, hidden in post-harvest */}
-                        {(data.inspHarvestType||'pre')==='pre' && (
-                          <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
-                            <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedAcres||'—'}</div>
-                            <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
-                          </td>
-                        )}
-                        {/* Actual acres — type to enter */}
-                        <td style={INSP_TD_S}>
-                          <input
-                            type="text"
-                            value={r.actualAcres}
-                            placeholder={(data.inspHarvestType||'pre')==='pre' ? (r.budgetedAcres||'0') : '0'}
-                            onChange={e=>updCrop(r.id,'actualAcres',e.target.value.replace(/[^0-9.]/g,''))}
-                            style={{border:'1.5px solid #6B0E1E',borderRadius:4,padding:'5px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'#fdf9f9',fontWeight:600,textAlign:'center'}}
-                          />
-                        </td>
-                        {/* Deviation badge — pre-harvest only */}
-                        {(data.inspHarvestType||'pre')==='pre' && (
-                          <td style={{...INSP_TD_S,textAlign:'center'}}>
-                            {r.actualAcres && r.budgetedAcres ? (
-                              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                                {devBadge(pct)}
-                                <div style={{fontSize:10,color:'#6b7280'}}>
-                                  {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')}
-                                  {(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0)} ac
-                                </div>
-                              </div>
-                            ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
-                          </td>
-                        )}
-                        <td style={INSP_TD_S}>{inspInp(r.location, v=>updCrop(r.id,'location',v), 'Field/Sec')}</td>
-                        <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updCrop(r.id,'condition',v)}/></td>
-                        <td style={INSP_TD_S}>
-                          <div style={{display:'flex',gap:3}}>
-                            {inspInp(r.actualYield||r.budgetedYield, v=>updCrop(r.id,'actualYield',v), r.budgetedYield||'0', 'number', {flex:1})}
-                            <div style={{fontSize:11,color:'#6b7280',alignSelf:'center',whiteSpace:'nowrap'}}>{r.budgetedUnit||'bu'}</div>
-                          </div>
-                          {r.budgetedYield&&<div style={{fontSize:10,color:'#9ca3af'}}>budget: {r.budgetedYield} {r.budgetedUnit}</div>}
-                        </td>
-                        <td style={INSP_TD_S}>{inspInp(r.valuePerUnit||r.budgetedPrice, v=>updCrop(r.id,'valuePerUnit',v), r.budgetedPrice||'$0', 'number')}</td>
-                        <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}}>
-                          {cropRowTot(r)>0?inspFmt$(cropRowTot(r)):'—'}
-                        </td>
-                        <td style={INSP_TD_S}>
-                          <button type="button" onClick={()=>remCrop(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button>
-                        </td>
-                      </tr>
-                      {/* Deviation reason row - only required at >= 20% in pre-harvest */}
-                      {!isPost && r.actualAcres && pct !== null && Math.abs(pct) >= 20 && (
-                        <tr style={{background:'#fef2f2'}}>
-                          <td colSpan={10} style={{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}}>
-                            <div style={{display:'flex',alignItems:'center',gap:8}}>
-                              <span style={{fontSize:11,fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
-                                ⛔ Deviation reason (required):
-                              </span>
-                              {inspInp(r.deviationReason, v=>updCrop(r.id,'deviationReason',v),
-                                'Required — explain major deviation from budget…',
-                                'text', {border:'1px solid #fca5a5',background:'white'})}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{background:'#ecfdf5'}}>
-                  <td colSpan={8} style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:INSP_SH,fontSize:13}}>CROP TOTAL</td>
-                  <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}}>{inspFmt$(cropTot)}</td>
-                  <td/>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          <InspAddBtn label="+ Add Crop Row" onClick={addCrop}/>
-          <div style={{marginTop:12}}><label style={INSP_LBL}>Comments</label>
-            {inspTa(data.inspCropCmt||'', v=>set('inspCropCmt',v), 'Crop condition observations…')}
-          </div>
-        </InspCard>
-
-        {/* ── Livestock ── */}
-        <InspCard title="🐄  LIVESTOCK CONDITION — Budget vs. Actual">
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
-              <thead>
-                <tr>
-                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:120}}>Type</th>
-                  {(data.inspCattleType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:80,background:'#374151'}}>Budget Hd</th>}
-                  <th style={{...INSP_TH_S,minWidth:80}}>Actual Hd</th>
-                  {(data.inspCattleType||'pre')==='pre' && <th style={{...INSP_TH_S,minWidth:70}}>Deviation</th>}
-                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:90}}>Location</th>
-                  <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
-                  <th style={{...INSP_TH_S,minWidth:90}}>Est. Wt (lbs)</th>
-                  <th style={{...INSP_TH_S,minWidth:80}}>Value / Hd</th>
-                  <th style={{...INSP_TH_S,minWidth:85}}>Total Value</th>
-                  <th style={{...INSP_TH_S,width:28}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {lsRows.map((r,i)=>{
-                  const isPostC = (data.inspCattleType||'pre')==='post';
-                  const pct = !isPostC ? devPct(r.actualHead, r.budgetedHead) : null;
-                  const showDev = !isPostC && pct !== null && Math.abs(pct) >= 10;
-                  const ds = !isPostC && r.actualHead ? devStyle(pct) : {};
-                  return (
-                    <React.Fragment key={r.id}>
-                      <tr style={{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}}>
-                        <td style={INSP_TD_S}>
-                          {r.budgetedType
-                            ? <div style={{fontWeight:600,fontSize:13}}>{r.budgetedType}</div>
-                            : inspInp(r.budgetedType, v=>updLS(r.id,'budgetedType',v), 'Cattle, Hogs…')
-                          }
-                        </td>
-                        {!isPostC && (
-                          <td style={{...INSP_TD_S,textAlign:'center',background:'#f8f6f2'}}>
-                            <div style={{fontSize:13,fontWeight:600,color:'#6b7280'}}>{r.budgetedHead||'—'}</div>
-                            <div style={{fontSize:10,color:'#9ca3af'}}>budgeted</div>
-                          </td>
-                        )}
-                        <td style={INSP_TD_S}>{inspInp(r.actualHead, v=>updLS(r.id,'actualHead',v), isPostC?'0':(r.budgetedHead||'0'),'number')}</td>
-                        {!isPostC && (
-                          <td style={{...INSP_TD_S,textAlign:'center'}}>
-                            {r.actualHead && r.budgetedHead ? (
-                              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                                {devBadge(pct)}
-                                <div style={{fontSize:10,color:'#6b7280'}}>{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)>0?'+':'')}{(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)).toFixed(0)} hd</div>
-                              </div>
-                          ) : <span style={{color:'#d1d5db',fontSize:11}}>—</span>}
-                          </td>
-                        )}
-                        <td style={INSP_TD_S}>{inspInp(r.location, v=>updLS(r.id,'location',v), 'Pasture/Lot')}</td>
-                        <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updLS(r.id,'condition',v)}/></td>
-                        <td style={INSP_TD_S}>{inspInp(r.estWeight, v=>updLS(r.id,'estWeight',v), r.budgetedLbs||'0','number')}</td>
-                        <td style={INSP_TD_S}>{inspInp(r.valuePerUnit, v=>updLS(r.id,'valuePerUnit',v), r.budgetedPrice||'$0','number')}</td>
-                        <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d'}}>{lsRowTot(r)>0?inspFmt$(lsRowTot(r)):'—'}</td>
-                        <td style={INSP_TD_S}><button type="button" onClick={()=>remLS(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button></td>
-                      </tr>
-                      {!isPostC && r.actualHead && pct !== null && Math.abs(pct) >= 20 && (
-                        <tr style={{background:'#fef2f2'}}>
-                          <td colSpan={10} style={{padding:'6px 10px 8px 32px'}}>
-                            <div style={{display:'flex',alignItems:'center',gap:8}}>
-                              <span style={{fontSize:11,fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>⛔ Deviation reason (required):</span>
-                              {inspInp(r.deviationReason, v=>updLS(r.id,'deviationReason',v), 'Required — explain major deviation from budget…', 'text', {border:'1px solid #fca5a5',background:'white'})}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{background:'#ecfdf5'}}>
-                  <td colSpan={8} style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:INSP_SH,fontSize:13}}>LIVESTOCK TOTAL</td>
-                  <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}}>{inspFmt$(lsTot)}</td>
-                  <td/>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          <InspAddBtn label="+ Add Livestock Row" onClick={addLS}/>
-          <div style={{marginTop:12}}><label style={INSP_LBL}>Comments</label>
-            {inspTa(data.inspLsCmt||'', v=>set('inspLsCmt',v), 'Livestock condition observations…')}
-          </div>
-        </InspCard>
-
-        {/* ── Inventory ── */}
-        <InspCard title="🏚  INVENTORY  (Stored Crop / Feed)">
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
-              <thead>
-                <tr>
-                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:130}}>Description</th>
-                  <th style={{...INSP_TH_S,textAlign:'left',minWidth:100}}>Location</th>
-                  <th style={{...INSP_TH_S,minWidth:190}}>Condition</th>
-                  <th style={{...INSP_TH_S,minWidth:80}}>Quantity</th>
-                  <th style={{...INSP_TH_S,minWidth:65}}>Unit</th>
-                  <th style={{...INSP_TH_S,minWidth:80}}>Value / Unit</th>
-                  <th style={{...INSP_TH_S,minWidth:85}}>Total Value</th>
-                  <th style={{...INSP_TH_S,width:28}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {invRows.map((r,i)=>(
-                  <tr key={r.id} style={{background:i%2===0?'white':'#f0fdf4'}}>
-                    <td style={INSP_TD_S}>{inspInp(r.description,v=>updInv(r.id,'description',v),'Corn, Soybeans…')}</td>
-                    <td style={INSP_TD_S}>{inspInp(r.location,v=>updInv(r.id,'location',v),'Bin/Facility')}</td>
-                    <td style={INSP_TD_S}><InspCondPills value={r.condition} onChange={v=>updInv(r.id,'condition',v)}/></td>
-                    <td style={INSP_TD_S}>{inspInp(r.quantity,v=>updInv(r.id,'quantity',v),'0','number')}</td>
-                    <td style={INSP_TD_S}>
-                      <select value={r.unitType||'bu'} onChange={e=>updInv(r.id,'unitType',e.target.value)} style={{border:'1px solid #d1d5db',borderRadius:4,padding:'4px 5px',fontSize:12,width:'100%',background:'white',outline:'none'}}>
-                        {['bu','ton','bale','cwt','lb','gal','head','ea'].map(u=><option key={u}>{u}</option>)}
-                      </select>
-                    </td>
-                    <td style={INSP_TD_S}>{inspInp(r.valuePerUnit,v=>updInv(r.id,'valuePerUnit',v),'$0','number')}</td>
-                    <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d'}}>{invRowTot(r)>0?inspFmt$(invRowTot(r)):'—'}</td>
-                    <td style={INSP_TD_S}><button type="button" onClick={()=>remInv(r.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button></td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{background:'#ecfdf5'}}>
-                  <td colSpan={6} style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:INSP_SH,fontSize:13}}>INVENTORY TOTAL</td>
-                  <td style={{...INSP_TD_S,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}}>{inspFmt$(invTot)}</td>
-                  <td/>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          <InspAddBtn label="+ Add Inventory Row" onClick={addInv}/>
-          <div style={{marginTop:12}}><label style={INSP_LBL}>Comments</label>
-            {inspTa(data.inspInvCmt||'', v=>set('inspInvCmt',v), 'Inventory observations…')}
-          </div>
-        </InspCard>
-
-        {/* ── Simple condition sections ── */}
-        {[
-          ['🟤  PASTURE CONDITIONS','inspPastureCond','inspPastureCmt','Pasture conditions…',INSP_CONDITIONS],
-          ['💧  WATER / IRRIGATION SOURCE','inspWaterCond','inspWaterCmt','Water source / irrigation notes…',INSP_WATER_COND],
-          ['🚜  EQUIPMENT','inspEquipCond','inspEquipCmt','Equipment condition notes…',INSP_CONDITIONS],
-        ].map(([title,condKey,cmtKey,ph,opts])=>(
-          <InspCard key={condKey} title={title}>
-            <div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'0 24px',alignItems:'start'}}>
-              <div style={{minWidth:260}}>
-                <label style={INSP_LBL}>Overall Condition</label>
-                <InspCondPills value={data[condKey]||''} onChange={v=>set(condKey,v)} options={opts}/>
-              </div>
-              <div><label style={INSP_LBL}>Comments</label>{inspTa(data[cmtKey]||'',v=>set(cmtKey,v),ph,2)}</div>
-            </div>
-          </InspCard>
-        ))}
-
-        <InspCard title="🌿  ENVIRONMENTAL OBSERVATIONS">
-          {inspTa(data.inspEnvCmt||'',v=>set('inspEnvCmt',v),'Soil erosion, drainage, weed pressure…',4)}
-        </InspCard>
-
-        <InspCard title="📋  ADDITIONAL OBSERVATIONS / OVERALL OPERATION">
-          {inspTa(data.inspAddlCmt||'',v=>set('inspAddlCmt',v),'Overall operation comments…',4)}
-        </InspCard>
-
-        {/* ── Financial Summary ── */}
-        <div style={{background:INSP_SH,borderRadius:6,padding:'14px 20px',marginBottom:20}}>
-          <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',letterSpacing:2,marginBottom:10,textTransform:'uppercase',fontWeight:700}}>Financial Summary</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
-            {[['Crop Value',cropTot],['Livestock Value',lsTot],['Inventory Value',invTot],['GRAND TOTAL',grand]].map(([label,val])=>{
-              const isG = label==='GRAND TOTAL';
-              return (
-                <div key={label} style={{background:isG?'rgba(200,134,10,0.2)':'rgba(255,255,255,0.07)',borderRadius:5,padding:'10px 12px',textAlign:'center',border:`1px solid ${isG?INSP_GOLD:'rgba(255,255,255,0.1)'}`}}>
-                  <div style={{fontSize:10,color:'rgba(255,255,255,0.55)',letterSpacing:.5,marginBottom:4,textTransform:'uppercase'}}>{label}</div>
-                  <div style={{fontSize:isG?20:16,fontWeight:700,color:isG?INSP_GOLD:'white'}}>{inspFmt$(val)}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ── Deviation Summary ── */}
-        {crops.some(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return r.actualAcres&&p!==null&&Math.abs(p)>=10; }) && (
-          <div style={{background:'#fffbeb',border:'2px solid #f59e0b',borderRadius:6,padding:16,marginBottom:20}}>
-            <div style={{fontWeight:700,fontSize:14,color:'#92400e',marginBottom:10}}>⚠️ Budget Deviation Summary</div>
-            {crops.filter(r=>{ const p=devPct(r.actualAcres,r.budgetedAcres); return r.actualAcres&&p!==null&&Math.abs(p)>=10; }).map(r=>{
-              const p = devPct(r.actualAcres, r.budgetedAcres);
-              const ac = parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0);
-              return (
-                <div key={r.id} style={{display:'flex',gap:12,alignItems:'flex-start',padding:'6px 0',borderBottom:'1px solid #fcd34d'}}>
-                  <div style={{fontSize:13,fontWeight:700,minWidth:80,color:Math.abs(p)>=20?'#dc2626':'#d97706'}}>{r.budgetedCrop||'—'}</div>
-                  <div style={{fontSize:12,color:'#92400e'}}>
-                    Budget: <strong>{r.budgetedAcres} ac</strong> → Actual: <strong>{r.actualAcres} ac</strong>
-                    <span style={{marginLeft:6,fontWeight:700}}>{ac>0?'+':''}{ac.toFixed(0)} ac ({p.toFixed(1)}%)</span>
-                    {r.substituted && r.substituteCrop && <span style={{marginLeft:6,background:'#fef3c7',padding:'1px 5px',borderRadius:3}}>Substituted: {r.substituteCrop}</span>}
-                  </div>
-                  {r.deviationReason && <div style={{fontSize:11,color:'#78350f',fontStyle:'italic',flex:1}}>"{r.deviationReason}"</div>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Photos ── */}
-        <div style={{borderRadius:6,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.1)',border:'1px solid #d1fae5',marginBottom:20}}>
-          <div style={{background:INSP_SH,padding:'9px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <span style={{color:'white',fontWeight:700,fontSize:15}}>📸  INSPECTION PHOTOS</span>
-            <div style={{display:'flex',gap:8}}>
-              <button type="button" onClick={()=>cameraRef.current?.click()} style={{background:'rgba(255,255,255,0.14)',color:'white',border:'1px solid rgba(255,255,255,0.35)',borderRadius:4,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>📷 Camera</button>
-              <button type="button" onClick={()=>fileRef.current?.click()} style={{background:'rgba(255,255,255,0.14)',color:'white',border:'1px solid rgba(255,255,255,0.35)',borderRadius:4,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>📁 Upload</button>
-              <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleFiles} style={{display:'none'}}/>
-              <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleFiles} style={{display:'none'}}/>
-            </div>
-          </div>
-          <div style={{background:'white',padding:16}}>
-            {photos.length===0 ? (
-              <div style={{textAlign:'center',padding:24,color:'#9ca3af',fontSize:14}}>No photos yet — use Camera or Upload above</div>
-            ) : (
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:12}}>
-                {photos.map(ph=>(
-                  <div key={ph.id} style={{border:'1px solid #e5e7eb',borderRadius:6,overflow:'hidden',position:'relative'}}>
-                    <img src={ph.src} alt={ph.label||'Photo'} style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
-                    <div style={{padding:'6px 8px'}}>
-                      <input value={ph.label} onChange={e=>setData(d=>({...d,inspPhotos:d.inspPhotos.map(x=>x.id===ph.id?{...x,label:e.target.value}:x)}))}
-                        placeholder="Add caption…" style={{border:'1px solid #e5e7eb',borderRadius:4,padding:'3px 6px',fontSize:11,width:'100%',boxSizing:'border-box',outline:'none',fontFamily:'inherit'}}/>
-                      <div style={{fontSize:10,color:'#9ca3af',marginTop:2}}>{ph.ts}</div>
-                    </div>
-                    <button type="button" onClick={()=>setData(d=>({...d,inspPhotos:d.inspPhotos.filter(x=>x.id!==ph.id)}))}
-                      style={{position:'absolute',top:5,right:5,background:'rgba(185,28,28,0.8)',color:'white',border:'none',borderRadius:999,width:22,height:22,cursor:'pointer',fontSize:14,lineHeight:'22px',textAlign:'center'}}>×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Signature */}
-        <div style={{background:'white',borderRadius:6,padding:20,marginBottom:20,border:'1px solid #d1fae5'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:28}}>
-            <div>
-              <label style={INSP_LBL}>INSPECTOR SIGNATURE</label>
-              <div style={{borderBottom:'2px solid #374151',height:44,marginTop:8}}/>
-              <div style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Signature</div>
-            </div>
-            <div>
-              <label style={INSP_LBL}>DATE</label>
-              <div style={{borderBottom:'2px solid #374151',height:44,marginTop:8,display:'flex',alignItems:'flex-end',paddingBottom:6,fontSize:14,color:'#374151'}}>
-                {data.inspDate ? new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
-              </div>
-              <div style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Date of Inspection</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom submit */}
-      <div style={{textAlign:'center',padding:'20px 0 32px'}}>
-        <button onClick={handleSubmit} disabled={submitting} style={{background:INSP_SH,color:'white',border:'none',borderRadius:6,padding:'13px 40px',fontWeight:700,fontSize:16,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 3px 12px rgba(27,67,50,0.3)'}}>
-          {submitting?'⏳ Generating & Sending…':'📤 Submit Inspection Report'}
-        </button>
-        <div style={{fontSize:11,color:'#9ca3af',marginTop:8}}>Generates a PDF and emails it</div>
-      </div>
-    </div>
-  );
-}
-
-
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
+
+// ── Auth session (module-level so all storage calls pick it up automatically) ──
+let currentSession = null;
+try {
+  const stored = localStorage.getItem('fbmt_session');
+  if (stored) currentSession = JSON.parse(stored);
+} catch {}
+
+async function supaLogin(email, password) {
+  const resp = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error_description || data.msg || 'Login failed');
+  currentSession = data;
+  try { localStorage.setItem('fbmt_session', JSON.stringify(data)); } catch {}
+  return data;
+}
+
+async function supaLogout() {
+  if (currentSession?.access_token) {
+    await fetch(SUPABASE_URL + '/auth/v1/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + currentSession.access_token },
+    }).catch(() => {});
+  }
+  currentSession = null;
+  try { localStorage.removeItem('fbmt_session'); } catch {}
+}
+
+async function supaGetProfile() {
+  if (!currentSession?.access_token) return null;
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*&id=eq.' + currentSession.user.id, {
+    headers: supaHeaders(),
+  });
+  if (!resp.ok) return null;
+  const rows = await resp.json();
+  return rows[0] || null;
+}
 
 function isConfigured() {
   return SUPABASE_URL
@@ -2316,10 +924,11 @@ function isConfigured() {
 }
 
 function supaHeaders() {
+  const bearer = currentSession?.access_token || SUPABASE_ANON_KEY;
   return {
     'Content-Type': 'application/json',
     'apikey': SUPABASE_ANON_KEY,
-    'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+    'Authorization': 'Bearer ' + bearer,
     'Prefer': 'return=representation'
   };
 }
@@ -2364,7 +973,7 @@ const storage = {
     }
     const { clientName, asOfDate } = parseKey(key);
     const parsed = JSON.parse(value);
-    const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString() };
+    const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: currentSession?.user?.id || null };
 
     // Check if record already exists
     const checkUrl = SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
@@ -2408,6 +1017,12 @@ const storage = {
 export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
+  const [session, setSession] = useState(currentSession);
+  const [profile, setProfile] = useState(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
@@ -2425,17 +1040,7 @@ export default function BalanceSheet() {
   const [editingFolder, setEditingFolder] = useState(null); // { path, newName }
   const [linkedEntityNWMap, setLinkedEntityNWMap] = useState({}); // { clientName: netWorth }
   const [availableEntities, setAvailableEntities] = useState([]);
-  const [corpPersonalDebt, setCorpPersonalDebt] = useState([]);
-  const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
-  const [taxReconData, setTaxReconData] = useState(null);
-  const [taxReconLoading, setTaxReconLoading] = useState(false);
-  const [taxReconError, setTaxReconError] = useState("");
-  const [taxDragOver, setTaxDragOver] = useState(false);
-  const [showInspHistory, setShowInspHistory] = useState(false);
-  const [commodityPrices, setCommodityPrices] = useState(() => loadCommodityPrices());
-  const [showPriceList, setShowPriceList] = useState(false);
-  const [editingPrice, setEditingPrice] = useState(null); // { id, field, value }
-  const [pendingResponses, setPendingResponses] = useState({}); // { clientName: shareRecord }
+  const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
 
@@ -2449,6 +1054,13 @@ export default function BalanceSheet() {
     el.id = "fbmt-styles"; el.textContent = FBMT_CSS;
     if (!document.getElementById("fbmt-styles")) document.head.appendChild(el);
   }, []);
+
+  // Load profile (role) when session exists
+  useEffect(() => {
+    if (session?.access_token) {
+      supaGetProfile().then(p => setProfile(p)).catch(() => {});
+    }
+  }, [session?.access_token]);
 
   const set = (k, v) => setData(d => ({ ...d, [k]: v }));
   const setArr = (k, idx, field, v) => setData(d => {
@@ -2494,7 +1106,7 @@ export default function BalanceSheet() {
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [], inspShareId: p.inspShareId || '', hasResponse: false });
+              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [] });
             }
           } catch {}
         }
@@ -2505,7 +1117,6 @@ export default function BalanceSheet() {
   };
   useEffect(() => {
     loadSavedList();
-    checkAllPendingResponses();
     // Load any user-created folders
     try {
       const stored = localStorage.getItem("fbmt_userFolders");
@@ -3342,172 +1953,7 @@ export default function BalanceSheet() {
     setEditingFolder(null);
   };
 
-
-  // Check for pending customer inspection responses for all clients
-  const checkAllPendingResponses = async () => {
-    try {
-      const resp = await fetch(
-        SUPABASE_URL + '/rest/v1/inspection_shares?responded_at=not.is.null&select=client_name,share_id,responded_at,response',
-        { headers: supaHeaders() }
-      );
-      if (!resp.ok) return;
-      const rows = await resp.json();
-      const map = {};
-      rows.forEach(r => { map[r.client_name] = r; });
-      setPendingResponses(map);
-    } catch {}
-  };
-
-
-  // Auto-check for customer inspection response when sheet has a shareId
-  useEffect(() => {
-    async function checkForResponse() {
-      if (!data.inspShareId) { setHasCustomerResponse(false); return; }
-      try {
-        const resp = await fetch(
-          SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + data.inspShareId + '&select=responded_at',
-          { headers: supaHeaders() }
-        );
-        const rows = await resp.json();
-        setHasCustomerResponse(!!(rows[0]?.responded_at));
-      } catch { setHasCustomerResponse(false); }
-    }
-    checkForResponse();
-  }, [data.inspShareId]);
-
   // ── Corp Personal Debt Loader ──────────────────────────────────────────────
-  // ── Commodity price lookup ───────────────────────────────────────────────────
-  const lookupPrice = (name) => {
-    if (!name) return null;
-    const needle = name.toLowerCase().trim();
-    const match = commodityPrices.find(p =>
-      needle.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(needle)
-    );
-    return match ? match.price : null;
-  };
-
-  const updateCommodityPrice = (id, field, value) => {
-    const updated = commodityPrices.map(p => p.id === id ? {...p, [field]: value} : p);
-    setCommodityPrices(updated);
-    saveCommodityPrices(updated);
-  };
-
-  // ── Tax Reconciliation ───────────────────────────────────────────────────────
-  const processTaxPDF = async (file) => {
-    setTaxReconLoading(true);
-    setTaxReconError("");
-    setTaxReconData(null);
-    try {
-      // Convert PDF to base64
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(",")[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      // Build balance sheet snapshot for comparison
-      const bsSnap = {
-        totalAssets, totalLTAssets, totalCurrentAssets,
-        totalLiabilities: n(data.operatingNotes?.reduce((s,r)=>s+n(r.balance),0)||0) +
-          data.intermediatDebt?.reduce((s,r)=>s+n(r.principal),0) +
-          data.reMortgages?.reduce((s,r)=>s+n(r.principal),0),
-        netWorth: totalAssets - (n(data.operatingNotes?.reduce((s,r)=>s+n(r.balance),0)||0) +
-          (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0) +
-          (data.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)),
-        budgetTotalIncome,
-        budgetTotalExpenses,
-        budgetNetIncome: budgetTotalIncome - budgetTotalExpenses,
-        machineryVal: machVal,
-        realEstateVal: reTotal,
-      };
-
-      const prompt = `You are an agricultural loan officer analyzing a tax return for reconciliation against a balance sheet.
-
-Extract all key financial figures from this tax return and return ONLY valid JSON (no markdown, no explanation).
-
-Balance sheet figures for comparison:
-- Total Assets: $${Math.round(bsSnap.totalAssets).toLocaleString()}
-- Total Liabilities: $${Math.round(bsSnap.totalLiabilities).toLocaleString()}
-- Net Worth: $${Math.round(bsSnap.netWorth).toLocaleString()}
-- Budget Income: $${Math.round(bsSnap.budgetTotalIncome).toLocaleString()}
-- Budget Expenses: $${Math.round(bsSnap.budgetTotalExpenses).toLocaleString()}
-- Budget Net Income: $${Math.round(bsSnap.budgetNetIncome).toLocaleString()}
-- Machinery/Equipment: $${Math.round(bsSnap.machineryVal).toLocaleString()}
-- Real Estate: $${Math.round(bsSnap.realEstateVal).toLocaleString()}
-
-Return this exact JSON structure:
-{
-  "formType": "1040 Schedule F" or "1065" or "1120S" etc,
-  "taxYear": 2024,
-  "taxpayerName": "name from return",
-  "ein": "EIN if found",
-  "fields": [
-    {"label": "Gross Farm Income", "value": 0},
-    {"label": "Total Farm Expenses", "value": 0},
-    {"label": "Net Farm Profit/Loss", "value": 0},
-    {"label": "Interest Expense", "value": 0},
-    {"label": "Depreciation", "value": 0},
-    {"label": "Total Gross Income", "value": 0},
-    {"label": "Adjusted Gross Income", "value": 0}
-  ],
-  "reconciliation": [
-    {
-      "label": "Farm Income",
-      "bsValue": ${Math.round(bsSnap.budgetTotalIncome)},
-      "taxValue": 0,
-      "flag": "ok|medium|high",
-      "note": "brief note"
-    },
-    {
-      "label": "Net Farm Income",
-      "bsValue": ${Math.round(bsSnap.budgetNetIncome)},
-      "taxValue": 0,
-      "flag": "ok|medium|high",
-      "note": ""
-    },
-    {
-      "label": "Implied Debt (from interest ÷ 6%)",
-      "bsValue": ${Math.round(bsSnap.totalLiabilities)},
-      "taxValue": null,
-      "flag": "ok",
-      "note": "calculate as interest expense / 0.06 for comparison"
-    }
-  ],
-  "commentary": "2-4 sentence plain-English summary for the loan officer noting any significant discrepancies between the tax return and the balance sheet, and what they might mean. Focus on income verification, debt coverage, and any red flags."
-}
-
-Flag rules: "high" if variance >25% or >$50,000, "medium" if variance 10-25%, "ok" otherwise.
-Fill in all taxValue fields from the actual tax return. Use null if a figure cannot be found.`;
-
-      const resp = await fetch("/.netlify/functions/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          max_tokens: 2000,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-              { type: "text", text: prompt }
-            ]
-          }]
-        })
-      });
-
-      if (!resp.ok) throw new Error("API error: " + resp.status);
-      const json = await resp.json();
-      const text = json.content?.filter(b=>b.type==="text").map(b=>b.text).join("") || "";
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
-      setTaxReconData(parsed);
-    } catch(e) {
-      setTaxReconError("Error processing PDF: " + e.message + ". Make sure it is a readable (not scanned image) PDF.");
-    }
-    setTaxReconLoading(false);
-  };
-
   const loadCorpPersonalDebt = async () => {
     if (!data.clientName) return;
     try {
@@ -4528,13 +2974,76 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   }
 
   // ── Home Screen ────────────────────────────────────────────────────────────
+  // ── Login screen ────────────────────────────────────────────────────────────
+  if (!session) {
+    const handleLogin = async (e) => {
+      e && e.preventDefault();
+      setLoginError(""); setLoginLoading(true);
+      try {
+        const s = await supaLogin(loginEmail, loginPassword);
+        setSession(s);
+      } catch(err) {
+        setLoginError(err.message || "Login failed. Check your email and password.");
+      } finally { setLoginLoading(false); }
+    };
+    return (
+      <div style={{minHeight:"100vh",background:"#6B0E1E",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+        <div style={{background:"white",borderRadius:14,padding:40,width:"min(400px,100%)",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+          <div style={{textAlign:"center",marginBottom:28}}>
+            <div style={{fontSize:32,marginBottom:8}}>🏦</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:22,color:"#6B0E1E"}}>First Bank of Montana</div>
+            <div style={{fontSize:13,color:"#888",marginTop:4}}>Agricultural Balance Sheet System</div>
+          </div>
+          {loginError && (
+            <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#991b1b"}}>
+              {loginError}
+            </div>
+          )}
+          <div style={{marginBottom:14}}>
+            <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>EMAIL</label>
+            <input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)}
+              placeholder="your@email.com" onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+              style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"9px 12px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{marginBottom:22}}>
+            <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>PASSWORD</label>
+            <input type="password" value={loginPassword} onChange={e=>setLoginPassword(e.target.value)}
+              placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+              style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"9px 12px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <button onClick={handleLogin} disabled={loginLoading}
+            style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:6,padding:"11px",fontWeight:700,fontSize:15,cursor:loginLoading?"wait":"pointer",opacity:loginLoading?.7:1,fontFamily:"inherit"}}>
+            {loginLoading ? "Signing in…" : "Sign In"}
+          </button>
+          <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:16}}>
+            Contact your administrator to get access
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (screen === "home") {
     return (
       <div className="app">
         <div className="home-top">
-          <div>
-            <div className="home-top-title">First Bank of Montana</div>
-            <div className="home-top-sub">Agricultural Balance Sheet System</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div className="home-top-title">First Bank of Montana</div>
+              <div className="home-top-sub">Agricultural Balance Sheet System</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              {session?.user?.email && (
+                <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>
+                  {profile?.full_name || session.user.email}
+                  {profile?.role === "admin" && <span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}
+                </span>
+              )}
+              <button onClick={async()=>{ await supaLogout(); setSession(null); setProfile(null); }}
+                style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
         <div className="home-body">
@@ -4848,11 +3357,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                                 <div style={{fontSize:".9rem",fontWeight:700,color:"#1a1a1a"}}>{s.clientName}</div>
                                 <div className="sheet-date">As of {s.asOfDate}</div>
                                 {s.savedAt && <div className="sheet-meta">Saved {new Date(s.savedAt).toLocaleDateString()}</div>}
-                                {s.inspShareId && s.hasResponse && (
-                                  <div style={{fontSize:".72rem",fontWeight:700,color:"#15803d",marginTop:2}}>
-                                    📬 Customer responded
-                                  </div>
-                                )}
                               </div>
                               <button className="sheet-load-btn"
                                 onClick={e=>{e.stopPropagation();loadSheet(s.key);}}>
@@ -5022,6 +3526,18 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             {data.clientName}
           </span>
         )}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+          {session?.user?.email && (
+            <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>
+              {profile?.full_name || session.user.email}
+              {profile?.role === "admin" && <span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}
+            </span>
+          )}
+          <button onClick={async()=>{ await supaLogout(); setSession(null); setProfile(null); setScreen("home"); setData(emptyData()); }}
+            style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",color:"rgba(255,255,255,.8)",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit"}}>
+            Sign Out
+          </button>
+        </div>
       </div>
 
       <div className="tab-bar">
@@ -5036,14 +3552,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <button className={"tab-btn" + (activeTab === "compare" ? " tab-active" : "")}
           onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
           Year Comparison
-        </button>
-        <button className={"tab-btn" + (activeTab === "taxrecon" ? " tab-active" : "")}
-          onClick={()=>setActiveTab("taxrecon")}>
-          Tax Reconciliation
-        </button>
-        <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
-          onClick={()=>setActiveTab("inspection")}>
-          Ag Inspection{hasCustomerResponse ? " 📬" : ""}
         </button>
       </div>
 
@@ -5123,11 +3631,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 </strong>
               </div>
             </div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <button onClick={()=>setShowPriceList(true)}
-                style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-                📋 Price List
-              </button>
             <button className="btn btn-save" onClick={saveSheet}
               disabled={!data.clientName || saveStatus === "saving"}>
               {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save"}
@@ -5136,99 +3639,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{fontSize:".85rem"}}>
               Print Budget
             </button>
-            </div>
           </div>
-
-          {/* ── Price List Modal ── */}
-          {showPriceList && (
-            <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-              <div style={{background:"white",borderRadius:14,padding:28,maxWidth:620,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:"1.05rem",color:"#1a1a1a"}}>Commodity Price List</div>
-                    <div style={{fontSize:".75rem",color:"#888",marginTop:2}}>
-                      First Bank of Montana · Prices auto-fill on the Budget tab · Edit any price to update
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{
-                      const newId = commodityPrices.length;
-                      const updated = [...commodityPrices,{id:newId,category:"Crops",name:"",price:"",unit:"bu"}];
-                      setCommodityPrices(updated);
-                      saveCommodityPrices(updated);
-                    }} style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"4px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-                      + Add
-                    </button>
-                    <button onClick={()=>{
-                      if(window.confirm("Reset to FBMT default prices? Your edits will be lost.")) {
-                        const defaults = DEFAULT_COMMODITY_PRICES.map((p,i)=>({...p,id:i}));
-                        setCommodityPrices(defaults);
-                        saveCommodityPrices(defaults);
-                      }
-                    }} style={{background:"none",border:"1px solid #ddd",borderRadius:6,padding:"4px 12px",color:"#888",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
-                      Reset to Defaults
-                    </button>
-                  </div>
-                </div>
-
-                {["Crops","Livestock"].map(cat => (
-                  <div key={cat} style={{marginBottom:16}}>
-                    <div style={{background:"#6B0E1E",color:"white",fontWeight:700,fontSize:".8rem",padding:"6px 12px",borderRadius:"6px 6px 0 0",letterSpacing:".05em",textTransform:"uppercase"}}>
-                      {cat}
-                    </div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:".85rem"}}>
-                      <thead>
-                        <tr style={{background:"#f5f0f0"}}>
-                          <th style={{padding:"7px 12px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Commodity</th>
-                          <th style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Price</th>
-                          <th style={{padding:"7px 12px",textAlign:"center",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Unit</th>
-                          <th style={{width:36}}></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {commodityPrices.filter(p=>p.category===cat).map((p,i)=>(
-                          <tr key={p.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"white":"#fafafa"}}>
-                            <td style={{padding:"6px 12px"}}>
-                              <input type="text" value={p.name}
-                                onChange={e=>updateCommodityPrice(p.id,"name",e.target.value)}
-                                style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".85rem",width:"100%",fontFamily:"inherit",outline:"none"}} />
-                            </td>
-                            <td style={{padding:"6px 12px"}}>
-                              <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
-                                <span style={{color:"#888",fontSize:".85rem"}}>$</span>
-                                <input type="text" value={p.price}
-                                  onChange={e=>updateCommodityPrice(p.id,"price",e.target.value.replace(/[^0-9.]/g,""))}
-                                  style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".9rem",width:80,textAlign:"right",fontFamily:"inherit",outline:"none",fontWeight:700,color:"#6B0E1E"}} />
-                              </div>
-                            </td>
-                            <td style={{padding:"6px 12px",textAlign:"center"}}>
-                              <select value={p.unit} onChange={e=>updateCommodityPrice(p.id,"unit",e.target.value)}
-                                style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 6px",fontSize:".8rem",fontFamily:"inherit",outline:"none",background:"white"}}>
-                                {["bu","lb","ton","cwt","bale","hd"].map(u=><option key={u}>{u}</option>)}
-                              </select>
-                            </td>
-                            <td style={{padding:"4px 8px",textAlign:"center"}}>
-                              <button onClick={()=>{
-                                const updated = commodityPrices.filter(x=>x.id!==p.id);
-                                setCommodityPrices(updated);
-                                saveCommodityPrices(updated);
-                              }} style={{background:"#fee2e2",color:"#b91c1c",border:"none",borderRadius:4,padding:"2px 7px",cursor:"pointer",fontSize:12}}>×</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
-
-                <div style={{fontSize:".72rem",color:"#aaa",marginBottom:12}}>
-                  Prices save automatically. When a crop or livestock type matches a name in this list, the price auto-fills and locks. Check "Contracted" on a crop row to override with a custom price.
-                </div>
-                <button onClick={()=>setShowPriceList(false)} className="btn btn-secondary" style={{width:"100%"}}>Close</button>
-              </div>
-            </div>
-          )}
-
           <div className="budget-body">
             <BudgetView
               data={data}
@@ -5253,8 +3664,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               setArr={setArr}
               removeRow={removeRow}
               addRow={addRow}
-              lookupPrice={lookupPrice}
-              commodityPrices={commodityPrices}
             />
           </div>
         </div>
@@ -5282,321 +3691,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               BOLD_ROWS={BOLD_ROWS}
             />
           </div>
-        </div>
-      )}
-
-      {activeTab === "taxrecon" && (
-        <div style={{maxWidth:900,margin:"0 auto",padding:20}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
-            <div>
-              <div style={{fontWeight:800,fontSize:18,color:"#1a1a1a"}}>Tax Return Reconciliation</div>
-              <div style={{fontSize:".82rem",color:"#888",marginTop:2}}>
-                {data.clientName} — Compare tax return figures against the balance sheet
-              </div>
-            </div>
-            {taxReconData && (
-              <button onClick={()=>{setTaxReconData(null);setTaxReconError("");}}
-                className="btn btn-secondary" style={{fontSize:".82rem"}}>
-                Clear / Upload New
-              </button>
-            )}
-          </div>
-
-          {/* Drop zone */}
-          {!taxReconData && !taxReconLoading && (
-            <div
-              onDragOver={e=>{e.preventDefault();setTaxDragOver(true);}}
-              onDragLeave={()=>setTaxDragOver(false)}
-              onDrop={async e=>{
-                e.preventDefault(); setTaxDragOver(false);
-                const file = e.dataTransfer.files[0];
-                if (file && file.type==="application/pdf") processTaxPDF(file);
-                else setTaxReconError("Please drop a PDF file.");
-              }}
-              style={{border:`2.5px dashed ${taxDragOver?"#6B0E1E":"#c0c0c0"}`,
-                borderRadius:12,padding:48,textAlign:"center",cursor:"pointer",
-                background:taxDragOver?"#fdf5f5":"#fafafa",transition:"all .2s"}}
-              onClick={()=>document.getElementById("tax-pdf-input").click()}>
-              <div style={{fontSize:"3rem",marginBottom:12}}>📄</div>
-              <div style={{fontWeight:700,fontSize:"1.1rem",color:"#1a1a1a",marginBottom:6}}>
-                Drop Tax Return PDF Here
-              </div>
-              <div style={{fontSize:".85rem",color:"#888",marginBottom:16}}>
-                Supports 1040 Schedule F, 1065 Partnership, 1120S S-Corp, or any farm tax return
-              </div>
-              <button className="btn btn-primary" style={{pointerEvents:"none"}}>
-                Browse PDF
-              </button>
-              <input id="tax-pdf-input" type="file" accept="application/pdf"
-                style={{display:"none"}}
-                onChange={e=>{
-                  const file = e.target.files[0];
-                  if (file) processTaxPDF(file);
-                  e.target.value="";
-                }} />
-            </div>
-          )}
-
-          {/* Loading */}
-          {taxReconLoading && (
-            <div style={{textAlign:"center",padding:60}}>
-              <div style={{fontSize:"2rem",marginBottom:12}}>🤖</div>
-              <div style={{fontWeight:700,color:"#6B0E1E",marginBottom:6}}>Analyzing tax return...</div>
-              <div style={{fontSize:".82rem",color:"#888"}}>AI is extracting figures from the PDF</div>
-            </div>
-          )}
-
-          {/* Error */}
-          {taxReconError && !taxReconLoading && (
-            <div style={{background:"#fce8e8",border:"1px solid #f0c0c0",borderRadius:8,padding:16,color:"#7a1a1a",fontSize:".9rem"}}>
-              ⚠️ {taxReconError}
-            </div>
-          )}
-
-          {/* Results */}
-          {taxReconData && !taxReconLoading && (
-            <div>
-              {/* Tax return summary */}
-              <div style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,padding:20,marginBottom:20}}>
-                <div style={{fontWeight:700,fontSize:"1rem",color:"#1a1a1a",marginBottom:4}}>
-                  📋 {taxReconData.formType} — Tax Year {taxReconData.taxYear}
-                </div>
-                <div style={{fontSize:".78rem",color:"#888",marginBottom:16}}>
-                  {taxReconData.taxpayerName && `Taxpayer: ${taxReconData.taxpayerName}`}
-                  {taxReconData.ein && ` · EIN: ${taxReconData.ein}`}
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
-                  {taxReconData.fields.map((f,i)=>(
-                    <div key={i} style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px"}}>
-                      <div style={{fontSize:".72rem",fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:".05em",marginBottom:3}}>{f.label}</div>
-                      <div style={{fontWeight:700,fontSize:"1rem",color:f.value<0?"#c44":"#1a1a1a"}}>{typeof f.value==="number" ? fmt(f.value) : f.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Reconciliation table */}
-              <div style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden",marginBottom:20}}>
-                <div style={{background:"#1a1a1a",color:"white",padding:"12px 20px",fontWeight:700,fontSize:".9rem"}}>
-                  Balance Sheet vs. Tax Return — Reconciliation
-                </div>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:".88rem"}}>
-                  <thead>
-                    <tr style={{background:"#f5f5f5"}}>
-                      <th style={{padding:"10px 16px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Item</th>
-                      <th style={{padding:"10px 16px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Balance Sheet</th>
-                      <th style={{padding:"10px 16px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Tax Return</th>
-                      <th style={{padding:"10px 16px",textAlign:"center",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Variance</th>
-                      <th style={{padding:"10px 16px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".78rem",textTransform:"uppercase"}}>Flag</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {taxReconData.reconciliation.map((row,i)=>{
-                      const variance = row.taxValue !== null && row.bsValue !== null ? row.taxValue - row.bsValue : null;
-                      const pct = row.bsValue && row.bsValue !== 0 ? Math.abs(variance/row.bsValue*100) : null;
-                      const flagColor = row.flag==="high" ? "#dc2626" : row.flag==="medium" ? "#d97706" : "#16a34a";
-                      const flagBg = row.flag==="high" ? "#fef2f2" : row.flag==="medium" ? "#fffbeb" : "#f0fdf4";
-                      return (
-                        <tr key={i} style={{borderTop:"1px solid #f0f0f0",background:i%2===0?"white":"#fafafa"}}>
-                          <td style={{padding:"10px 16px",fontWeight:600}}>{row.label}</td>
-                          <td style={{padding:"10px 16px",textAlign:"right",color:"#555"}}>{row.bsValue!==null ? fmt(row.bsValue) : "—"}</td>
-                          <td style={{padding:"10px 16px",textAlign:"right",color:"#555"}}>{row.taxValue!==null ? fmt(row.taxValue) : "—"}</td>
-                          <td style={{padding:"10px 16px",textAlign:"center"}}>
-                            {variance!==null ? (
-                              <span style={{fontWeight:700,color:Math.abs(variance)<1000?"#16a34a":variance>0?"#2d5a8e":"#c44"}}>
-                                {variance>0?"+":""}{fmt(variance)}
-                                {pct!==null && <span style={{fontSize:".72rem",marginLeft:4,color:"#888"}}>({pct.toFixed(0)}%)</span>}
-                              </span>
-                            ) : "—"}
-                          </td>
-                          <td style={{padding:"10px 16px"}}>
-                            {row.flag && row.flag !== "ok" && (
-                              <span style={{fontSize:".75rem",fontWeight:700,color:flagColor,background:flagBg,padding:"2px 8px",borderRadius:10}}>
-                                {row.flag==="high" ? "⚠️ Review" : "ℹ️ Note"}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* AI Commentary */}
-              {taxReconData.commentary && (
-                <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,padding:20}}>
-                  <div style={{fontWeight:700,fontSize:".9rem",color:"#2d5a8e",marginBottom:10}}>🤖 AI Analysis</div>
-                  <div style={{fontSize:".88rem",color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
-                    {taxReconData.commentary}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === "inspection" && (
-        <div>
-          {hasCustomerResponse && (
-            <div style={{background:"#e8f5ea",border:"1px solid #22c55e",borderRadius:10,
-              padding:"14px 18px",margin:"12px 12px 0",display:"flex",alignItems:"center",
-              gap:12,flexWrap:"wrap"}}>
-              <span style={{fontSize:"1.3rem"}}>📬</span>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:700,fontSize:".9rem",color:"#15803d"}}>
-                  Customer has submitted their inspection form!
-                </div>
-                <div style={{fontSize:".78rem",color:"#555"}}>
-                  Click Load Response to pull their answers into the inspection form below.
-                </div>
-              </div>
-              <button
-                onClick={()=>{
-                  const sid = data.inspShareId;
-                  if (!sid) return;
-                  fetch(SUPABASE_URL+'/rest/v1/inspection_shares?share_id=eq.'+sid+'&select=response',
-                    {headers:supaHeaders()})
-                    .then(r=>r.json())
-                    .then(rows=>{
-                      if (!rows[0]?.response) return;
-                      const cr = rows[0].response;
-                      setData(d=>({...d,
-                        inspCrops:(d.inspCrops||[]).map((r,i)=>({
-                          ...r,
-                          actualAcres:cr.crops?.[i]?.actualAcres||r.actualAcres,
-                          condition:cr.crops?.[i]?.condition||r.condition,
-                          actualYield:cr.crops?.[i]?.actualYield||r.actualYield,
-                          location:cr.crops?.[i]?.location||r.location,
-                          deviationReason:cr.crops?.[i]?.deviationReason||r.deviationReason,
-                        })),
-                        inspLivestock:(d.inspLivestock||[]).map((r,i)=>({
-                          ...r,
-                          actualHead:cr.livestock?.[i]?.actualHead||r.actualHead,
-                          condition:cr.livestock?.[i]?.condition||r.condition,
-                          estWeight:cr.livestock?.[i]?.estWeight||r.estWeight,
-                          deviationReason:cr.livestock?.[i]?.deviationReason||r.deviationReason,
-                        })),
-                      }));
-                      setHasCustomerResponse(false);
-                    });
-                }}
-                style={{background:"#15803d",color:"white",border:"none",borderRadius:7,
-                  padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
-                  fontSize:".85rem",flexShrink:0}}>
-                Load Response
-              </button>
-            </div>
-          )}
-
-          {/* ── Save Inspection Results ── */}
-          <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,
-            padding:"14px 18px",margin:"12px 12px 0",display:"flex",alignItems:"center",
-            gap:12,flexWrap:"wrap"}}>
-            <span style={{fontSize:"1.2rem"}}>💾</span>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:".88rem",color:"#2d5a8e"}}>Save Inspection Results</div>
-              <div style={{fontSize:".75rem",color:"#666",marginTop:2}}>
-                Save a snapshot of the current inspection with a date so you can review it later.
-              </div>
-            </div>
-            <input type="date"
-              defaultValue={data.inspDate || new Date().toISOString().slice(0,10)}
-              id="insp-save-date"
-              style={{border:"1.5px solid #c0d8f0",borderRadius:6,padding:"6px 10px",
-                fontSize:".85rem",fontFamily:"inherit",color:"#1a1a1a"}} />
-            <button
-              onClick={()=>{
-                const dateVal = document.getElementById('insp-save-date').value
-                  || data.inspDate
-                  || new Date().toISOString().slice(0,10);
-                const snapshot = {
-                  date: dateVal,
-                  savedAt: new Date().toISOString(),
-                  crops: (data.inspCrops||[]).map(r=>({...r})),
-                  livestock: (data.inspLivestock||[]).map(r=>({...r})),
-                };
-                setData(d=>{
-                  const existing = d.inspResults || [];
-                  // Replace if same date exists, otherwise add
-                  const filtered = existing.filter(r=>r.date !== dateVal);
-                  return {...d, inspResults: [...filtered, snapshot]};
-                });
-                // Auto-save the balance sheet
-                const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
-                const savePayload = {...data, inspResults: [...(data.inspResults||[]).filter(r=>r.date!==dateVal), snapshot], _savedAt: new Date().toISOString()};
-                storage.set(key, JSON.stringify(savePayload))
-                  .then(()=>alert('Inspection results saved for ' + dateVal))
-                  .catch(e=>alert('Save error: ' + e.message));
-              }}
-              style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,
-                padding:"7px 16px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
-                fontSize:".85rem",flexShrink:0}}>
-              Save Results
-            </button>
-            {(data.inspResults||[]).length > 0 && (
-              <button
-                onClick={()=>setShowInspHistory(h=>!h)}
-                style={{background:"none",border:"1.5px solid #2d5a8e",color:"#2d5a8e",
-                  borderRadius:7,padding:"6px 14px",fontWeight:700,cursor:"pointer",
-                  fontFamily:"inherit",fontSize:".82rem",flexShrink:0}}>
-                {showInspHistory ? "Hide History" : "View History (" + (data.inspResults||[]).length + ")"}
-              </button>
-            )}
-          </div>
-
-          {/* ── Inspection History ── */}
-          {showInspHistory && (data.inspResults||[]).length > 0 && (
-            <div style={{margin:"0 12px",background:"white",border:"1px solid #c0d8f0",
-              borderRadius:"0 0 10px 10px",overflow:"hidden"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:".85rem"}}>
-                <thead>
-                  <tr style={{background:"#e8f0fb"}}>
-                    <th style={{padding:"8px 14px",textAlign:"left",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Inspection Date</th>
-                    <th style={{padding:"8px 14px",textAlign:"left",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Crops</th>
-                    <th style={{padding:"8px 14px",textAlign:"left",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Saved</th>
-                    <th style={{padding:"8px 14px",textAlign:"center",fontWeight:700,color:"#2d5a8e",fontSize:".78rem",textTransform:"uppercase",letterSpacing:".05em"}}>Load</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...(data.inspResults||[])].sort((a,b)=>b.date.localeCompare(a.date)).map((snap,i)=>(
-                    <tr key={snap.date} style={{borderTop:"1px solid #e8e8e8",background:i%2===0?"white":"#f8faff"}}>
-                      <td style={{padding:"10px 14px",fontWeight:700,color:"#1a1a1a"}}>{snap.date}</td>
-                      <td style={{padding:"10px 14px",color:"#555",fontSize:".82rem"}}>
-                        {(snap.crops||[]).filter(r=>r.budgetedCrop).map(r=>
-                          r.budgetedCrop + (r.actualAcres ? " (" + r.actualAcres + " ac)" : "")
-                        ).join(", ") || "—"}
-                      </td>
-                      <td style={{padding:"10px 14px",color:"#888",fontSize:".78rem"}}>
-                        {snap.savedAt ? new Date(snap.savedAt).toLocaleDateString() : "—"}
-                      </td>
-                      <td style={{padding:"10px 14px",textAlign:"center"}}>
-                        <button
-                          onClick={()=>{
-                            if (!window.confirm("Load inspection from " + snap.date + "? This will replace current inspection data.")) return;
-                            setData(d=>({
-                              ...d,
-                              inspDate: snap.date,
-                              inspCrops: snap.crops || d.inspCrops,
-                              inspLivestock: snap.livestock || d.inspLivestock,
-                            }));
-                            setShowInspHistory(false);
-                          }}
-                          style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:5,
-                            padding:"4px 12px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
-                            fontSize:".78rem"}}>
-                          Load
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <InspectionView data={data} setData={setData} />
         </div>
       )}
     </div>
