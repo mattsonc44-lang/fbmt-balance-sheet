@@ -1035,6 +1035,7 @@ const iTa=(val,onChange,ph,rows=3)=>React.createElement('textarea',{value:val,on
 function InspectionView({data,setData}){
   const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
+  const [showShareInsp,setShowShareInsp]=React.useState(false),[shareInspEmail,setShareInspEmail]=React.useState(''),[shareInspSending,setShareInspSending]=React.useState(false),[shareInspSent,setShareInspSent]=React.useState(false),[shareInspErr,setShareInspErr]=React.useState('');
   React.useEffect(()=>{
     if(!data.inspCrops||data.inspCrops.length===0){
       const rows=(data.budgetCrops||[]).filter(r=>r.crop||r.acres).map(r=>({id:inspUid(),budgetedCrop:r.crop||'',budgetedAcres:r.acres||'',budgetedYield:r.yieldPerAcre||'',budgetedUnit:r.unit||'bu',budgetedPrice:r.price||'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}));
@@ -1064,6 +1065,34 @@ function InspectionView({data,setData}){
   const crops=data.inspCrops||[],lsRows=data.inspLivestock||[],invRows=data.inspInventory||[],photos=data.inspPhotos||[],loans=data.inspLoans||['','',''];
   const cropTot=crops.reduce((s,r)=>s+cRT(r),0),lsTot=lsRows.reduce((s,r)=>s+lRT(r),0),invTot=invRows.reduce((s,r)=>s+iRT(r),0),grand=cropTot+lsTot+invTot;
   const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
+  const handleShareInsp=async()=>{
+    if(!shareInspEmail.trim()){setShareInspErr('Please enter an email address.');return;}
+    setShareInspErr('');setShareInspSending(true);
+    try{
+      const ECFG={serviceId:'YOUR_SERVICE_ID',templateId:'YOUR_TEMPLATE_ID',publicKey:'YOUR_PUBLIC_KEY'};
+      const crops=data.inspCrops||[];
+      const deviations=crops.filter(r=>{const p=devPct(r.actualAcres,r.budgetedAcres);return p!==null&&Math.abs(p)>=5;})
+        .map(r=>`${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac → actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) — ${r.deviationReason||'no reason given'}`).join('\n')||'None';
+      if(ECFG.serviceId==='YOUR_SERVICE_ID'){
+        // EmailJS not configured — download PDF instead
+        handlePDF(); setShareInspSent(true); return;
+      }
+      let pdfData=null;
+      if(window.html2pdf){
+        const b64=await window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'').replace(/\s+/g,'-')}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).outputPdf('datauristring');
+        pdfData=b64.split(',')[1];
+      }
+      await window.emailjs.send(ECFG.serviceId,ECFG.templateId,{
+        to_email:shareInspEmail,customer:data.clientName||'',
+        inspector:data.inspInspector||'',date:data.inspDate||'',
+        grand_total:iFmt$(grand),deviations,
+        body:`Ag Inspection Report\nCustomer: ${data.clientName}\nDate: ${data.inspDate}\nInspector: ${data.inspInspector||''}\n\nBudget Deviations:\n${deviations}\n\nGrand Total: ${iFmt$(grand)}\n\nPasture: ${data.inspPastureCond||'—'}\nWater: ${data.inspWaterCond||'—'}\nEquipment: ${data.inspEquipCond||'—'}`,
+        pdf_attachment:pdfData,pdf_name:`ag-inspection-${(data.clientName||'').replace(/\s+/g,'-')}.pdf`,
+      },ECFG.publicKey);
+      setShareInspSent(true);
+    }catch(e){setShareInspErr('Send failed: '+(e.text||e.message||String(e)));}
+    finally{setShareInspSending(false);}
+  };
   const handleSubmit=async()=>{setSubmitErr('');setSubmitting(true);try{handlePDF();}catch(e){setSubmitErr('PDF failed: '+e.message);}finally{setSubmitting(false);}};
   if(submitted)return React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:48}},React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420}},React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),React.createElement('div',{style:{fontWeight:800,fontSize:22,color:ISH,marginBottom:8}},'Report Complete!'),React.createElement('button',{onClick:()=>setSubmitted(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer',marginTop:12}},'New Inspection')));
 
@@ -1080,8 +1109,29 @@ function InspectionView({data,setData}){
       React.createElement('div',null,React.createElement('div',{style:{fontWeight:800,fontSize:18,color:ISH}},'Ag Inspection Report'),React.createElement('div',{style:{fontSize:12,color:'#6b7280'}},'Pre-loaded from Budget tab · Fill in actuals below')),
       React.createElement('div',{style:{display:'flex',gap:8}},
         React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
+        React.createElement('button',{onClick:()=>{setShareInspSent(false);setShareInspErr('');setShowShareInsp(true);},style:{background:ISH,color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'📧 Share with Customer'),
         React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📤 Save PDF Report'))),
     submitErr&&React.createElement('div',{style:{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}},'⚠️ '+submitErr),
+    // Share with Customer modal
+    showShareInsp&&React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
+      shareInspSent
+        ? React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:380}},
+            React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),
+            React.createElement('div',{style:{fontWeight:800,fontSize:20,color:ISH,marginBottom:8}},'Inspection Sent!'),
+            React.createElement('p',{style:{color:'#6b7280',fontSize:14,marginBottom:20}},'The inspection report has been sent to ',React.createElement('strong',null,shareInspEmail)),
+            React.createElement('button',{onClick:()=>setShowShareInsp(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer'}},'Done'))
+        : React.createElement('div',{style:{background:'white',borderRadius:12,padding:0,width:'min(480px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)',overflow:'hidden'}},
+            React.createElement('div',{style:{background:ISH,padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:16}},'📧 Share Inspection with Customer'),
+              React.createElement('button',{onClick:()=>setShowShareInsp(false),style:{background:'none',border:'none',color:'rgba(255,255,255,.7)',fontSize:20,cursor:'pointer',lineHeight:1}},'×')),
+            React.createElement('div',{style:{padding:24}},
+              React.createElement('label',{style:{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:6,letterSpacing:.3}},'CUSTOMER EMAIL'),
+              React.createElement('div',{style:{display:'flex',gap:8,marginBottom:shareInspErr?8:0}},
+                React.createElement('input',{type:'email',value:shareInspEmail,onChange:e=>setShareInspEmail(e.target.value),placeholder:'customer@email.com',onKeyDown:e=>e.key==='Enter'&&handleShareInsp(),style:{flex:1,border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',outline:'none'}}),
+                React.createElement('button',{onClick:handleShareInsp,disabled:shareInspSending,style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:shareInspSending?'wait':'pointer',opacity:shareInspSending?.7:1,whiteSpace:'nowrap'}},shareInspSending?'Sending…':'Send PDF')),
+              shareInspErr&&React.createElement('div',{style:{color:'#991b1b',fontSize:12,marginTop:6}},shareInspErr),
+              React.createElement('div',{style:{marginTop:16,padding:'10px 12px',background:'#f0fdf4',borderRadius:6,fontSize:12,color:'#374151',borderLeft:'3px solid #22c55e'}},
+                '📋 Sends a PDF of the full inspection report including all conditions, deviations, photos, and financial summary.')))),
     React.createElement('div',{style:{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}},[['#22c55e','On Budget (< 5%)'],['#f59e0b','Minor Deviation (5–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>React.createElement('div',{key:l,style:{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}},React.createElement('div',{style:{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}),l))),
     React.createElement('div',{ref:printRef},
       // Header
