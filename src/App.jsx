@@ -1035,6 +1035,7 @@ const iTa=(val,onChange,ph,rows=3)=>React.createElement('textarea',{value:val,on
 function InspectionView({data,setData}){
   const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
+  const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(null);
   const [showShareInsp,setShowShareInsp]=React.useState(false),[shareInspEmail,setShareInspEmail]=React.useState(''),[shareInspSending,setShareInspSending]=React.useState(false),[shareInspSent,setShareInspSent]=React.useState(false),[shareInspErr,setShareInspErr]=React.useState('');
   React.useEffect(()=>{
     if(!data.inspCrops||data.inspCrops.length===0){
@@ -1064,35 +1065,58 @@ function InspectionView({data,setData}){
   const iRT=r=>(parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
   const crops=data.inspCrops||[],lsRows=data.inspLivestock||[],invRows=data.inspInventory||[],photos=data.inspPhotos||[],loans=data.inspLoans||['','',''];
   const cropTot=crops.reduce((s,r)=>s+cRT(r),0),lsTot=lsRows.reduce((s,r)=>s+lRT(r),0),invTot=invRows.reduce((s,r)=>s+iRT(r),0),grand=cropTot+lsTot+invTot;
-  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
-  const handleShareInsp=async()=>{
-    if(!shareInspEmail.trim()){setShareInspErr('Please enter an email address.');return;}
-    setShareInspErr('');setShareInspSending(true);
+  const generateShare=async()=>{
+    setShareStatus('generating');setShowShareModal(true);
     try{
-      const ECFG={serviceId:'YOUR_SERVICE_ID',templateId:'YOUR_TEMPLATE_ID',publicKey:'YOUR_PUBLIC_KEY'};
-      const crops=data.inspCrops||[];
-      const deviations=crops.filter(r=>{const p=devPct(r.actualAcres,r.budgetedAcres);return p!==null&&Math.abs(p)>=5;})
-        .map(r=>`${r.budgetedCrop}: budgeted ${r.budgetedAcres}ac → actual ${r.actualAcres}ac (${devPct(r.actualAcres,r.budgetedAcres).toFixed(1)}%) — ${r.deviationReason||'no reason given'}`).join('\n')||'None';
-      if(ECFG.serviceId==='YOUR_SERVICE_ID'){
-        // EmailJS not configured — download PDF instead
-        handlePDF(); setShareInspSent(true); return;
+      const shareId=Math.random().toString(36).slice(2,10).toUpperCase();
+      const pin=String(Math.floor(100000+Math.random()*900000));
+      const SUPABASE_URL_L=(window.SUPABASE_URL||'').replace(/\/+$/,'');
+      const ANON_KEY_L=window.SUPABASE_ANON_KEY||'';
+      if(!SUPABASE_URL_L||SUPABASE_URL_L==='https://YOUR_PROJECT_ID.supabase.co'){
+        setShareStatus('error:Supabase not configured. Add your project URL and key to config.js.');return;
       }
-      let pdfData=null;
-      if(window.html2pdf){
-        const b64=await window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'').replace(/\s+/g,'-')}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).outputPdf('datauristring');
-        pdfData=b64.split(',')[1];
-      }
-      await window.emailjs.send(ECFG.serviceId,ECFG.templateId,{
-        to_email:shareInspEmail,customer:data.clientName||'',
-        inspector:data.inspInspector||'',date:data.inspDate||'',
-        grand_total:iFmt$(grand),deviations,
-        body:`Ag Inspection Report\nCustomer: ${data.clientName}\nDate: ${data.inspDate}\nInspector: ${data.inspInspector||''}\n\nBudget Deviations:\n${deviations}\n\nGrand Total: ${iFmt$(grand)}\n\nPasture: ${data.inspPastureCond||'—'}\nWater: ${data.inspWaterCond||'—'}\nEquipment: ${data.inspEquipCond||'—'}`,
-        pdf_attachment:pdfData,pdf_name:`ag-inspection-${(data.clientName||'').replace(/\s+/g,'-')}.pdf`,
-      },ECFG.publicKey);
-      setShareInspSent(true);
-    }catch(e){setShareInspErr('Send failed: '+(e.text||e.message||String(e)));}
-    finally{setShareInspSending(false);}
+      const payload={share_id:shareId,pin,client_name:data.clientName,as_of_date:data.asOfDate||data.inspDate||new Date().toISOString().slice(0,10),
+        insp_data:{inspCrops:data.inspCrops||[],inspLivestock:data.inspLivestock||[],inspInventory:data.inspInventory||[],
+          inspPastureCond:data.inspPastureCond||'',inspPastureCmt:data.inspPastureCmt||'',inspWaterCond:data.inspWaterCond||'',
+          inspWaterCmt:data.inspWaterCmt||'',inspEquipCond:data.inspEquipCond||'',inspEquipCmt:data.inspEquipCmt||'',
+          inspEnvCmt:data.inspEnvCmt||'',inspAddlCmt:data.inspAddlCmt||'',clientName:data.clientName,inspDate:data.inspDate},response:null};
+      const resp=await fetch(SUPABASE_URL_L+'/rest/v1/inspection_shares',{method:'POST',
+        headers:{'Content-Type':'application/json','apikey':ANON_KEY_L,'Authorization':'Bearer '+(currentSession?.access_token||ANON_KEY_L),'Prefer':'return=representation'},
+        body:JSON.stringify(payload)});
+      if(!resp.ok)throw new Error(await resp.text());
+      const origin=window.location.origin;
+      setShareLink(origin+'/?id='+shareId);setSharePin(pin);setShareStatus('ready');
+      setData(d=>({...d,inspShareId:shareId}));
+      const saveKey=STORAGE_PREFIX+data.clientName.replace(/\s+/g,'_')+':'+(data.asOfDate||new Date().toISOString().slice(0,10));
+      storage.set(saveKey,JSON.stringify({...data,inspShareId:shareId,_savedAt:new Date().toISOString()})).catch(()=>{});
+    }catch(e){setShareStatus('error:'+e.message);}
   };
+
+  const checkCustomerResponse=async()=>{
+    setCheckingResponse(true);
+    try{
+      const sid=data.inspShareId||(shareLink?shareLink.split('id=')[1]:null);
+      if(!sid){alert('No share link found. Use "Share with Customer" first.');setCheckingResponse(false);return;}
+      const SUPABASE_URL_L=(window.SUPABASE_URL||'').replace(/\/+$/,'');
+      const resp=await fetch(SUPABASE_URL_L+'/rest/v1/inspection_shares?share_id=eq.'+sid+'&select=response,responded_at',{headers:supaHeaders()});
+      const rows=await resp.json();
+      if(rows[0]?.response){
+        const cr=rows[0].response;
+        setCustomerResponse(cr);
+        setData(d=>({...d,
+          inspCrops:(d.inspCrops||[]).map((r,i)=>{const c=cr.crops?.[i]||{};return{...r,actualAcres:c.actualAcres||r.actualAcres,condition:c.condition||r.condition,actualYield:c.actualYield||r.actualYield,location:c.location||r.location,deviationReason:c.deviationReason||r.deviationReason};}),
+          inspLivestock:(d.inspLivestock||[]).map((r,i)=>{const l=cr.livestock?.[i]||{};return{...r,actualHead:l.actualHead||r.actualHead,condition:l.condition||r.condition,estWeight:l.estWeight||r.estWeight,deviationReason:l.deviationReason||r.deviationReason};}),
+          inspPastureCond:cr.pastureCond||d.inspPastureCond,inspPastureCmt:cr.pastureCmt||d.inspPastureCmt,
+          inspWaterCond:cr.waterCond||d.inspWaterCond,inspWaterCmt:cr.waterCmt||d.inspWaterCmt,
+          inspEquipCond:cr.equipCond||d.inspEquipCond,inspEquipCmt:cr.equipCmt||d.inspEquipCmt,
+          inspEnvCmt:cr.envCmt||d.inspEnvCmt,inspAddlCmt:cr.addlCmt||d.inspAddlCmt}));
+        alert('✅ Customer response loaded! Their answers have been filled in.');
+      }else{alert('No response yet — the customer has not submitted the form.');}
+    }catch(e){alert('Error: '+e.message);}
+    setCheckingResponse(false);
+  };
+
+  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
   const handleSubmit=async()=>{setSubmitErr('');setSubmitting(true);try{handlePDF();}catch(e){setSubmitErr('PDF failed: '+e.message);}finally{setSubmitting(false);}};
   if(submitted)return React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:48}},React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420}},React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),React.createElement('div',{style:{fontWeight:800,fontSize:22,color:ISH,marginBottom:8}},'Report Complete!'),React.createElement('button',{onClick:()=>setSubmitted(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer',marginTop:12}},'New Inspection')));
 
@@ -1108,30 +1132,31 @@ function InspectionView({data,setData}){
     React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,gap:10,flexWrap:'wrap'}},
       React.createElement('div',null,React.createElement('div',{style:{fontWeight:800,fontSize:18,color:ISH}},'Ag Inspection Report'),React.createElement('div',{style:{fontSize:12,color:'#6b7280'}},'Pre-loaded from Budget tab · Fill in actuals below')),
       React.createElement('div',{style:{display:'flex',gap:8}},
+        React.createElement('button',{onClick:generateShare,style:{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}},'🔗 Share with Customer'),
+        (data.inspShareId||shareLink)&&React.createElement('button',{onClick:checkCustomerResponse,disabled:checkingResponse,style:{background:checkingResponse?'#e5e7eb':'#e8f5ea',color:checkingResponse?'#9ca3af':'#15803d',border:`1.5px solid ${checkingResponse?'#d1d5db':'#22c55e'}`,borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:checkingResponse?'wait':'pointer'}},checkingResponse?'⏳ Checking...':'📬 Check Response'),
         React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
-        React.createElement('button',{onClick:()=>{setShareInspSent(false);setShareInspErr('');setShowShareInsp(true);},style:{background:ISH,color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'📧 Share with Customer'),
         React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📤 Save PDF Report'))),
     submitErr&&React.createElement('div',{style:{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}},'⚠️ '+submitErr),
-    // Share with Customer modal
-    showShareInsp&&React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
-      shareInspSent
-        ? React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:380}},
-            React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),
-            React.createElement('div',{style:{fontWeight:800,fontSize:20,color:ISH,marginBottom:8}},'Inspection Sent!'),
-            React.createElement('p',{style:{color:'#6b7280',fontSize:14,marginBottom:20}},'The inspection report has been sent to ',React.createElement('strong',null,shareInspEmail)),
-            React.createElement('button',{onClick:()=>setShowShareInsp(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer'}},'Done'))
-        : React.createElement('div',{style:{background:'white',borderRadius:12,padding:0,width:'min(480px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)',overflow:'hidden'}},
-            React.createElement('div',{style:{background:ISH,padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center'}},
-              React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:16}},'📧 Share Inspection with Customer'),
-              React.createElement('button',{onClick:()=>setShowShareInsp(false),style:{background:'none',border:'none',color:'rgba(255,255,255,.7)',fontSize:20,cursor:'pointer',lineHeight:1}},'×')),
-            React.createElement('div',{style:{padding:24}},
-              React.createElement('label',{style:{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:6,letterSpacing:.3}},'CUSTOMER EMAIL'),
-              React.createElement('div',{style:{display:'flex',gap:8,marginBottom:shareInspErr?8:0}},
-                React.createElement('input',{type:'email',value:shareInspEmail,onChange:e=>setShareInspEmail(e.target.value),placeholder:'customer@email.com',onKeyDown:e=>e.key==='Enter'&&handleShareInsp(),style:{flex:1,border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',outline:'none'}}),
-                React.createElement('button',{onClick:handleShareInsp,disabled:shareInspSending,style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:shareInspSending?'wait':'pointer',opacity:shareInspSending?.7:1,whiteSpace:'nowrap'}},shareInspSending?'Sending…':'Send PDF')),
-              shareInspErr&&React.createElement('div',{style:{color:'#991b1b',fontSize:12,marginTop:6}},shareInspErr),
-              React.createElement('div',{style:{marginTop:16,padding:'10px 12px',background:'#f0fdf4',borderRadius:6,fontSize:12,color:'#374151',borderLeft:'3px solid #22c55e'}},
-                '📋 Sends a PDF of the full inspection report including all conditions, deviations, photos, and financial summary.')))),
+    // ── Share with Customer Modal ──────────────────────────────────────────────
+    showShareModal&&React.createElement('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
+      React.createElement('div',{style:{background:'white',borderRadius:14,padding:28,maxWidth:480,width:'100%',boxShadow:'0 10px 50px rgba(0,0,0,.25)'}},
+        React.createElement('div',{style:{fontWeight:700,fontSize:'1.05rem',marginBottom:6,color:'#1a1a1a'}},'Share Inspection with Customer'),
+        shareStatus==='generating'&&React.createElement('div',{style:{color:'#6b7280',padding:'20px 0',textAlign:'center'}},'Generating secure link...'),
+        shareStatus==='ready'&&React.createElement('div',null,
+          React.createElement('div',{style:{fontSize:'.85rem',color:'#555',marginBottom:16}},'Send the link and PIN below to your customer. They fill in actual acres, conditions, and yields — you can load their response back here anytime.'),
+          React.createElement('div',{style:{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:8,padding:14,marginBottom:12}},
+            React.createElement('div',{style:{fontSize:'.72rem',fontWeight:700,color:'#2d5a8e',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}},'Share Link'),
+            React.createElement('div',{style:{fontSize:'.82rem',wordBreak:'break-all',color:'#1a1a1a',fontFamily:'monospace',marginBottom:8}},shareLink),
+            React.createElement('button',{onClick:()=>navigator.clipboard.writeText(shareLink).then(()=>alert('Copied!')),style:{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,padding:'4px 10px',fontSize:'.75rem',cursor:'pointer',fontWeight:600}},'Copy Link')),
+          React.createElement('div',{style:{background:'#f5e8ea',border:'1px solid #e0b0b8',borderRadius:8,padding:14,marginBottom:14}},
+            React.createElement('div',{style:{fontSize:'.72rem',fontWeight:700,color:'#6B0E1E',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}},'Customer PIN'),
+            React.createElement('div',{style:{fontSize:'2rem',fontWeight:900,letterSpacing:'.25em',color:'#6B0E1E',fontFamily:'monospace'}},sharePin),
+            React.createElement('div',{style:{fontSize:'.72rem',color:'#888',marginTop:4}},'Customer must enter this to open the form')),
+          React.createElement('button',{onClick:()=>{const subject=encodeURIComponent('Inspection Form - '+data.clientName);const body=encodeURIComponent('Please fill out your crop inspection form.\n\nClick the link to open your form:\n'+shareLink+'\n\nYour PIN: '+sharePin+'\n\nSteps:\n1. Click the link above\n2. Enter your PIN when prompted\n3. Fill in your actual acres, yields, and conditions\n4. Submit the form\n\nThank you,\nFirst Bank of Montana');window.location.href='mailto:?subject='+subject+'&body='+body;},style:{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'10px 0',fontWeight:700,fontSize:'.9rem',cursor:'pointer',marginBottom:8}},'📧 Open in Email (Outlook / Mail)'),
+          React.createElement('button',{onClick:checkCustomerResponse,disabled:checkingResponse,style:{width:'100%',background:'none',border:'1.5px solid #22c55e',borderRadius:7,padding:'8px 0',fontWeight:700,fontSize:'.88rem',cursor:'pointer',color:'#15803d',marginBottom:8}},checkingResponse?'Checking...':'🔄 Check for Customer Response'),
+          customerResponse&&React.createElement('div',{style:{background:'#e8f5ea',border:'1px solid #22c55e',borderRadius:7,padding:10,fontSize:'.85rem',color:'#15803d',fontWeight:700,marginBottom:8}},'✅ Customer has responded — answers loaded into the form.')),
+        shareStatus.startsWith('error')&&React.createElement('div',{style:{color:'#c44',fontSize:'.85rem',padding:'12px 0'}},'Error: ',shareStatus.slice(6),React.createElement('br'),React.createElement('span',{style:{fontSize:'.75rem',color:'#888'}},'Make sure you ran inspection_shares.sql in Supabase.')),
+        React.createElement('button',{onClick:()=>setShowShareModal(false),style:{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'7px 20px',cursor:'pointer',fontFamily:'inherit',fontSize:'.85rem',marginTop:4}},'Close'))),
     React.createElement('div',{style:{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}},[['#22c55e','On Budget (< 5%)'],['#f59e0b','Minor Deviation (5–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>React.createElement('div',{key:l,style:{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}},React.createElement('div',{style:{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}),l))),
     React.createElement('div',{ref:printRef},
       // Header
@@ -1427,6 +1452,171 @@ function ShareBudgetModal({data,budgetTotalIncome,budgetTotalExpenses,budgetCrop
 }
 
 
+// ── Customer-Facing Public Inspection Form ────────────────────────────────────
+function CustomerInspectForm({ shareId }) {
+  const [stage, setStage] = React.useState('pin'); // 'pin'|'form'|'done'|'error'
+  const [pin, setPin] = React.useState('');
+  const [pinErr, setPinErr] = React.useState('');
+  const [inspData, setInspData] = React.useState(null);
+  const [crops, setCrops] = React.useState([]);
+  const [livestock, setLivestock] = React.useState([]);
+  const [pastureCond, setPastureCond] = React.useState('');
+  const [pastureCmt, setPastureCmt] = React.useState('');
+  const [waterCond, setWaterCond] = React.useState('');
+  const [waterCmt, setWaterCmt] = React.useState('');
+  const [equipCond, setEquipCond] = React.useState('');
+  const [equipCmt, setEquipCmt] = React.useState('');
+  const [envCmt, setEnvCmt] = React.useState('');
+  const [addlCmt, setAddlCmt] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [errMsg, setErrMsg] = React.useState('');
+  const SUPABASE_URL_PUB = (window.SUPABASE_URL || '').replace(/\/+$/, '');
+  const SUPABASE_KEY_PUB = window.SUPABASE_ANON_KEY || '';
+
+  const verifyPin = async () => {
+    setPinErr('');
+    try {
+      const resp = await fetch(
+        SUPABASE_URL_PUB + '/rest/v1/inspection_shares?share_id=eq.' + shareId + '&select=pin,insp_data,client_name,responded_at',
+        { headers: { 'apikey': SUPABASE_KEY_PUB, 'Content-Type': 'application/json' } }
+      );
+      const rows = await resp.json();
+      if (!rows.length) { setPinErr('Link not found or expired.'); return; }
+      const row = rows[0];
+      if (row.responded_at) { setStage('done'); return; }
+      if (pin.trim() !== String(row.pin).trim()) { setPinErr('Incorrect PIN. Please check your email and try again.'); return; }
+      const d = row.insp_data || {};
+      setInspData(d);
+      setCrops((d.inspCrops || []).map(r => ({...r, actualAcres: r.actualAcres||'', condition: r.condition||'', actualYield: r.actualYield||r.budgetedYield||'', location: r.location||'', deviationReason: r.deviationReason||''})));
+      setLivestock((d.inspLivestock || []).map(r => ({...r, actualHead: r.actualHead||'', condition: r.condition||'', estWeight: r.estWeight||'', deviationReason: r.deviationReason||''})));
+      setPastureCond(d.inspPastureCond||'');
+      setPastureCmt(d.inspPastureCmt||'');
+      setWaterCond(d.inspWaterCond||'');
+      setWaterCmt(d.inspWaterCmt||'');
+      setEquipCond(d.inspEquipCond||'');
+      setEquipCmt(d.inspEquipCmt||'');
+      setEnvCmt(d.inspEnvCmt||'');
+      setAddlCmt(d.inspAddlCmt||'');
+      setStage('form');
+    } catch(e) { setPinErr('Connection error: ' + e.message); }
+  };
+
+  const submitResponse = async () => {
+    setSubmitting(true); setErrMsg('');
+    try {
+      const response = {
+        crops: crops.map(r => ({ actualAcres: r.actualAcres, condition: r.condition, actualYield: r.actualYield, location: r.location, deviationReason: r.deviationReason })),
+        livestock: livestock.map(r => ({ actualHead: r.actualHead, condition: r.condition, estWeight: r.estWeight, deviationReason: r.deviationReason })),
+        pastureCond, pastureCmt, waterCond, waterCmt, equipCond, equipCmt, envCmt, addlCmt,
+        submittedAt: new Date().toISOString(),
+      };
+      const resp = await fetch(
+        SUPABASE_URL_PUB + '/rest/v1/inspection_shares?share_id=eq.' + shareId,
+        { method: 'PATCH',
+          headers: { 'apikey': SUPABASE_KEY_PUB, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ response, responded_at: new Date().toISOString() }) }
+      );
+      if (!resp.ok) throw new Error(await resp.text());
+      setStage('done');
+    } catch(e) { setErrMsg('Submission failed: ' + e.message); }
+    setSubmitting(false);
+  };
+
+  const conds = ['Excellent','Good','Fair','Poor'];
+  const condBtn = (val, set, opt) => {
+    const active = val === opt;
+    const cs = {Excellent:{c:'#15803d',bg:'#dcfce7',b:'#86efac'},Good:{c:'#1d4ed8',bg:'#dbeafe',b:'#93c5fd'},Fair:{c:'#92400e',bg:'#fef3c7',b:'#fcd34d'},Poor:{c:'#991b1b',bg:'#fee2e2',b:'#fca5a5'}}[opt]||{c:'#6b7280',bg:'#f3f4f6',b:'#d1d5db'};
+    return React.createElement('button',{key:opt,type:'button',onClick:()=>set(active?'':opt),style:{padding:'3px 10px',borderRadius:999,fontSize:12,fontWeight:700,cursor:'pointer',border:`1.5px solid ${active?cs.b:'#e5e7eb'}`,background:active?cs.bg:'white',color:active?cs.c:'#9ca3af'}},opt);
+  };
+
+  const baseStyle = {fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
+  const card = {background:'white',borderRadius:12,padding:32,boxShadow:'0 4px 24px rgba(0,0,0,.1)',maxWidth:640,margin:'0 auto'};
+
+  if (stage === 'done') return React.createElement('div',{style:{...baseStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}},
+    React.createElement('div',{style:{...card,textAlign:'center'}},
+      React.createElement('div',{style:{fontSize:56,marginBottom:12}},'✅'),
+      React.createElement('div',{style:{fontWeight:800,fontSize:22,color:'#1B4332',marginBottom:8}},'Form Submitted!'),
+      React.createElement('p',{style:{color:'#6b7280',fontSize:14,lineHeight:1.6}},'Your inspection information has been received. Your lender will review your responses.')));
+
+  if (stage === 'error') return React.createElement('div',{style:{...baseStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}},
+    React.createElement('div',{style:{...card,textAlign:'center'}},
+      React.createElement('div',{style:{fontSize:48,marginBottom:12}},'⚠️'),
+      React.createElement('div',{style:{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}},'Link Not Found'),
+      React.createElement('p',{style:{color:'#6b7280',fontSize:14}},'This inspection link may have expired or is invalid. Please contact your lender.')));
+
+  if (stage === 'pin') return React.createElement('div',{style:{...baseStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}},
+    React.createElement('div',{style:card},
+      React.createElement('div',{style:{textAlign:'center',marginBottom:28}},
+        React.createElement('div',{style:{fontSize:32,marginBottom:8}},'🌾'),
+        React.createElement('div',{style:{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:20,color:'#6B0E1E'}},'First Bank of Montana'),
+        React.createElement('div',{style:{fontSize:13,color:'#888',marginTop:4}},'Agricultural Inspection Form')),
+      React.createElement('p',{style:{fontSize:14,color:'#555',marginBottom:20,lineHeight:1.6}},'Your lender has sent you a crop inspection form to fill out. Enter your 6-digit PIN to get started.'),
+      React.createElement('label',{style:{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:6,letterSpacing:.3}},'ENTER YOUR 6-DIGIT PIN'),
+      React.createElement('input',{type:'tel',inputMode:'numeric',pattern:'[0-9]*',maxLength:6,value:pin,onChange:e=>setPin(e.target.value.replace(/\D/g,'')),onKeyDown:e=>e.key==='Enter'&&verifyPin(),placeholder:'000000',style:{width:'100%',border:`1.5px solid ${pinErr?'#fca5a5':'#d1d5db'}`,borderRadius:8,padding:'12px 16px',fontSize:24,fontFamily:'monospace',textAlign:'center',letterSpacing:8,outline:'none',boxSizing:'border-box',marginBottom:pinErr?8:16}}),
+      pinErr&&React.createElement('div',{style:{color:'#991b1b',fontSize:13,marginBottom:14,padding:'8px 12px',background:'#fef2f2',borderRadius:6,border:'1px solid #fca5a5'}},pinErr),
+      React.createElement('button',{onClick:verifyPin,style:{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:8,padding:12,fontWeight:700,fontSize:16,cursor:'pointer',fontFamily:'inherit'}},'Open My Form →')));
+
+  // Form stage
+  if (stage === 'form') return React.createElement('div',{style:baseStyle},
+    React.createElement('div',{style:{background:'#6B0E1E',padding:'14px 20px',display:'flex',alignItems:'center',gap:12}},
+      React.createElement('span',{style:{fontSize:22}},'🌾'),
+      React.createElement('div',null,
+        React.createElement('div',{style:{color:'white',fontWeight:700,fontSize:16}},'First Bank of Montana — Crop Inspection'),
+        React.createElement('div',{style:{color:'rgba(255,255,255,.65)',fontSize:12}},inspData?.clientName||''))),
+    React.createElement('div',{style:{maxWidth:700,margin:'0 auto',padding:'24px 16px'}},
+      errMsg&&React.createElement('div',{style:{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#991b1b'}},'⚠️ '+errMsg),
+      // Instruction box
+      React.createElement('div',{style:{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:16,marginBottom:24}},
+        React.createElement('div',{style:{fontWeight:700,color:'#2d5a8e',marginBottom:4,fontSize:14}},'📋 Instructions'),
+        React.createElement('div',{style:{fontSize:13,color:'#555',lineHeight:1.6}},'Your lender has pre-filled the budgeted (planned) values below. Please fill in the actual amounts for what was planted or harvested this season. Grey fields are pre-filled by your lender — just fill in the white fields.')),
+      // Crops
+      crops.length > 0 && React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
+        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🌱 Crops')),
+        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:16}},
+          crops.map((r,i)=>React.createElement('div',{key:i,style:{border:'1px solid #e5e7eb',borderRadius:8,padding:14,background:'#fafafa'}},
+            React.createElement('div',{style:{fontWeight:700,fontSize:15,color:'#1a1a1a',marginBottom:10}},r.budgetedCrop||'Crop '+(i+1)),
+            React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
+              React.createElement('div',null,
+                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#888',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'Budgeted Acres (planned)'),
+                React.createElement('div',{style:{background:'#f5f5f5',border:'1px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:14,color:'#6b7280',fontWeight:600}},r.budgetedAcres||'—')),
+              React.createElement('div',null,
+                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Acres Planted'),
+                React.createElement('input',{type:'number',value:r.actualAcres,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,actualAcres:e.target.value}:c)),placeholder:r.budgetedAcres||'0',style:{border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
+            React.createElement('div',{style:{marginBottom:10}},
+              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:6,textTransform:'uppercase',letterSpacing:.3}},'✏️ Crop Condition'),
+              React.createElement('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},conds.map(o=>condBtn(r.condition,v=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,condition:v}:c)),o)))),
+            React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
+              React.createElement('div',null,
+                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Yield / Acre'),
+                React.createElement('input',{type:'number',value:r.actualYield,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,actualYield:e.target.value}:c)),placeholder:r.budgetedYield||'0',style:{border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}})),
+              React.createElement('div',null,
+                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Field / Section'),
+                React.createElement('input',{type:'text',value:r.location,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,location:e.target.value}:c)),placeholder:'e.g. NW Section 14',style:{border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
+            React.createElement('div',null,
+              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Notes (if different from plan)'),
+              React.createElement('textarea',{value:r.deviationReason,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,deviationReason:e.target.value}:c)),placeholder:'e.g. wet spring, replanted 50 acres to barley...',rows:2,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}})))))),
+      // Conditions
+      React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
+        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🌿 Field & Ranch Conditions')),
+        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:16}},
+          [['🟤 Pasture',pastureCond,setPastureCond,pastureCmt,setPastureCmt,['Excellent','Good','Fair','Poor']],
+           ['💧 Water / Irrigation',waterCond,setWaterCond,waterCmt,setWaterCmt,['Excess','Adequate','Limited']],
+           ['🚜 Equipment',equipCond,setEquipCond,equipCmt,setEquipCmt,['Excellent','Good','Fair','Poor']]].map(([label,cval,cset,tval,tset,opts])=>
+            React.createElement('div',{key:label},
+              React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:8,color:'#374151'}},label),
+              React.createElement('div',{style:{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}},opts.map(o=>condBtn(cval,cset,o))),
+              React.createElement('textarea',{value:tval,onChange:e=>tset(e.target.value),placeholder:'Comments...',rows:2,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}))))),
+      React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:24,overflow:'hidden'}},
+        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'📋 Additional Comments')),
+        React.createElement('div',{style:{padding:16}},
+          React.createElement('textarea',{value:addlCmt,onChange:e=>setAddlCmt(e.target.value),placeholder:'Any other information your lender should know...',rows:4,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}))),
+      React.createElement('button',{onClick:submitResponse,disabled:submitting,style:{width:'100%',background:'#1B4332',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(27,67,50,.3)',fontFamily:'inherit'}},submitting?'⏳ Submitting…':'✅ Submit My Inspection'),
+      React.createElement('div',{style:{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:12}},'Your response is sent securely to First Bank of Montana.')));
+
+  return null;
+}
+
+
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
@@ -1561,6 +1751,10 @@ const storage = {
 export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
+
+  // ── Route customer inspection links (/any-url?id=XXXX) ─────────────────────
+  const _shareIdParam = new URLSearchParams(window.location.search).get('id');
+  if (_shareIdParam) return <CustomerInspectForm shareId={_shareIdParam} />;
   const [session, setSession] = useState(currentSession);
   const [profile, setProfile] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
@@ -1570,6 +1764,8 @@ export default function BalanceSheet() {
   const [showShareBudget, setShowShareBudget] = useState(false);
   const [showPriceList, setShowPriceList] = useState(false);
   const [commodityPrices, setCommodityPrices] = useState(() => loadCommodityPrices());
+  const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
+  const [showInspHistory, setShowInspHistory] = useState(false);
   const [activeTab, setActiveTab] = useState("balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
@@ -1605,6 +1801,16 @@ export default function BalanceSheet() {
   useEffect(() => {
     if (session?.access_token) supaGetProfile().then(p => setProfile(p)).catch(() => {});
   }, [session?.access_token]);
+
+  // Auto-check for customer response when a sheet with a shareId is open
+  useEffect(() => {
+    if (!data.inspShareId || !isConfigured()) return;
+    fetch(SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + data.inspShareId + '&select=responded_at',
+      { headers: supaHeaders() })
+      .then(r => r.json())
+      .then(rows => { setHasCustomerResponse(!!(rows[0]?.responded_at)); })
+      .catch(() => {});
+  }, [data.inspShareId]);
 
   const set = (k, v) => setData(d => ({ ...d, [k]: v }));
   const setArr = (k, idx, field, v) => setData(d => {
@@ -4337,7 +4543,56 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
       )}
 
       {activeTab === "inspection" && (
-        <InspectionView data={data} setData={setData} />
+        <div>
+          {hasCustomerResponse && (
+            <div style={{background:"#e8f5ea",border:"1px solid #22c55e",borderRadius:10,
+              padding:"14px 18px",margin:"12px 12px 0",display:"flex",alignItems:"center",
+              gap:12,flexWrap:"wrap"}}>
+              <span style={{fontSize:"1.3rem"}}>📬</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:".9rem",color:"#15803d"}}>
+                  Customer has submitted their inspection form!
+                </div>
+                <div style={{fontSize:".78rem",color:"#555"}}>
+                  Click Load Response to pull their answers into the inspection form below.
+                </div>
+              </div>
+              <button
+                onClick={()=>{
+                  const sid = data.inspShareId;
+                  if (!sid) return;
+                  fetch(SUPABASE_URL+'/rest/v1/inspection_shares?share_id=eq.'+sid+'&select=response',
+                    {headers:supaHeaders()})
+                    .then(r=>r.json())
+                    .then(rows=>{
+                      if (!rows[0]?.response) return;
+                      const cr = rows[0].response;
+                      setData(d=>({...d,
+                        inspCrops:(d.inspCrops||[]).map((r,i)=>({...r,
+                          actualAcres:cr.crops?.[i]?.actualAcres||r.actualAcres,
+                          condition:cr.crops?.[i]?.condition||r.condition,
+                          actualYield:cr.crops?.[i]?.actualYield||r.actualYield,
+                          location:cr.crops?.[i]?.location||r.location,
+                          deviationReason:cr.crops?.[i]?.deviationReason||r.deviationReason,
+                        })),
+                        inspLivestock:(d.inspLivestock||[]).map((r,i)=>({...r,
+                          actualHead:cr.livestock?.[i]?.actualHead||r.actualHead,
+                          condition:cr.livestock?.[i]?.condition||r.condition,
+                          estWeight:cr.livestock?.[i]?.estWeight||r.estWeight,
+                        })),
+                      }));
+                      setHasCustomerResponse(false);
+                    });
+                }}
+                style={{background:"#15803d",color:"white",border:"none",borderRadius:7,
+                  padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+                  fontSize:".85rem",flexShrink:0}}>
+                Load Response
+              </button>
+            </div>
+          )}
+          <InspectionView data={data} setData={setData} />
+        </div>
       )}
     </div>
   );
