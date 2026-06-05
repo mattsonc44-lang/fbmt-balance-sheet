@@ -335,6 +335,15 @@ function emptyData() {
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
+    inspDate: new Date().toISOString().split('T')[0],
+    inspInspector:"", inspLoans:["","",""],
+    inspCrops:[], inspLivestock:[], inspInventory:[],
+    inspCropCmt:"", inspLsCmt:"", inspInvCmt:"",
+    inspPastureCond:"", inspPastureCmt:"",
+    inspWaterCond:"", inspWaterCmt:"",
+    inspEquipCond:"", inspEquipCmt:"",
+    inspEnvCmt:"", inspAddlCmt:"",
+    inspPhotos:[],
   };
 }
 
@@ -871,16 +880,186 @@ function ComparisonView({
 }
 
 
+// ── Ag Inspection Tab ────────────────────────────────────────────────────────
+const INSP_CONDITIONS=["Excellent","Good","Fair","Poor"],INSP_WATER_COND=["Excess","Adequate","Limited"];
+const inspUid=()=>Math.random().toString(36).slice(2,9);
+const ISH='#1B4332',ITH='#2D6A4F',IGOLD='#C8860A';
+const iCS=c=>({Excellent:{color:'#15803d',bg:'#dcfce7',border:'#86efac'},Good:{color:'#1d4ed8',bg:'#dbeafe',border:'#93c5fd'},Fair:{color:'#92400e',bg:'#fef3c7',border:'#fcd34d'},Poor:{color:'#991b1b',bg:'#fee2e2',border:'#fca5a5'},Excess:{color:'#1d4ed8',bg:'#dbeafe',border:'#93c5fd'},Adequate:{color:'#15803d',bg:'#dcfce7',border:'#86efac'},Limited:{color:'#991b1b',bg:'#fee2e2',border:'#fca5a5'}}[c]||{color:'#6b7280',bg:'#f3f4f6',border:'#d1d5db'});
+const iFmt$=v=>{const n=parseFloat(v)||0;return n===0?'—':`$${n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;};
+const devPct=(a,b)=>{const av=parseFloat(a)||0,bv=parseFloat(b)||0;if(!bv)return null;return((av-bv)/bv)*100;};
+const devStyle=p=>{if(p===null)return{};const abs=Math.abs(p);if(abs>=20)return{background:'#fef2f2',borderLeft:'4px solid #dc2626'};if(abs>=5)return{background:'#fffbeb',borderLeft:'4px solid #f59e0b'};return{};};
+const devBadge=p=>{if(p===null||Math.abs(p)<0.5)return null;const abs=Math.abs(p),pos=p>0,color=abs>=20?'#dc2626':abs>=5?'#d97706':'#16a34a';return React.createElement('span',{style:{fontSize:10,fontWeight:700,color,background:color+'18',padding:'1px 6px',borderRadius:999,whiteSpace:'nowrap'}},(pos?'+':'')+p.toFixed(1)+'%');};
+const ILBL={fontSize:12,fontWeight:600,color:'#374151',marginBottom:4,display:'block',letterSpacing:.3};
+const ITHS={background:ITH,color:'white',padding:'6px 8px',fontSize:11,fontWeight:700,textAlign:'center',whiteSpace:'nowrap'};
+const ITDS={padding:'4px 6px',borderBottom:'1px solid #f0fdf4',verticalAlign:'middle'};
+function ICP({value,onChange,options=INSP_CONDITIONS}){return React.createElement('div',{style:{display:'flex',gap:3,flexWrap:'wrap'}},options.map(o=>{const cs=iCS(o),active=value===o;return React.createElement('button',{key:o,type:'button',onClick:()=>onChange(active?'':o),style:{padding:'2px 9px',borderRadius:999,fontSize:11,fontWeight:700,cursor:'pointer',transition:'all .15s',border:`1.5px solid ${active?cs.border:'#e5e7eb'}`,background:active?cs.bg:'white',color:active?cs.color:'#9ca3af',lineHeight:1.6}},o);}));}
+function ICard({title,children}){return React.createElement('div',{style:{marginBottom:20,borderRadius:6,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.1)',border:'1px solid #d1fae5'}},React.createElement('div',{style:{background:ISH,padding:'9px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},title)),React.createElement('div',{style:{background:'white',padding:16}},children));}
+const iInp=(val,onChange,ph='',type='text',extra={})=>React.createElement('input',{type,value:val,placeholder:ph,onChange:e=>onChange(e.target.value),style:{border:'1px solid #d1d5db',borderRadius:4,padding:'4px 7px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box',background:'white',...extra}});
+const iTa=(val,onChange,ph,rows=3)=>React.createElement('textarea',{value:val,onChange:e=>onChange(e.target.value),placeholder:ph,rows,style:{border:'1px solid #d1d5db',borderRadius:4,padding:'6px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}});
+
+function InspectionView({data,setData}){
+  const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
+  const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
+  React.useEffect(()=>{
+    if(!data.inspCrops||data.inspCrops.length===0){
+      const rows=(data.budgetCrops||[]).filter(r=>r.crop||r.acres).map(r=>({id:inspUid(),budgetedCrop:r.crop||'',budgetedAcres:r.acres||'',budgetedYield:r.yieldPerAcre||'',budgetedUnit:r.unit||'bu',budgetedPrice:r.price||'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}));
+      setData(d=>({...d,inspCrops:rows.length>0?rows:[{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}]}));
+    }
+    if(!data.inspLivestock||data.inspLivestock.length===0){
+      const rows=(data.budgetLivestock||[]).filter(r=>r.type||r.head).map(r=>({id:inspUid(),budgetedType:r.type||'',budgetedHead:r.head||'',budgetedLbs:r.lbs||'',budgetedPrice:r.price||'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}));
+      setData(d=>({...d,inspLivestock:rows.length>0?rows:[{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}]}));
+    }
+    if(!data.inspInventory||data.inspInventory.length===0){setData(d=>({...d,inspInventory:[{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));}
+  },[]);
+  const iset=(f,v)=>setData(d=>({...d,[f]:v}));
+  const setLoan=(i,v)=>setData(d=>({...d,inspLoans:d.inspLoans.map((x,j)=>j===i?v:x)}));
+  const uC=(id,f,v)=>setData(d=>({...d,inspCrops:d.inspCrops.map(r=>r.id===id?{...r,[f]:v}:r)}));
+  const uL=(id,f,v)=>setData(d=>({...d,inspLivestock:d.inspLivestock.map(r=>r.id===id?{...r,[f]:v}:r)}));
+  const uI=(id,f,v)=>setData(d=>({...d,inspInventory:d.inspInventory.map(r=>r.id===id?{...r,[f]:v}:r)}));
+  const aC=()=>setData(d=>({...d,inspCrops:[...d.inspCrops,{id:inspUid(),budgetedCrop:'',budgetedAcres:'',budgetedYield:'',budgetedUnit:'bu',budgetedPrice:'',location:'',condition:'',actualAcres:'',actualYield:'',valuePerUnit:'',deviationReason:'',substituted:false,substituteCrop:''}]}));
+  const aL=()=>setData(d=>({...d,inspLivestock:[...d.inspLivestock,{id:inspUid(),budgetedType:'',budgetedHead:'',budgetedLbs:'',budgetedPrice:'',location:'',condition:'',actualHead:'',estWeight:'',valuePerUnit:'',deviationReason:''}]}));
+  const aI=()=>setData(d=>({...d,inspInventory:[...d.inspInventory,{id:inspUid(),description:'',location:'',condition:'',quantity:'',unitType:'bu',valuePerUnit:''}]}));
+  const rC=id=>setData(d=>({...d,inspCrops:d.inspCrops.filter(r=>r.id!==id)}));
+  const rL=id=>setData(d=>({...d,inspLivestock:d.inspLivestock.filter(r=>r.id!==id)}));
+  const rI=id=>setData(d=>({...d,inspInventory:d.inspInventory.filter(r=>r.id!==id)}));
+  const handleFiles=e=>{Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>setData(d=>({...d,inspPhotos:[...(d.inspPhotos||[]),{id:inspUid(),src:ev.target.result,label:'',ts:new Date().toLocaleString()}]}));r.readAsDataURL(f);});e.target.value='';};
+  const cRT=r=>(parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+  const lRT=r=>(parseFloat(r.actualHead||r.budgetedHead||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+  const iRT=r=>(parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
+  const crops=data.inspCrops||[],lsRows=data.inspLivestock||[],invRows=data.inspInventory||[],photos=data.inspPhotos||[],loans=data.inspLoans||['','',''];
+  const cropTot=crops.reduce((s,r)=>s+cRT(r),0),lsTot=lsRows.reduce((s,r)=>s+lRT(r),0),invTot=invRows.reduce((s,r)=>s+iRT(r),0),grand=cropTot+lsTot+invTot;
+  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
+  const handleSubmit=async()=>{setSubmitErr('');setSubmitting(true);try{handlePDF();}catch(e){setSubmitErr('PDF failed: '+e.message);}finally{setSubmitting(false);}};
+  if(submitted)return React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:48}},React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420}},React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),React.createElement('div',{style:{fontWeight:800,fontSize:22,color:ISH,marginBottom:8}},'Report Complete!'),React.createElement('button',{onClick:()=>setSubmitted(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer',marginTop:12}},'New Inspection')));
+
+  return React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},
+    !window.html2pdf&&React.createElement('script',{src:'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'}),
+    React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,gap:10,flexWrap:'wrap'}},
+      React.createElement('div',null,React.createElement('div',{style:{fontWeight:800,fontSize:18,color:ISH}},'Ag Inspection Report'),React.createElement('div',{style:{fontSize:12,color:'#6b7280'}},'Pre-loaded from Budget tab · Fill in actuals below')),
+      React.createElement('div',{style:{display:'flex',gap:8}},
+        React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
+        React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📤 Save PDF Report'))),
+    submitErr&&React.createElement('div',{style:{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}},'⚠️ '+submitErr),
+    React.createElement('div',{style:{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}},[['#22c55e','On Budget (< 5%)'],['#f59e0b','Minor Deviation (5–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>React.createElement('div',{key:l,style:{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}},React.createElement('div',{style:{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}),l))),
+    React.createElement('div',{ref:printRef},
+      // Header
+      React.createElement('div',{style:{background:'white',borderRadius:6,padding:20,marginBottom:20,boxShadow:'0 1px 4px rgba(0,0,0,0.08)',border:'1px solid #d1fae5'}},
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px 24px'}},
+          React.createElement('div',null,React.createElement('label',{style:ILBL},'CUSTOMER NAME'),React.createElement('div',{style:{padding:'6px 8px',background:'#f0fdf4',borderRadius:4,fontSize:13,fontWeight:600,color:ISH}},data.clientName||'—')),
+          React.createElement('div',null,React.createElement('label',{style:ILBL},'DATE OF INSPECTION'),iInp(data.inspDate||'',v=>iset('inspDate',v),'','date')),
+          React.createElement('div',null,React.createElement('label',{style:ILBL},'INSPECTOR NAME'),iInp(data.inspInspector||'',v=>iset('inspInspector',v),'Enter inspector name')),
+          React.createElement('div',null,React.createElement('label',{style:ILBL},'LOAN NUMBER(S)'),React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:5}},loans.map((l,i)=>React.createElement('div',{key:i},iInp(l,v=>setLoan(i,v),`Loan ${i+1}`))))))),
+      // Crops table
+      React.createElement(ICard,{title:'🌱  CROP CONDITION — Budget vs. Actual'},
+        React.createElement('div',{style:{overflowX:'auto'}},
+          React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
+            React.createElement('thead',null,React.createElement('tr',null,['Crop','Budget Ac','Actual Ac','Deviation','Location','Condition','Yield/Ac','Value/Unit','Total',''].map((h,i)=>React.createElement('th',{key:i,style:{...ITHS,minWidth:i===5?190:i===0?100:80,textAlign:i===0||i===4?'left':'center',background:i===1?'#374151':ITH}},h)))),
+            React.createElement('tbody',null,crops.map((r,i)=>{
+              const pct=devPct(r.actualAcres,r.budgetedAcres),showDev=pct!==null&&Math.abs(pct)>=5,ds=r.actualAcres?devStyle(pct):{};
+              return React.createElement(React.Fragment,{key:r.id},
+                React.createElement('tr',{style:{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}},
+                  React.createElement('td',{style:ITDS},r.budgetedCrop?React.createElement('div',null,React.createElement('div',{style:{fontWeight:600,fontSize:13}},r.budgetedCrop),r.substituted&&React.createElement('div',{style:{marginTop:4}},React.createElement('div',{style:{fontSize:10,color:'#d97706',fontWeight:700}},'SUBSTITUTED →'),iInp(r.substituteCrop,v=>uC(r.id,'substituteCrop',v),'Actual crop…','text',{fontSize:12})),React.createElement('button',{type:'button',onClick:()=>uC(r.id,'substituted',!r.substituted),style:{marginTop:3,fontSize:10,background:'none',border:'none',color:r.substituted?'#dc2626':'#9ca3af',cursor:'pointer',padding:0,fontWeight:600}},r.substituted?'✕ Remove':'↺ Different crop?')):iInp(r.budgetedCrop,v=>uC(r.id,'budgetedCrop',v),'Crop name…')),
+                  React.createElement('td',{style:{...ITDS,textAlign:'center',background:'#f8f6f2'}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:'#6b7280'}},r.budgetedAcres||'—'),React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budgeted')),
+                  React.createElement('td',{style:ITDS},iInp(r.actualAcres,v=>uC(r.id,'actualAcres',v),r.budgetedAcres||'0','number')),
+                  React.createElement('td',{style:{...ITDS,textAlign:'center'}},r.actualAcres&&r.budgetedAcres?React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},devBadge(pct),React.createElement('div',{style:{fontSize:10,color:'#6b7280'}},(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')+((parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0))+' ac')):React.createElement('span',{style:{color:'#d1d5db',fontSize:11}},'—')),
+                  React.createElement('td',{style:ITDS},iInp(r.location,v=>uC(r.id,'location',v),'Field/Sec')),
+                  React.createElement('td',{style:ITDS},React.createElement(ICP,{value:r.condition,onChange:v=>uC(r.id,'condition',v)})),
+                  React.createElement('td',{style:ITDS},React.createElement('div',{style:{display:'flex',gap:3}},iInp(r.actualYield||r.budgetedYield,v=>uC(r.id,'actualYield',v),r.budgetedYield||'0','number',{flex:1}),React.createElement('div',{style:{fontSize:11,color:'#6b7280',alignSelf:'center',padding:'0 2px'}},r.budgetedUnit||'bu')),r.budgetedYield&&React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budget: '+r.budgetedYield)),
+                  React.createElement('td',{style:ITDS},iInp(r.valuePerUnit||r.budgetedPrice,v=>uC(r.id,'valuePerUnit',v),r.budgetedPrice||'$0','number')),
+                  React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}},cRT(r)>0?iFmt$(cRT(r)):'—'),
+                  React.createElement('td',{style:ITDS},React.createElement('button',{type:'button',onClick:()=>rC(r.id),style:{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}},'×'))),
+                showDev&&React.createElement('tr',{style:{background:Math.abs(pct)>=20?'#fef2f2':'#fffbeb'}},
+                  React.createElement('td',{colSpan:10,style:{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}},
+                    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+                      React.createElement('span',{style:{fontSize:11,fontWeight:700,color:Math.abs(pct)>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}},Math.abs(pct)>=20?'⛔':'⚠️',' Deviation reason:'),
+                      iInp(r.deviationReason,v=>uC(r.id,'deviationReason',v),Math.abs(pct)>=20?'Required — explain major deviation…':'Explain deviation…','text',{border:`1px solid ${Math.abs(pct)>=20?'#fca5a5':'#fcd34d'}`,background:'white'})))));
+            })),
+            React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:8,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'CROP TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(cropTot)),React.createElement('td',null))))),
+        React.createElement('button',{type:'button',onClick:aC,style:{marginTop:10,background:'#f0fdf4',color:ITH,border:`1.5px dashed ${ITH}`,borderRadius:4,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}},'+ Add Crop Row'),
+        React.createElement('div',{style:{marginTop:12}},React.createElement('label',{style:ILBL},'Comments'),iTa(data.inspCropCmt||'',v=>iset('inspCropCmt',v),'Crop condition observations…'))),
+      // Livestock table
+      React.createElement(ICard,{title:'🐄  LIVESTOCK CONDITION — Budget vs. Actual'},
+        React.createElement('div',{style:{overflowX:'auto'}},
+          React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
+            React.createElement('thead',null,React.createElement('tr',null,['Type','Budget Hd','Actual Hd','Deviation','Location','Condition','Est. Wt','Value/Hd','Total',''].map((h,i)=>React.createElement('th',{key:i,style:{...ITHS,minWidth:i===5?190:80,textAlign:i===0||i===4?'left':'center',background:i===1?'#374151':ITH}},h)))),
+            React.createElement('tbody',null,lsRows.map((r,i)=>{
+              const pct=devPct(r.actualHead,r.budgetedHead),showDev=pct!==null&&Math.abs(pct)>=5,ds=r.actualHead?devStyle(pct):{};
+              return React.createElement(React.Fragment,{key:r.id},
+                React.createElement('tr',{style:{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}},
+                  React.createElement('td',{style:ITDS},r.budgetedType?React.createElement('div',{style:{fontWeight:600,fontSize:13}},r.budgetedType):iInp(r.budgetedType,v=>uL(r.id,'budgetedType',v),'Cattle, Hogs…')),
+                  React.createElement('td',{style:{...ITDS,textAlign:'center',background:'#f8f6f2'}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:'#6b7280'}},r.budgetedHead||'—'),React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budgeted')),
+                  React.createElement('td',{style:ITDS},iInp(r.actualHead,v=>uL(r.id,'actualHead',v),r.budgetedHead||'0','number')),
+                  React.createElement('td',{style:{...ITDS,textAlign:'center'}},r.actualHead&&r.budgetedHead?React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},devBadge(pct),React.createElement('div',{style:{fontSize:10,color:'#6b7280'}},(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)>0?'+':'')+((parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)).toFixed(0))+' hd')):React.createElement('span',{style:{color:'#d1d5db',fontSize:11}},'—')),
+                  React.createElement('td',{style:ITDS},iInp(r.location,v=>uL(r.id,'location',v),'Pasture/Lot')),
+                  React.createElement('td',{style:ITDS},React.createElement(ICP,{value:r.condition,onChange:v=>uL(r.id,'condition',v)})),
+                  React.createElement('td',{style:ITDS},iInp(r.estWeight,v=>uL(r.id,'estWeight',v),r.budgetedLbs||'0','number')),
+                  React.createElement('td',{style:ITDS},iInp(r.valuePerUnit,v=>uL(r.id,'valuePerUnit',v),r.budgetedPrice||'$0','number')),
+                  React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d'}},lRT(r)>0?iFmt$(lRT(r)):'—'),
+                  React.createElement('td',{style:ITDS},React.createElement('button',{type:'button',onClick:()=>rL(r.id),style:{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}},'×'))),
+                showDev&&React.createElement('tr',{style:{background:Math.abs(pct)>=20?'#fef2f2':'#fffbeb'}},React.createElement('td',{colSpan:10,style:{padding:'6px 10px 8px 32px'}},React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},React.createElement('span',{style:{fontSize:11,fontWeight:700,color:Math.abs(pct)>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}},Math.abs(pct)>=20?'⛔':'⚠️',' Deviation reason:'),iInp(r.deviationReason,v=>uL(r.id,'deviationReason',v),'Explain deviation from budget…','text',{border:`1px solid ${Math.abs(pct)>=20?'#fca5a5':'#fcd34d'}`,background:'white'})))));
+            })),
+            React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:8,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'LIVESTOCK TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(lsTot)),React.createElement('td',null))))),
+        React.createElement('button',{type:'button',onClick:aL,style:{marginTop:10,background:'#f0fdf4',color:ITH,border:`1.5px dashed ${ITH}`,borderRadius:4,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}},'+ Add Livestock Row'),
+        React.createElement('div',{style:{marginTop:12}},React.createElement('label',{style:ILBL},'Comments'),iTa(data.inspLsCmt||'',v=>iset('inspLsCmt',v),'Livestock observations…'))),
+      // Inventory table
+      React.createElement(ICard,{title:'🏚  INVENTORY (Stored Crop / Feed)'},
+        React.createElement('div',{style:{overflowX:'auto'}},
+          React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
+            React.createElement('thead',null,React.createElement('tr',null,['Description','Location','Condition','Quantity','Unit','Value/Unit','Total',''].map((h,i)=>React.createElement('th',{key:i,style:{...ITHS,minWidth:i===2?190:80,textAlign:i===0||i===1?'left':'center'}},h)))),
+            React.createElement('tbody',null,invRows.map((r,i)=>React.createElement('tr',{key:r.id,style:{background:i%2===0?'white':'#f0fdf4'}},
+              React.createElement('td',{style:ITDS},iInp(r.description,v=>uI(r.id,'description',v),'Corn, Soybeans…')),
+              React.createElement('td',{style:ITDS},iInp(r.location,v=>uI(r.id,'location',v),'Bin/Facility')),
+              React.createElement('td',{style:ITDS},React.createElement(ICP,{value:r.condition,onChange:v=>uI(r.id,'condition',v)})),
+              React.createElement('td',{style:ITDS},iInp(r.quantity,v=>uI(r.id,'quantity',v),'0','number')),
+              React.createElement('td',{style:ITDS},React.createElement('select',{value:r.unitType||'bu',onChange:e=>uI(r.id,'unitType',e.target.value),style:{border:'1px solid #d1d5db',borderRadius:4,padding:'4px 5px',fontSize:12,width:'100%',background:'white',outline:'none'}},['bu','ton','bale','cwt','lb','gal','head','ea'].map(u=>React.createElement('option',{key:u},u)))),
+              React.createElement('td',{style:ITDS},iInp(r.valuePerUnit,v=>uI(r.id,'valuePerUnit',v),'$0','number')),
+              React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d'}},iRT(r)>0?iFmt$(iRT(r)):'—'),
+              React.createElement('td',{style:ITDS},React.createElement('button',{type:'button',onClick:()=>rI(r.id),style:{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}},'×'))))),
+            React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:6,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'INVENTORY TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(invTot)),React.createElement('td',null))))),
+        React.createElement('button',{type:'button',onClick:aI,style:{marginTop:10,background:'#f0fdf4',color:ITH,border:`1.5px dashed ${ITH}`,borderRadius:4,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}},'+ Add Inventory Row'),
+        React.createElement('div',{style:{marginTop:12}},React.createElement('label',{style:ILBL},'Comments'),iTa(data.inspInvCmt||'',v=>iset('inspInvCmt',v),'Inventory observations…'))),
+      // Simple sections
+      ...[['🟤  PASTURE CONDITIONS','inspPastureCond','inspPastureCmt','Pasture conditions…',INSP_CONDITIONS],['💧  WATER / IRRIGATION SOURCE','inspWaterCond','inspWaterCmt','Water / irrigation notes…',INSP_WATER_COND],['🚜  EQUIPMENT','inspEquipCond','inspEquipCmt','Equipment condition notes…',INSP_CONDITIONS]].map(([title,ck,mk,ph,opts])=>React.createElement(ICard,{key:ck,title},React.createElement('div',{style:{display:'grid',gridTemplateColumns:'auto 1fr',gap:'0 24px',alignItems:'start'}},React.createElement('div',{style:{minWidth:260}},React.createElement('label',{style:ILBL},'Overall Condition'),React.createElement(ICP,{value:data[ck]||'',onChange:v=>iset(ck,v),options:opts})),React.createElement('div',null,React.createElement('label',{style:ILBL},'Comments'),iTa(data[mk]||'',v=>iset(mk,v),ph,2))))),
+      React.createElement(ICard,{title:'🌿  ENVIRONMENTAL OBSERVATIONS'},iTa(data.inspEnvCmt||'',v=>iset('inspEnvCmt',v),'Soil erosion, drainage, weed pressure…',4)),
+      React.createElement(ICard,{title:'📋  ADDITIONAL OBSERVATIONS / OVERALL OPERATION'},iTa(data.inspAddlCmt||'',v=>iset('inspAddlCmt',v),'Overall operation comments…',4)),
+      // Financial summary
+      React.createElement('div',{style:{background:ISH,borderRadius:6,padding:'14px 20px',marginBottom:20}},
+        React.createElement('div',{style:{fontSize:11,color:'rgba(255,255,255,.55)',letterSpacing:2,marginBottom:10,textTransform:'uppercase',fontWeight:700}},'Financial Summary'),
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}},[['Crop Value',cropTot],['Livestock Value',lsTot],['Inventory Value',invTot],['GRAND TOTAL',grand]].map(([label,val])=>React.createElement('div',{key:label,style:{background:label==='GRAND TOTAL'?'rgba(200,134,10,0.2)':'rgba(255,255,255,.07)',borderRadius:5,padding:'10px 12px',textAlign:'center',border:`1px solid ${label==='GRAND TOTAL'?IGOLD:'rgba(255,255,255,.1)'}`}},React.createElement('div',{style:{fontSize:10,color:'rgba(255,255,255,.55)',letterSpacing:.5,marginBottom:4,textTransform:'uppercase'}},label),React.createElement('div',{style:{fontSize:label==='GRAND TOTAL'?20:16,fontWeight:700,color:label==='GRAND TOTAL'?IGOLD:'white'}},iFmt$(val)))))),
+      // Deviation summary
+      crops.some(r=>{const p=devPct(r.actualAcres,r.budgetedAcres);return p!==null&&Math.abs(p)>=5;})&&React.createElement('div',{style:{background:'#fffbeb',border:'2px solid #f59e0b',borderRadius:6,padding:16,marginBottom:20}},
+        React.createElement('div',{style:{fontWeight:700,fontSize:14,color:'#92400e',marginBottom:10}},'⚠️ Budget Deviation Summary'),
+        crops.filter(r=>{const p=devPct(r.actualAcres,r.budgetedAcres);return p!==null&&Math.abs(p)>=5;}).map(r=>{const p=devPct(r.actualAcres,r.budgetedAcres),ac=parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0);return React.createElement('div',{key:r.id,style:{display:'flex',gap:12,alignItems:'flex-start',padding:'6px 0',borderBottom:'1px solid #fcd34d'}},React.createElement('div',{style:{fontSize:13,fontWeight:700,minWidth:80,color:Math.abs(p)>=20?'#dc2626':'#d97706'}},r.budgetedCrop||'—'),React.createElement('div',{style:{fontSize:12,color:'#92400e'}},'Budget: ',React.createElement('strong',null,r.budgetedAcres,' ac'),' → Actual: ',React.createElement('strong',null,r.actualAcres,' ac'),React.createElement('span',{style:{marginLeft:6,fontWeight:700}},(ac>0?'+':'')+ac.toFixed(0)+' ac ('+p.toFixed(1)+'%)'),r.substituted&&r.substituteCrop&&React.createElement('span',{style:{marginLeft:6,background:'#fef3c7',padding:'1px 5px',borderRadius:3}},'Sub: '+r.substituteCrop)),r.deviationReason&&React.createElement('div',{style:{fontSize:11,color:'#78350f',fontStyle:'italic',flex:1}},'"'+r.deviationReason+'"'));})),
+      // Photos
+      React.createElement('div',{style:{borderRadius:6,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.1)',border:'1px solid #d1fae5',marginBottom:20}},
+        React.createElement('div',{style:{background:ISH,padding:'9px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'📸  INSPECTION PHOTOS'),
+          React.createElement('div',{style:{display:'flex',gap:8}},
+            React.createElement('button',{type:'button',onClick:()=>camRef.current?.click(),style:{background:'rgba(255,255,255,.14)',color:'white',border:'1px solid rgba(255,255,255,.35)',borderRadius:4,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}},'📷 Camera'),
+            React.createElement('button',{type:'button',onClick:()=>fileRef.current?.click(),style:{background:'rgba(255,255,255,.14)',color:'white',border:'1px solid rgba(255,255,255,.35)',borderRadius:4,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}},'📁 Upload'),
+            React.createElement('input',{ref:camRef,type:'file',accept:'image/*',capture:'environment',onChange:handleFiles,style:{display:'none'}}),
+            React.createElement('input',{ref:fileRef,type:'file',accept:'image/*',multiple:true,onChange:handleFiles,style:{display:'none'}}))),
+        React.createElement('div',{style:{background:'white',padding:16}},
+          photos.length===0?React.createElement('div',{style:{textAlign:'center',padding:24,color:'#9ca3af',fontSize:14}},'No photos yet — use Camera or Upload above'):
+          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:12}},photos.map(ph=>React.createElement('div',{key:ph.id,style:{border:'1px solid #e5e7eb',borderRadius:6,overflow:'hidden',position:'relative'}},React.createElement('img',{src:ph.src,alt:ph.label||'Photo',style:{width:'100%',height:140,objectFit:'cover',display:'block'}}),React.createElement('div',{style:{padding:'6px 8px'}},React.createElement('input',{value:ph.label,onChange:e=>setData(d=>({...d,inspPhotos:d.inspPhotos.map(x=>x.id===ph.id?{...x,label:e.target.value}:x)})),placeholder:'Add caption…',style:{border:'1px solid #e5e7eb',borderRadius:4,padding:'3px 6px',fontSize:11,width:'100%',boxSizing:'border-box',outline:'none',fontFamily:'inherit'}}),React.createElement('div',{style:{fontSize:10,color:'#9ca3af',marginTop:2}},ph.ts)),React.createElement('button',{type:'button',onClick:()=>setData(d=>({...d,inspPhotos:d.inspPhotos.filter(x=>x.id!==ph.id)})),style:{position:'absolute',top:5,right:5,background:'rgba(185,28,28,.8)',color:'white',border:'none',borderRadius:999,width:22,height:22,cursor:'pointer',fontSize:14,lineHeight:'22px',textAlign:'center'}},'×')))))),
+      // Signature
+      React.createElement('div',{style:{background:'white',borderRadius:6,padding:20,marginBottom:20,border:'1px solid #d1fae5'}},
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:28}},
+          React.createElement('div',null,React.createElement('label',{style:ILBL},'INSPECTOR SIGNATURE'),React.createElement('div',{style:{borderBottom:'2px solid #374151',height:44,marginTop:8}}),React.createElement('div',{style:{fontSize:11,color:'#9ca3af',marginTop:4}},'Signature')),
+          React.createElement('div',null,React.createElement('label',{style:ILBL},'DATE'),React.createElement('div',{style:{borderBottom:'2px solid #374151',height:44,marginTop:8,display:'flex',alignItems:'flex-end',paddingBottom:6,fontSize:14,color:'#374151'}},data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):''))))),
+    React.createElement('div',{style:{textAlign:'center',padding:'20px 0 32px'}},
+      React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'13px 40px',fontWeight:700,fontSize:16,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 3px 12px rgba(27,67,50,.3)'}},submitting?'⏳ Generating…':'📤 Save PDF Report'),
+      React.createElement('div',{style:{fontSize:11,color:'#9ca3af',marginTop:8}},'Generates a PDF of the full inspection')));
+}
+
+
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
 
-// ── Auth session (module-level so all storage calls pick it up automatically) ──
+// Auth session — module-level so all storage calls pick it up automatically
 let currentSession = null;
-try {
-  const stored = localStorage.getItem('fbmt_session');
-  if (stored) currentSession = JSON.parse(stored);
-} catch {}
+try { const s = localStorage.getItem('fbmt_session'); if (s) currentSession = JSON.parse(s); } catch {}
 
 async function supaLogin(email, password) {
   const resp = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
@@ -908,29 +1087,20 @@ async function supaLogout() {
 
 async function supaGetProfile() {
   if (!currentSession?.access_token) return null;
-  const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*&id=eq.' + currentSession.user.id, {
-    headers: supaHeaders(),
-  });
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*&id=eq.' + currentSession.user.id, { headers: supaHeaders() });
   if (!resp.ok) return null;
   const rows = await resp.json();
   return rows[0] || null;
 }
 
 function isConfigured() {
-  return SUPABASE_URL
-    && SUPABASE_URL !== 'https://YOUR_PROJECT_ID.supabase.co'
-    && SUPABASE_ANON_KEY
-    && SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE';
+  return SUPABASE_URL && SUPABASE_URL !== 'https://YOUR_PROJECT_ID.supabase.co'
+    && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE';
 }
 
 function supaHeaders() {
   const bearer = currentSession?.access_token || SUPABASE_ANON_KEY;
-  return {
-    'Content-Type': 'application/json',
-    'apikey': SUPABASE_ANON_KEY,
-    'Authorization': 'Bearer ' + bearer,
-    'Prefer': 'return=representation'
-  };
+  return { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + bearer, 'Prefer': 'return=representation' };
 }
 
 function parseKey(key) {
@@ -1055,11 +1225,8 @@ export default function BalanceSheet() {
     if (!document.getElementById("fbmt-styles")) document.head.appendChild(el);
   }, []);
 
-  // Load profile (role) when session exists
   useEffect(() => {
-    if (session?.access_token) {
-      supaGetProfile().then(p => setProfile(p)).catch(() => {});
-    }
+    if (session?.access_token) supaGetProfile().then(p => setProfile(p)).catch(() => {});
   }, [session?.access_token]);
 
   const set = (k, v) => setData(d => ({ ...d, [k]: v }));
@@ -2974,31 +3141,23 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   }
 
   // ── Home Screen ────────────────────────────────────────────────────────────
-  // ── Login screen ────────────────────────────────────────────────────────────
+  // ── Login screen ─────────────────────────────────────────────────────────────
   if (!session) {
-    const handleLogin = async (e) => {
-      e && e.preventDefault();
+    const handleLogin = async () => {
       setLoginError(""); setLoginLoading(true);
-      try {
-        const s = await supaLogin(loginEmail, loginPassword);
-        setSession(s);
-      } catch(err) {
-        setLoginError(err.message || "Login failed. Check your email and password.");
-      } finally { setLoginLoading(false); }
+      try { const s = await supaLogin(loginEmail, loginPassword); setSession(s); }
+      catch(err) { setLoginError(err.message || "Login failed. Check your email and password."); }
+      finally { setLoginLoading(false); }
     };
     return (
       <div style={{minHeight:"100vh",background:"#6B0E1E",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
         <div style={{background:"white",borderRadius:14,padding:40,width:"min(400px,100%)",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
           <div style={{textAlign:"center",marginBottom:28}}>
-            <div style={{fontSize:32,marginBottom:8}}>🏦</div>
+            <div style={{fontSize:36,marginBottom:8}}>🏦</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:22,color:"#6B0E1E"}}>First Bank of Montana</div>
             <div style={{fontSize:13,color:"#888",marginTop:4}}>Agricultural Balance Sheet System</div>
           </div>
-          {loginError && (
-            <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#991b1b"}}>
-              {loginError}
-            </div>
-          )}
+          {loginError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#991b1b"}}>{loginError}</div>}
           <div style={{marginBottom:14}}>
             <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>EMAIL</label>
             <input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)}
@@ -3012,12 +3171,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"9px 12px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
           </div>
           <button onClick={handleLogin} disabled={loginLoading}
-            style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:6,padding:"11px",fontWeight:700,fontSize:15,cursor:loginLoading?"wait":"pointer",opacity:loginLoading?.7:1,fontFamily:"inherit"}}>
+            style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:6,padding:11,fontWeight:700,fontSize:15,cursor:loginLoading?"wait":"pointer",opacity:loginLoading?.7:1,fontFamily:"inherit"}}>
             {loginLoading ? "Signing in…" : "Sign In"}
           </button>
-          <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:16}}>
-            Contact your administrator to get access
-          </div>
+          <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:16}}>Contact your administrator for access</div>
         </div>
       </div>
     );
@@ -3033,16 +3190,8 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               <div className="home-top-sub">Agricultural Balance Sheet System</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
-              {session?.user?.email && (
-                <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>
-                  {profile?.full_name || session.user.email}
-                  {profile?.role === "admin" && <span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}
-                </span>
-              )}
-              <button onClick={async()=>{ await supaLogout(); setSession(null); setProfile(null); }}
-                style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>
-                Sign Out
-              </button>
+              {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
+              <button onClick={async()=>{await supaLogout();setSession(null);setProfile(null);}} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>Sign Out</button>
             </div>
           </div>
         </div>
@@ -3521,22 +3670,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <span className="bank-name">First Bank of Montana</span>
         <span className="divider">|</span>
         <span className="tool-name">Agricultural Financial Tools</span>
-        {data.clientName && (
-          <span style={{marginLeft:"auto",opacity:.8,fontSize:".85rem"}}>
-            {data.clientName}
-          </span>
-        )}
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
-          {session?.user?.email && (
-            <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>
-              {profile?.full_name || session.user.email}
-              {profile?.role === "admin" && <span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}
-            </span>
-          )}
-          <button onClick={async()=>{ await supaLogout(); setSession(null); setProfile(null); setScreen("home"); setData(emptyData()); }}
-            style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",color:"rgba(255,255,255,.8)",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit"}}>
-            Sign Out
-          </button>
+          {data.clientName && <span style={{opacity:.8,fontSize:".85rem"}}>{data.clientName}</span>}
+          {session?.user?.email && <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
+          <button onClick={async()=>{await supaLogout();setSession(null);setProfile(null);setScreen("home");setData(emptyData());}} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",color:"rgba(255,255,255,.8)",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit"}}>Sign Out</button>
         </div>
       </div>
 
@@ -3552,6 +3689,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
         <button className={"tab-btn" + (activeTab === "compare" ? " tab-active" : "")}
           onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
           Year Comparison
+        </button>
+        <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
+          onClick={()=>setActiveTab("inspection")}>
+          🌾 Ag Inspection
         </button>
       </div>
 
@@ -3692,6 +3833,10 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             />
           </div>
         </div>
+      )}
+
+      {activeTab === "inspection" && (
+        <InspectionView data={data} setData={setData} />
       )}
     </div>
   );
