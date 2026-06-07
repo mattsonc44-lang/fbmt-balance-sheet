@@ -386,6 +386,25 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
   );
 }
 
+// ── Expense List ──────────────────────────────────────────────────────────────
+const DEFAULT_EXPENSE_LIST = [
+  'Seed','Fertilizer','Chemicals / Pesticides','Crop Insurance',
+  'Fuel & Oil','Repairs & Maintenance','Custom Hire','Labor - Hired',
+  'Land Rent / Cash Rent','Utilities','Trucking & Hauling',
+  'Storage & Drying','Interest - Operating','Interest - Term Debt',
+  'Accounting & Legal','Supplies','Veterinary & Medicine',
+  'Feed - Purchased','Livestock Supplies','Real Estate Taxes',
+  'Insurance - Farm','Depreciation','Other',
+];
+
+function loadExpenseList() {
+  try { const s=localStorage.getItem('fbmt_expenseList'); if(s) return JSON.parse(s); } catch {}
+  return DEFAULT_EXPENSE_LIST.map((name,id)=>({id,name}));
+}
+function saveExpenseList(list) {
+  try { localStorage.setItem('fbmt_expenseList',JSON.stringify(list)); } catch {}
+}
+
 const STORAGE_PREFIX = "fbmt_bs:";
 
 const STEPS = [
@@ -1617,6 +1636,595 @@ function CustomerInspectForm({ shareId }) {
 }
 
 
+// ── Shared customer form helpers ─────────────────────────────────────────────
+const CUST_SUPABASE_URL = () => (window.SUPABASE_URL||'').replace(/\/+$/,'');
+const CUST_ANON_KEY = () => window.SUPABASE_ANON_KEY||'';
+const custHeaders = () => ({'Content-Type':'application/json','apikey':CUST_ANON_KEY()});
+
+async function notifySubmission(type, clientName, shareId) {
+  try {
+    await fetch('/.netlify/functions/notify-submission', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type, clientName, shareId, submittedAt:new Date().toISOString()}),
+    });
+  } catch {}
+}
+
+function CustSec({title,children,open,onToggle}) {
+  return (
+    <div style={{marginBottom:12,border:'1px solid #e5e7eb',borderRadius:8,overflow:'hidden'}}>
+      <div onClick={onToggle} style={{background:'#f5e8ea',padding:'10px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',userSelect:'none'}}>
+        <span style={{fontWeight:700,fontSize:14,color:'#6B0E1E'}}>{title}</span>
+        <span style={{color:'#6B0E1E',fontSize:12}}>{open?'▲':'▼'}</span>
+      </div>
+      {open && <div style={{padding:14,background:'white'}}>{children}</div>}
+    </div>
+  );
+}
+
+function CustInp({value,onChange,placeholder,type='text',prefix,style={}}) {
+  return (
+    <div style={{display:'flex',alignItems:'center',border:'1px solid #d1d5db',borderRadius:6,overflow:'hidden',background:'white',...style}}>
+      {prefix&&<span style={{padding:'8px 10px',background:'#f9f5f5',borderRight:'1px solid #d1d5db',color:'#666',fontSize:13,whiteSpace:'nowrap'}}>{prefix}</span>}
+      <input type={type} value={value||''} placeholder={placeholder||''}
+        onChange={e=>onChange(type==='number'?e.target.value.replace(/[^0-9.]/g,''):e.target.value)}
+        style={{flex:1,border:'none',padding:'8px 10px',fontSize:14,fontFamily:'inherit',outline:'none',background:'transparent'}}/>
+    </div>
+  );
+}
+
+// ── Customer Balance Sheet Form ───────────────────────────────────────────────
+function CustomerBalanceSheetForm({shareId}) {
+  const [stage,setStage]=React.useState('pin');
+  const [pin,setPin]=React.useState(''); const [pinErr,setPinErr]=React.useState('');
+  const [shareRow,setShareRow]=React.useState(null);
+  const [data,setData]=React.useState(null);
+  const [saving,setSaving]=React.useState(false);
+  const [submitting,setSubmitting]=React.useState(false);
+  const [open,setOpen]=React.useState({cash:true,farmProducts:true,livestock:true,cropInv:true,breeding:false,re:true,vehicles:false,machinery:false,otherA:false,opNotes:true,termDebt:true,reMort:false,otherL:false});
+  const toggle = k => setOpen(o=>({...o,[k]:!o[k]}));
+  const n = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
+  const fmt = v => v===''||v===null||v===undefined?'$0':'$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const saveTimer = React.useRef(null);
+
+  const verifyPin = async () => {
+    setPinErr('');
+    try {
+      const resp = await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId+'&select=*',{headers:custHeaders()});
+      const rows = await resp.json();
+      if(!rows.length){setPinErr('Link not found or expired.');return;}
+      const row = rows[0];
+      if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
+      if(row.status==='reviewed'){setStage('reviewed');return;}
+      if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN. Please check your email.');return;}
+      setShareRow(row);
+      const d = row.customer_draft || row.original_data || {};
+      setData({...d});
+      setStage('form');
+    } catch(e){setPinErr('Connection error: '+e.message);}
+  };
+
+  const saveDraft = React.useCallback(async (d) => {
+    if(!shareRow||!d)return;
+    setSaving(true);
+    try {
+      await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId,{
+        method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},
+        body:JSON.stringify({customer_draft:d}),
+      });
+    } catch {}
+    setSaving(false);
+  },[shareRow,shareId]);
+
+  const updateData = (updates) => {
+    setData(d=>{
+      const nd={...d,...updates};
+      clearTimeout(saveTimer.current);
+      saveTimer.current=setTimeout(()=>saveDraft(nd),1500);
+      return nd;
+    });
+  };
+  const setArr = (k,i,f,v) => updateData({[k]:data[k].map((r,j)=>j===i?{...r,[f]:v}:r)});
+  const addRow = (k,tpl) => updateData({[k]:[...(data[k]||[]),{...tpl}]});
+  const remRow = (k,i) => updateData({[k]:(data[k]||[]).filter((_,j)=>j!==i)});
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId,{
+        method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},
+        body:JSON.stringify({customer_draft:data,status:'submitted',submitted_at:new Date().toISOString()}),
+      });
+      await notifySubmission('balance_sheet',shareRow?.client_name||'',shareId);
+      setStage('done');
+    } catch(e){alert('Submit failed: '+e.message);}
+    setSubmitting(false);
+  };
+
+  const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
+  const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
+
+  if(stage==='expired') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>⏰</div><div style={{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}}>Link Expired</div><p style={{color:'#6b7280',fontSize:14}}>This balance sheet link has expired. Please contact your lender for a new link.</p></div></div>;
+  if(stage==='reviewed') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>✅</div><div style={{fontWeight:700,fontSize:18,color:'#15803d',marginBottom:8}}>Already Submitted</div><p style={{color:'#6b7280',fontSize:14}}>Your balance sheet has been received and reviewed by your lender. Thank you!</p></div></div>;
+  if(stage==='done') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:56,marginBottom:12}}>✅</div><div style={{fontWeight:800,fontSize:22,color:'#15803d',marginBottom:8}}>Balance Sheet Submitted!</div><p style={{color:'#6b7280',fontSize:14,lineHeight:1.6}}>Your balance sheet has been sent to First Bank of Montana for review. Your lender will be in touch.</p></div></div>;
+
+  if(stage==='pin') return (
+    <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={cardStyle}>
+        <div style={{textAlign:'center',marginBottom:28}}>
+          <div style={{fontSize:32,marginBottom:8}}>🏦</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:20,color:'#6B0E1E'}}>First Bank of Montana</div>
+          <div style={{fontSize:13,color:'#888',marginTop:4}}>Customer Balance Sheet Portal</div>
+        </div>
+        <p style={{fontSize:14,color:'#555',marginBottom:20,lineHeight:1.6}}>Your lender has shared a balance sheet with you to review and fill out. Enter your 6-digit PIN to get started. Your progress saves automatically so you can come back anytime before the link expires.</p>
+        <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:6,letterSpacing:.3}}>ENTER YOUR 6-DIGIT PIN</label>
+        <input type="tel" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,''))} onKeyDown={e=>e.key==='Enter'&&verifyPin()} placeholder="000000"
+          style={{width:'100%',border:`1.5px solid ${pinErr?'#fca5a5':'#d1d5db'}`,borderRadius:8,padding:'12px 16px',fontSize:24,fontFamily:'monospace',textAlign:'center',letterSpacing:8,outline:'none',boxSizing:'border-box',marginBottom:pinErr?8:16}}/>
+        {pinErr&&<div style={{color:'#991b1b',fontSize:13,marginBottom:14,padding:'8px 12px',background:'#fef2f2',borderRadius:6,border:'1px solid #fca5a5'}}>{pinErr}</div>}
+        <button onClick={verifyPin} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:8,padding:12,fontWeight:700,fontSize:16,cursor:'pointer',fontFamily:'inherit'}}>Open My Balance Sheet →</button>
+      </div>
+    </div>
+  );
+
+  if(!data) return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{color:'#888'}}>Loading...</div></div>;
+
+  // Totals
+  const cashTot = n(data.cashGlacier)+(data.cashOther||[]).reduce((s,r)=>s+n(r.amount),0);
+  const farmProdTot = (data.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0);
+  const lsMktTot = (data.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0);
+  const cropInvTot = (data.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
+  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+n(r.value),0);
+  const reTot = (data.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
+  const vehTot = (data.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
+  const machTot = (data.machinery||[]).reduce((s,r)=>s+n(r.value),0);
+  const otherATot = (data.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+  const fedPay = Array.isArray(data.federalPayments)?(data.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0):n(data.federalPayments);
+  const supTot = (data.supplies||[]).reduce((s,r)=>s+n(r.value),0);
+  const otherCurTot = (data.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
+  const totalAssets = cashTot+farmProdTot+lsMktTot+cropInvTot+fedPay+supTot+otherCurTot+breedTot+reTot+vehTot+machTot+otherATot;
+  const opNotesTot = (data.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0);
+  const termTot = (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+  const reMortTot = (data.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0);
+  const otherLTot = (data.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
+  const taxTot = n(data.taxesDue);
+  const totalLiab = opNotesTot+termTot+reMortTot+otherLTot+taxTot;
+  const netWorth = totalAssets-totalLiab;
+
+  const rowStyle={display:'flex',gap:8,alignItems:'center',marginBottom:8,padding:'8px 10px',background:'#f9f5f5',borderRadius:6};
+  const remBtn=(k,i)=><button type="button" onClick={()=>remRow(k,i)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer',fontSize:14,flexShrink:0}}>×</button>;
+  const addBtn=(k,tpl,label)=><button type="button" onClick={()=>addRow(k,tpl)} style={{marginTop:6,background:'#f5e8ea',color:'#6B0E1E',border:'1.5px dashed #6B0E1E',borderRadius:5,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}}>+ {label}</button>;
+  const lbl=(text)=><div style={{fontSize:11,fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:3}}>{text}</div>;
+
+  return (
+    <div style={pageStyle}>
+      {/* Top bar */}
+      <div style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:99,boxShadow:'0 2px 8px rgba(0,0,0,.3)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:20}}>🏦</span>
+          <div>
+            <div style={{color:'white',fontWeight:700,fontSize:15}}>First Bank of Montana</div>
+            <div style={{color:'rgba(255,255,255,.6)',fontSize:11}}>{shareRow?.client_name||''} — Balance Sheet</div>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {saving&&<span style={{color:'rgba(255,255,255,.6)',fontSize:12}}>Saving...</span>}
+          <button onClick={()=>saveDraft(data)} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600}}>💾 Save Draft</button>
+        </div>
+      </div>
+      <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 80px'}}>
+        <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:14,marginBottom:20}}>
+          <div style={{fontWeight:700,color:'#2d5a8e',marginBottom:4,fontSize:14}}>📋 Instructions</div>
+          <div style={{fontSize:13,color:'#555',lineHeight:1.6}}>Your lender has pre-filled this form with existing information. Please review each section, correct any figures, and add anything that's missing. Your progress saves automatically. When you're done, scroll to the bottom and click Submit.</div>
+        </div>
+
+        {/* ASSETS */}
+        <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase'}}>Assets</div>
+
+        <CustSec title="Cash & Bank Accounts" open={open.cash} onToggle={()=>toggle('cash')}>
+          {lbl('Glacier Bank / FBMT Balance')}
+          <CustInp prefix="$" value={data.cashGlacier} onChange={v=>updateData({cashGlacier:v})} placeholder="0"/>
+          <div style={{marginTop:10}}>{lbl('Other Banks / Institutions')}</div>
+          {(data.cashOther||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.institution} onChange={v=>setArr('cashOther',i,'institution',v)} placeholder="Bank name" style={{flex:2}}/><CustInp prefix="$" value={r.amount} onChange={v=>setArr('cashOther',i,'amount',v)} placeholder="0" style={{flex:1}}/>{remBtn('cashOther',i)}</div>)}
+          {addBtn('cashOther',{institution:'',amount:''},'Add Bank')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total Cash: {fmt(cashTot)}</div>
+        </CustSec>
+
+        <CustSec title="Farm Products on Hand" open={open.farmProducts} onToggle={()=>toggle('farmProducts')}>
+          {(data.farmProducts||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+            <CustInp value={r.kind} onChange={v=>setArr('farmProducts',i,'kind',v)} placeholder="e.g. Wheat, Barley" style={{flex:'1 1 120px'}}/>
+            <CustInp value={r.quantity} onChange={v=>setArr('farmProducts',i,'quantity',v)} placeholder="Qty" type="number" style={{flex:'1 1 60px'}}/>
+            <select value={r.unit||'bu'} onChange={e=>setArr('farmProducts',i,'unit',e.target.value)} style={{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 6px',fontSize:13,background:'white',outline:'none'}}>
+              {['bu','ton','lbs','cwt','bale'].map(u=><option key={u}>{u}</option>)}
+            </select>
+            <CustInp prefix="$" value={r.pricePerUnit} onChange={v=>setArr('farmProducts',i,'pricePerUnit',v)} placeholder="Price/unit" type="number" style={{flex:'1 1 80px'}}/>
+            {remBtn('farmProducts',i)}
+          </div>)}
+          {addBtn('farmProducts',{quantity:'',unit:'bu',kind:'',pricePerUnit:'',share:'100',contracted:false},'Add Crop')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(farmProdTot)}</div>
+        </CustSec>
+
+        <CustSec title="Market Livestock" open={open.livestock} onToggle={()=>toggle('livestock')}>
+          {(data.livestockMarket||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.number} onChange={v=>setArr('livestockMarket',i,'number',v)} placeholder="# head" style={{width:80,flex:'none'}}/><CustInp value={r.kind} onChange={v=>setArr('livestockMarket',i,'kind',v)} placeholder="Kind / weight" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('livestockMarket',i,'value',v)} placeholder="Total value" style={{flex:1}}/>{remBtn('livestockMarket',i)}</div>)}
+          {addBtn('livestockMarket',{number:'',kind:'',value:''},'Add Livestock')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(lsMktTot)}</div>
+        </CustSec>
+
+        <CustSec title="Growing Crops (Input Costs)" open={open.cropInv} onToggle={()=>toggle('cropInv')}>
+          {(data.cropInvestment||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.cropType} onChange={v=>setArr('cropInvestment',i,'cropType',v)} placeholder="Crop type" style={{flex:2}}/><CustInp value={r.acres} onChange={v=>setArr('cropInvestment',i,'acres',v)} placeholder="Acres" type="number" style={{flex:1}}/><CustInp prefix="$" value={r.valuePerAcre} onChange={v=>setArr('cropInvestment',i,'valuePerAcre',v)} placeholder="$/acre" style={{flex:1}}/>{remBtn('cropInvestment',i)}</div>)}
+          {addBtn('cropInvestment',{cropType:'',acres:'',valuePerAcre:''},'Add Crop')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(cropInvTot)}</div>
+        </CustSec>
+
+        <CustSec title="Breeding Stock" open={open.breeding} onToggle={()=>toggle('breeding')}>
+          {(data.breedingStock||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.number} onChange={v=>setArr('breedingStock',i,'number',v)} placeholder="# head" style={{width:80,flex:'none'}}/><CustInp value={r.kind} onChange={v=>setArr('breedingStock',i,'kind',v)} placeholder="Kind" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('breedingStock',i,'value',v)} placeholder="Total value" style={{flex:1}}/>{remBtn('breedingStock',i)}</div>)}
+          {addBtn('breedingStock',{number:'',kind:'',value:''},'Add Breeding Stock')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(breedTot)}</div>
+        </CustSec>
+
+        <CustSec title="Real Estate" open={open.re} onToggle={()=>toggle('re')}>
+          {(data.realEstate||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+            <CustInp value={r.acres} onChange={v=>setArr('realEstate',i,'acres',v)} placeholder="Acres" type="number" style={{flex:'1 1 70px'}}/>
+            <CustInp value={r.description||r.reType} onChange={v=>setArr('realEstate',i,'description',v)} placeholder="Description / section" style={{flex:'2 1 140px'}}/>
+            <CustInp prefix="$" value={r.valuePerAcre} onChange={v=>setArr('realEstate',i,'valuePerAcre',v)} placeholder="$/acre" style={{flex:'1 1 80px'}}/>
+            <div style={{fontSize:12,color:'#6B0E1E',fontWeight:600,alignSelf:'center',whiteSpace:'nowrap'}}>{fmt(n(r.acres)*n(r.valuePerAcre))}</div>
+            {remBtn('realEstate',i)}
+          </div>)}
+          {addBtn('realEstate',{acres:'',reType:'',description:'',valuePerAcre:''},'Add Tract')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(reTot)}</div>
+        </CustSec>
+
+        <CustSec title="Titled Vehicles" open={open.vehicles} onToggle={()=>toggle('vehicles')}>
+          {(data.vehicles||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.year} onChange={v=>setArr('vehicles',i,'year',v)} placeholder="Year" style={{width:70,flex:'none'}}/><CustInp value={r.make} onChange={v=>setArr('vehicles',i,'make',v)} placeholder="Make / Model" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('vehicles',i,'value',v)} placeholder="Value" style={{flex:1}}/>{remBtn('vehicles',i)}</div>)}
+          {addBtn('vehicles',{year:'',make:'',vin:'',condition:'',value:''},'Add Vehicle')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(vehTot)}</div>
+        </CustSec>
+
+        <CustSec title="Machinery & Equipment" open={open.machinery} onToggle={()=>toggle('machinery')}>
+          {(data.machinery||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+            <CustInp value={r.year} onChange={v=>setArr('machinery',i,'year',v)} placeholder="Year" style={{width:70,flex:'none'}}/>
+            <CustInp value={r.make} onChange={v=>setArr('machinery',i,'make',v)} placeholder="Make / Model" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.value} onChange={v=>setArr('machinery',i,'value',v)} placeholder="Value" style={{flex:1}}/>
+            {remBtn('machinery',i)}
+          </div>)}
+          {addBtn('machinery',{year:'',make:'',size:'',serial:'',condition:'',value:''},'Add Equipment')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(machTot)}</div>
+        </CustSec>
+
+        <CustSec title="Other Assets" open={open.otherA} onToggle={()=>toggle('otherA')}>
+          {(data.otherAssets||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.description} onChange={v=>setArr('otherAssets',i,'description',v)} placeholder="Description" style={{flex:2}}/><CustInp prefix="$" value={r.amount} onChange={v=>setArr('otherAssets',i,'amount',v)} placeholder="Value" style={{flex:1}}/>{remBtn('otherAssets',i)}</div>)}
+          {addBtn('otherAssets',{description:'',amount:''},'Add Asset')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(otherATot)}</div>
+        </CustSec>
+
+        <div style={{background:'#1a5c25',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,marginBottom:16,display:'flex',justifyContent:'space-between'}}>
+          <span>TOTAL ASSETS</span><span>{fmt(totalAssets)}</span>
+        </div>
+
+        {/* LIABILITIES */}
+        <div style={{background:'#4a0810',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase',marginTop:8}}>Liabilities</div>
+
+        <CustSec title="Operating Notes & Lines of Credit" open={open.opNotes} onToggle={()=>toggle('opNotes')}>
+          {(data.operatingNotes||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+            <CustInp value={r.creditor} onChange={v=>setArr('operatingNotes',i,'creditor',v)} placeholder="Lender" style={{flex:'2 1 120px'}}/>
+            <CustInp prefix="$" value={r.balance} onChange={v=>setArr('operatingNotes',i,'balance',v)} placeholder="Balance" style={{flex:'1 1 80px'}}/>
+            {remBtn('operatingNotes',i)}
+          </div>)}
+          {addBtn('operatingNotes',{creditor:'',dueDate:'',pmt:'',balance:'',security:''},'Add Note')}
+          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(opNotesTot)}</div>
+        </CustSec>
+
+        <CustSec title="Term Debt / Equipment Loans" open={open.termDebt} onToggle={()=>toggle('termDebt')}>
+          {(data.intermediatDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+            <CustInp value={r.creditor} onChange={v=>setArr('intermediatDebt',i,'creditor',v)} placeholder="Lender" style={{flex:'2 1 120px'}}/>
+            <CustInp value={r.security} onChange={v=>setArr('intermediatDebt',i,'security',v)} placeholder="Collateral" style={{flex:'2 1 100px'}}/>
+            <CustInp prefix="Ann Pmt $" value={r.annualPmt} onChange={v=>setArr('intermediatDebt',i,'annualPmt',v)} placeholder="0" style={{flex:'1 1 80px'}}/>
+            <CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('intermediatDebt',i,'principal',v)} placeholder="0" style={{flex:'1 1 80px'}}/>
+            {remBtn('intermediatDebt',i)}
+          </div>)}
+          {addBtn('intermediatDebt',{creditor:'',security:'',dueDate:'',annualPmt:'',principal:'',rate:''},'Add Loan')}
+          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Annual Payments: {fmt(termTot)}</div>
+        </CustSec>
+
+        <CustSec title="Real Estate Mortgages" open={open.reMort} onToggle={()=>toggle('reMort')}>
+          {(data.reMortgages||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.lienHolder} onChange={v=>setArr('reMortgages',i,'lienHolder',v)} placeholder="Lender" style={{flex:2}}/><CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('reMortgages',i,'principal',v)} placeholder="0" style={{flex:1}}/>{remBtn('reMortgages',i)}</div>)}
+          {addBtn('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''},'Add Mortgage')}
+          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(reMortTot)}</div>
+        </CustSec>
+
+        <CustSec title="Taxes Due & Other Liabilities" open={open.otherL} onToggle={()=>toggle('otherL')}>
+          <div style={{marginBottom:10}}>
+            {lbl('Income Taxes Due')}
+            <CustInp prefix="$" value={data.taxesDue} onChange={v=>updateData({taxesDue:v})} placeholder="0"/>
+          </div>
+          {(data.otherLiabilities||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.description} onChange={v=>setArr('otherLiabilities',i,'description',v)} placeholder="Description" style={{flex:2}}/><CustInp prefix="$" value={r.balance} onChange={v=>setArr('otherLiabilities',i,'balance',v)} placeholder="Balance" style={{flex:1}}/>{remBtn('otherLiabilities',i)}</div>)}
+          {addBtn('otherLiabilities',{description:'',balance:''},'Add Liability')}
+        </CustSec>
+
+        <div style={{background:'#7a1a1a',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,marginBottom:12,display:'flex',justifyContent:'space-between'}}>
+          <span>TOTAL LIABILITIES</span><span>{fmt(totalLiab)}</span>
+        </div>
+        <div style={{background:netWorth>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginBottom:24,display:'flex',justifyContent:'space-between',fontSize:16}}>
+          <span>NET WORTH</span><span>{fmt(netWorth)}</span>
+        </div>
+
+        {/* Signature area */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:20,marginBottom:24}}>
+          <div style={{fontWeight:700,fontSize:14,color:'#374151',marginBottom:4}}>Certification</div>
+          <p style={{fontSize:13,color:'#555',lineHeight:1.6,marginBottom:0}}>I certify that the information provided above is a true and accurate statement of my financial condition as of the date submitted.</p>
+        </div>
+
+        <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
+          {submitting?'⏳ Submitting…':'✅ Submit My Balance Sheet'}
+        </button>
+        <div style={{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:10}}>Sent securely to First Bank of Montana · Your draft saves automatically</div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Customer Budget Form ──────────────────────────────────────────────────────
+function CustomerBudgetForm({shareId}) {
+  const [stage,setStage]=React.useState('pin');
+  const [pin,setPin]=React.useState(''); const [pinErr,setPinErr]=React.useState('');
+  const [shareRow,setShareRow]=React.useState(null);
+  const [clientName,setClientName]=React.useState('');
+  const [crops,setCrops]=React.useState([{id:1,acres:'',crop:'',yieldPerAcre:'',unit:'bu',price:'',share:'100',contracted:false}]);
+  const [livestock,setLivestock]=React.useState([{id:1,head:'',type:'',lbs:'',price:''}]);
+  const [misc,setMisc]=React.useState([{id:1,description:'Government Payments',amount:''}]);
+  const [expenses,setExpenses]=React.useState([]);
+  const [expenseList,setExpenseList]=React.useState(()=>loadExpenseList());
+  const [customExpense,setCustomExpense]=React.useState('');
+  const [saving,setSaving]=React.useState(false);
+  const [submitting,setSubmitting]=React.useState(false);
+  const saveTimer=React.useRef(null);
+
+  const n=v=>Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
+  const fmt=v=>'$'+(Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}));
+  const uid=()=>Math.random().toString(36).slice(2,8);
+
+  const verifyPin=async()=>{
+    setPinErr('');
+    try{
+      const resp=await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId+'&select=*',{headers:custHeaders()});
+      const rows=await resp.json();
+      if(!rows.length){setPinErr('Link not found or expired.');return;}
+      const row=rows[0];
+      if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
+      if(row.status==='reviewed'){setStage('reviewed');return;}
+      if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN.');return;}
+      setShareRow(row);setClientName(row.client_name||'');
+      if(row.customer_draft){
+        const d=row.customer_draft;
+        if(d.budgetCrops)setCrops(d.budgetCrops);
+        if(d.budgetLivestock)setLivestock(d.budgetLivestock);
+        if(d.budgetMisc)setMisc(d.budgetMisc);
+        if(d.budgetExpenses)setExpenses(d.budgetExpenses);
+      }
+      setStage('form');
+    }catch(e){setPinErr('Connection error: '+e.message);}
+  };
+
+  const saveDraft=React.useCallback(async(c,l,m,e)=>{
+    if(!shareRow)return;
+    setSaving(true);
+    try{await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId,{method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},body:JSON.stringify({customer_draft:{budgetCrops:c,budgetLivestock:l,budgetMisc:m,budgetExpenses:e}})});}catch{}
+    setSaving(false);
+  },[shareRow,shareId]);
+
+  const schedSave=(c,l,m,e)=>{clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>saveDraft(c,l,m,e),1500);};
+
+  const updCrop=(i,f,v)=>{const nc=crops.map((r,j)=>j===i?{...r,[f]:v}:r);setCrops(nc);schedSave(nc,livestock,misc,expenses);};
+  const updLS=(i,f,v)=>{const nl=livestock.map((r,j)=>j===i?{...r,[f]:v}:r);setLivestock(nl);schedSave(crops,nl,misc,expenses);};
+  const updMisc=(i,f,v)=>{const nm=misc.map((r,j)=>j===i?{...r,[f]:v}:r);setMisc(nm);schedSave(crops,livestock,nm,expenses);};
+  const updExp=(i,f,v)=>{const ne=expenses.map((r,j)=>j===i?{...r,[f]:v}:r);setExpenses(ne);schedSave(crops,livestock,misc,ne);};
+
+  const addExpenseFromList=(name)=>{
+    if(!name||expenses.some(e=>e.description===name))return;
+    const ne=[...expenses,{id:uid(),description:name,amount:''}];
+    setExpenses(ne);schedSave(crops,livestock,misc,ne);
+  };
+  const addCustomExpense=()=>{
+    if(!customExpense.trim())return;
+    const ne=[...expenses,{id:uid(),description:customExpense.trim(),amount:''}];
+    setExpenses(ne);setCustomExpense('');schedSave(crops,livestock,misc,ne);
+  };
+  const remExp=(i)=>{const ne=expenses.filter((_,j)=>j!==i);setExpenses(ne);schedSave(crops,livestock,misc,ne);};
+
+  const cropTot=crops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
+  const lsTot=livestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+  const miscTot=misc.reduce((s,r)=>s+n(r.amount),0);
+  const totalIncome=cropTot+lsTot+miscTot;
+  const totalExpenses=expenses.reduce((s,r)=>s+n(r.amount),0);
+  const net=totalIncome-totalExpenses;
+
+  const submit=async()=>{
+    setSubmitting(true);
+    try{
+      await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId,{method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},body:JSON.stringify({customer_draft:{budgetCrops:crops,budgetLivestock:livestock,budgetMisc:misc,budgetExpenses:expenses},status:'submitted',submitted_at:new Date().toISOString()})});
+      await notifySubmission('budget',shareRow?.client_name||'',shareId);
+      setStage('done');
+    }catch(e){alert('Submit failed: '+e.message);}
+    setSubmitting(false);
+  };
+
+  const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
+  const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
+
+  if(stage==='expired')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>⏰</div><div style={{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}}>Link Expired</div><p style={{color:'#6b7280',fontSize:14}}>This budget link has expired. Please contact your lender.</p></div></div>;
+  if(stage==='reviewed')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>✅</div><div style={{fontWeight:700,fontSize:18,color:'#15803d',marginBottom:8}}>Already Submitted</div><p style={{color:'#6b7280',fontSize:14}}>Your budget has been received. Thank you!</p></div></div>;
+  if(stage==='done')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:56,marginBottom:12}}>✅</div><div style={{fontWeight:800,fontSize:22,color:'#15803d',marginBottom:8}}>Budget Submitted!</div><p style={{color:'#6b7280',fontSize:14,lineHeight:1.6}}>Your budget has been sent to First Bank of Montana.</p></div></div>;
+
+  if(stage==='pin')return(
+    <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={cardStyle}>
+        <div style={{textAlign:'center',marginBottom:28}}>
+          <div style={{fontSize:32,marginBottom:8}}>🌾</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:20,color:'#6B0E1E'}}>First Bank of Montana</div>
+          <div style={{fontSize:13,color:'#888',marginTop:4}}>Agricultural Budget Form</div>
+        </div>
+        <p style={{fontSize:14,color:'#555',marginBottom:20,lineHeight:1.6}}>Your lender has sent you a budget form to fill out. Enter your 6-digit PIN to get started.</p>
+        <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:6}}>ENTER YOUR 6-DIGIT PIN</label>
+        <input type="tel" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,''))} onKeyDown={e=>e.key==='Enter'&&verifyPin()} placeholder="000000" style={{width:'100%',border:`1.5px solid ${pinErr?'#fca5a5':'#d1d5db'}`,borderRadius:8,padding:'12px 16px',fontSize:24,fontFamily:'monospace',textAlign:'center',letterSpacing:8,outline:'none',boxSizing:'border-box',marginBottom:pinErr?8:16}}/>
+        {pinErr&&<div style={{color:'#991b1b',fontSize:13,marginBottom:14,padding:'8px 12px',background:'#fef2f2',borderRadius:6,border:'1px solid #fca5a5'}}>{pinErr}</div>}
+        <button onClick={verifyPin} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:8,padding:12,fontWeight:700,fontSize:16,cursor:'pointer',fontFamily:'inherit'}}>Open My Budget →</button>
+      </div>
+    </div>
+  );
+
+  const inpStyle={border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'};
+  const secHead=(color,title)=><div style={{background:color,color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase',marginBottom:0}}>{title}</div>;
+  const secBody=(children)=><div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'0 0 8px 8px',padding:16,marginBottom:16}}>{children}</div>;
+
+  return(
+    <div style={pageStyle}>
+      <div style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:99,boxShadow:'0 2px 8px rgba(0,0,0,.3)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:20}}>🌾</span>
+          <div><div style={{color:'white',fontWeight:700,fontSize:15}}>First Bank of Montana</div><div style={{color:'rgba(255,255,255,.6)',fontSize:11}}>{clientName} — Budget</div></div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {saving&&<span style={{color:'rgba(255,255,255,.6)',fontSize:12}}>Saving...</span>}
+          <button onClick={()=>saveDraft(crops,livestock,misc,expenses)} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600}}>💾 Save Draft</button>
+        </div>
+      </div>
+      <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 80px'}}>
+        {/* Running totals */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
+          {[['Total Income',totalIncome,'#1a5c25'],['Total Expenses',totalExpenses,'#7a1a1a'],[net>=0?'Net Income':'Net Loss',Math.abs(net),net>=0?'#1a5c25':'#7a1a1a']].map(([l,v,c])=>(
+            <div key={l} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
+              <div style={{fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:4}}>{l}</div>
+              <div style={{fontSize:18,fontWeight:700,color:c}}>{fmt(v)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* INCOME */}
+        {secHead('#1a5c25','🌱 Income')}
+        {secBody(<>
+          <div style={{fontWeight:600,fontSize:13,color:'#374151',marginBottom:8}}>Crop Income</div>
+          <div style={{display:'grid',gridTemplateColumns:'80px 1fr 80px 60px 80px 60px auto',gap:4,fontSize:11,color:'#888',marginBottom:4,padding:'0 4px'}}>
+            {['Acres','Crop','Yield/Ac','Unit','Price','Share%',''].map(h=><div key={h}>{h}</div>)}
+          </div>
+          {crops.map((r,i)=>(
+            <div key={r.id||i} style={{display:'grid',gridTemplateColumns:'80px 1fr 80px 60px 80px 60px auto',gap:4,marginBottom:6,alignItems:'center'}}>
+              <input style={inpStyle} type="text" value={r.acres} onChange={e=>updCrop(i,'acres',e.target.value.replace(/[^0-9.]/g,''))} placeholder="0"/>
+              <input style={inpStyle} type="text" value={r.crop} onChange={e=>updCrop(i,'crop',e.target.value)} placeholder="Crop"/>
+              <input style={inpStyle} type="text" value={r.yieldPerAcre} onChange={e=>updCrop(i,'yieldPerAcre',e.target.value.replace(/[^0-9.]/g,''))} placeholder="0"/>
+              <select style={{...inpStyle,padding:'7px 4px'}} value={r.unit||'bu'} onChange={e=>updCrop(i,'unit',e.target.value)}>{['bu','ton','lbs','cwt','bale'].map(u=><option key={u}>{u}</option>)}</select>
+              <input style={inpStyle} type="text" value={r.price} onChange={e=>updCrop(i,'price',e.target.value.replace(/[^0-9.]/g,''))} placeholder="0.00"/>
+              <input style={inpStyle} type="text" value={r.share??'100'} onChange={e=>updCrop(i,'share',e.target.value.replace(/[^0-9.]/g,''))} placeholder="100"/>
+              <button onClick={()=>{const nc=crops.filter((_,j)=>j!==i);setCrops(nc);schedSave(nc,livestock,misc,expenses);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:14}}>×</button>
+            </div>
+          ))}
+          <button onClick={()=>{const nc=[...crops,{id:uid(),acres:'',crop:'',yieldPerAcre:'',unit:'bu',price:'',share:'100',contracted:false}];setCrops(nc);schedSave(nc,livestock,misc,expenses);}} style={{marginTop:4,background:'#e8f5ea',color:'#1a5c25',border:'1.5px dashed #1a5c25',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>+ Add Crop</button>
+          <div style={{fontWeight:600,color:'#1a5c25',fontSize:13,marginTop:8}}>Crop Subtotal: {fmt(cropTot)}</div>
+
+          <div style={{fontWeight:600,fontSize:13,color:'#374151',margin:'16px 0 8px'}}>Livestock Income</div>
+          {livestock.map((r,i)=>(
+            <div key={r.id||i} style={{display:'flex',gap:6,marginBottom:6,alignItems:'center'}}>
+              <input style={{...inpStyle,width:70,flex:'none'}} type="text" value={r.head} onChange={e=>updLS(i,'head',e.target.value.replace(/[^0-9.]/g,''))} placeholder="Head"/>
+              <input style={{...inpStyle,flex:2}} type="text" value={r.type} onChange={e=>updLS(i,'type',e.target.value)} placeholder="Type / description"/>
+              <input style={{...inpStyle,width:80,flex:'none'}} type="text" value={r.lbs} onChange={e=>updLS(i,'lbs',e.target.value.replace(/[^0-9.]/g,''))} placeholder="Lbs/hd"/>
+              <input style={{...inpStyle,width:90,flex:'none'}} type="text" value={r.price} onChange={e=>updLS(i,'price',e.target.value.replace(/[^0-9.]/g,''))} placeholder="$/lb"/>
+              <button onClick={()=>{const nl=livestock.filter((_,j)=>j!==i);setLivestock(nl);schedSave(crops,nl,misc,expenses);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:14}}>×</button>
+            </div>
+          ))}
+          <button onClick={()=>{const nl=[...livestock,{id:uid(),head:'',type:'',lbs:'',price:''}];setLivestock(nl);schedSave(crops,nl,misc,expenses);}} style={{background:'#e8f5ea',color:'#1a5c25',border:'1.5px dashed #1a5c25',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>+ Add Livestock</button>
+          <div style={{fontWeight:600,color:'#1a5c25',fontSize:13,marginTop:8}}>Livestock Subtotal: {fmt(lsTot)}</div>
+
+          <div style={{fontWeight:600,fontSize:13,color:'#374151',margin:'16px 0 8px'}}>Miscellaneous Income (Government Payments, etc.)</div>
+          {misc.map((r,i)=>(
+            <div key={r.id||i} style={{display:'flex',gap:6,marginBottom:6,alignItems:'center'}}>
+              <input style={{...inpStyle,flex:2}} type="text" value={r.description} onChange={e=>updMisc(i,'description',e.target.value)} placeholder="Description"/>
+              <input style={{...inpStyle,flex:1}} type="text" value={r.amount} onChange={e=>updMisc(i,'amount',e.target.value.replace(/[^0-9.]/g,''))} placeholder="Amount"/>
+              <button onClick={()=>{const nm=misc.filter((_,j)=>j!==i);setMisc(nm);schedSave(crops,livestock,nm,expenses);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:14}}>×</button>
+            </div>
+          ))}
+          <button onClick={()=>{const nm=[...misc,{id:uid(),description:'',amount:''}];setMisc(nm);schedSave(crops,livestock,nm,expenses);}} style={{background:'#e8f5ea',color:'#1a5c25',border:'1.5px dashed #1a5c25',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>+ Add Income</button>
+          <div style={{fontWeight:700,color:'#1a5c25',fontSize:14,marginTop:12,padding:'8px 0',borderTop:'2px solid #e5e7eb'}}>TOTAL INCOME: {fmt(totalIncome)}</div>
+        </>)}
+
+        {/* EXPENSES */}
+        {secHead('#7a1a1a','💰 Expenses')}
+        {secBody(<>
+          <div style={{marginBottom:14}}>
+            <div style={{fontWeight:600,fontSize:13,color:'#374151',marginBottom:8}}>Add from expense list:</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:10}}>
+              {expenseList.filter(e=>!expenses.some(x=>x.description===e.name)).map(e=>(
+                <button key={e.id} onClick={()=>addExpenseFromList(e.name)} style={{background:'#f5e8ea',color:'#6B0E1E',border:'1px solid #e0b0b8',borderRadius:20,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:500,transition:'all .1s'}}>{e.name}</button>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <input type="text" value={customExpense} onChange={e=>setCustomExpense(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addCustomExpense()} placeholder="Type a custom expense and press Enter..." style={{...inpStyle,flex:1}}/>
+              <button onClick={addCustomExpense} style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'7px 14px',cursor:'pointer',fontWeight:600,fontSize:13,whiteSpace:'nowrap'}}>+ Add</button>
+            </div>
+          </div>
+          {expenses.length===0&&<div style={{textAlign:'center',color:'#9ca3af',padding:'16px 0',fontSize:13}}>No expenses yet — click items above to add them.</div>}
+          {expenses.map((r,i)=>(
+            <div key={r.id||i} style={{display:'flex',gap:8,marginBottom:6,alignItems:'center'}}>
+              <div style={{flex:2,fontSize:14,color:'#374151',fontWeight:500,padding:'4px 0'}}>{r.description}</div>
+              <input style={{...inpStyle,flex:1,textAlign:'right'}} type="text" value={r.amount} onChange={e=>updExp(i,'amount',e.target.value.replace(/[^0-9.]/g,''))} placeholder="$0"/>
+              <button onClick={()=>remExp(i)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:14,flexShrink:0}}>×</button>
+            </div>
+          ))}
+          {expenses.length>0&&<div style={{fontWeight:700,color:'#7a1a1a',fontSize:14,marginTop:12,padding:'8px 0',borderTop:'2px solid #e5e7eb'}}>TOTAL EXPENSES: {fmt(totalExpenses)}</div>}
+        </>)}
+
+        {/* Net */}
+        <div style={{background:net>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'14px 18px',borderRadius:8,marginBottom:24,display:'flex',justifyContent:'space-between',fontSize:16}}>
+          <span>{net>=0?'PROJECTED NET INCOME':'PROJECTED NET LOSS'}</span><span>{fmt(Math.abs(net))}</span>
+        </div>
+
+        <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
+          {submitting?'⏳ Submitting…':'✅ Submit My Budget'}
+        </button>
+        <div style={{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:10}}>Sent securely to First Bank of Montana · Your draft saves automatically</div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Expense List Editor Modal ─────────────────────────────────────────────────
+function ExpenseListEditor({expenseList,setExpenseList,onClose}) {
+  const [newName,setNewName]=React.useState('');
+  const update=(id,name)=>{const ul=expenseList.map(e=>e.id===id?{...e,name}:e);setExpenseList(ul);saveExpenseList(ul);};
+  const remove=(id)=>{const ul=expenseList.filter(e=>e.id!==id);setExpenseList(ul);saveExpenseList(ul);};
+  const add=()=>{if(!newName.trim())return;const ul=[...expenseList,{id:Date.now(),name:newName.trim()}];setExpenseList(ul);saveExpenseList(ul);setNewName('');};
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'white',borderRadius:14,padding:28,maxWidth:480,width:'100%',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:'1.05rem',color:'#1a1a1a'}}>Expense List Editor</div>
+            <div style={{fontSize:'.75rem',color:'#888',marginTop:2}}>Customers see these as quick-add buttons on their budget form</div>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={()=>{if(window.confirm('Reset to defaults?')){const d=DEFAULT_EXPENSE_LIST.map((name,id)=>({id,name}));setExpenseList(d);saveExpenseList(d);}}} style={{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'4px 10px',color:'#888',fontSize:'.75rem',cursor:'pointer',fontFamily:'inherit'}}>Reset</button>
+            <button onClick={onClose} style={{background:'none',border:'none',fontSize:'1.3rem',cursor:'pointer',color:'#888',lineHeight:1}}>×</button>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8,marginBottom:16}}>
+          <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} placeholder="Add new expense item..." style={{flex:1,border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,fontFamily:'inherit',outline:'none'}}/>
+          <button onClick={add} style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>+ Add</button>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          {expenseList.map((e,i)=>(
+            <div key={e.id} style={{display:'flex',gap:8,alignItems:'center',padding:'6px 10px',background:i%2===0?'white':'#fafafa',borderRadius:6,border:'1px solid #f0f0f0'}}>
+              <span style={{color:'#aaa',fontSize:12,width:20,textAlign:'center'}}>{i+1}</span>
+              <input type="text" value={e.name} onChange={ev=>update(e.id,ev.target.value)} style={{flex:1,border:'1px solid #e0e0e0',borderRadius:4,padding:'4px 8px',fontSize:'.9rem',fontFamily:'inherit',outline:'none'}}/>
+              <button onClick={()=>remove(e.id)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}}>×</button>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:'.72rem',color:'#aaa',marginTop:12,textAlign:'center'}}>Changes save automatically to this device</div>
+      </div>
+    </div>
+  );
+}
+
+
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
@@ -1781,9 +2389,14 @@ export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
 
-  // ── Route customer inspection links (/any-url?id=XXXX) ─────────────────────
-  const _shareIdParam = new URLSearchParams(window.location.search).get('id');
-  if (_shareIdParam) return <CustomerInspectForm shareId={_shareIdParam} />;
+  // ── Route customer links ─────────────────────────────────────────────────────
+  const _params = new URLSearchParams(window.location.search);
+  const _inspId = _params.get('id');
+  const _bsId   = _params.get('bs');
+  const _budId  = _params.get('budget');
+  if (_inspId) return <CustomerInspectForm shareId={_inspId} />;
+  if (_bsId)   return <CustomerBalanceSheetForm shareId={_bsId} />;
+  if (_budId)  return <CustomerBudgetForm shareId={_budId} />;
   const [session, setSession] = useState(currentSession);
   const [profile, setProfile] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
@@ -1793,8 +2406,24 @@ export default function BalanceSheet() {
   const [showShareBudget, setShowShareBudget] = useState(false);
   const [showPriceList, setShowPriceList] = useState(false);
   const [commodityPrices, setCommodityPrices] = useState(() => loadCommodityPrices());
+  const [expenseList, setExpenseList] = useState(() => loadExpenseList());
+  const [showExpenseEditor, setShowExpenseEditor] = useState(false);
   const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
   const [showInspHistory, setShowInspHistory] = useState(false);
+  // Balance sheet share
+  const [showBSShareModal, setShowBSShareModal] = useState(false);
+  const [bsShareLink, setBSShareLink] = useState('');
+  const [bsSharePin, setBSSharePin] = useState('');
+  const [bsShareStatus, setBSShareStatus] = useState('');
+  // Budget share
+  const [showBudgetShareModal, setShowBudgetShareModal] = useState(false);
+  const [budgetShareLink, setBudgetShareLink] = useState('');
+  const [budgetSharePin, setBudgetSharePin] = useState('');
+  const [budgetShareStatus, setBudgetShareStatus] = useState('');
+  // Pending reviews
+  const [pendingReviews, setPendingReviews] = useState([]);
+  const [reviewSaveDate, setReviewSaveDate] = useState({});
+  const [loadingReviews, setLoadingReviews] = useState(false);
   const [activeTab, setActiveTab] = useState("balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
@@ -1915,7 +2544,7 @@ export default function BalanceSheet() {
   };
   useEffect(() => {
     loadSavedList();
-    // Load any user-created folders
+    loadPendingReviews();
     try {
       const stored = localStorage.getItem("fbmt_userFolders");
       if (stored) setUserFolders(JSON.parse(stored));
@@ -2759,6 +3388,74 @@ export default function BalanceSheet() {
       needle.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(needle)
     );
     return match ? match.price : null;
+  };
+
+  const generateBSShare = async () => {
+    setBSShareStatus('generating'); setShowBSShareModal(true);
+    try {
+      const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
+      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, original_data:data, expires_at:expires };
+      const resp = await fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
+      if (!resp.ok) throw new Error(await resp.text());
+      setBSShareLink(window.location.origin+'/?bs='+shareId);
+      setBSSharePin(pin); setBSShareStatus('ready');
+    } catch(e) { setBSShareStatus('error:'+e.message); }
+  };
+
+  const generateBudgetShare = async () => {
+    setBudgetShareStatus('generating'); setShowBudgetShareModal(true);
+    try {
+      const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
+      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, original_data:{}, expires_at:expires };
+      const resp = await fetch(SUPABASE_URL+'/rest/v1/budget_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
+      if (!resp.ok) throw new Error(await resp.text());
+      setBudgetShareLink(window.location.origin+'/?budget='+shareId);
+      setBudgetSharePin(pin); setBudgetShareStatus('ready');
+    } catch(e) { setBudgetShareStatus('error:'+e.message); }
+  };
+
+  const loadPendingReviews = async () => {
+    if (!isConfigured()) return;
+    setLoadingReviews(true);
+    try {
+      const [bsResp, budResp] = await Promise.all([
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?status=eq.submitted&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?status=eq.submitted&select=share_id,client_name,as_of_date,submitted_at,customer_draft&order=submitted_at.desc', {headers:supaHeaders()}),
+      ]);
+      const bsRows = bsResp.ok ? await bsResp.json() : [];
+      const budRows = budResp.ok ? await budResp.json() : [];
+      setPendingReviews([
+        ...bsRows.map(r=>({...r,type:'balance_sheet'})),
+        ...budRows.map(r=>({...r,type:'budget'})),
+      ].sort((a,b)=>b.submitted_at?.localeCompare(a.submitted_at||'')||0));
+    } catch {}
+    setLoadingReviews(false);
+  };
+
+  const markReviewed = async (shareId, type) => {
+    const table = type==='balance_sheet'?'balance_sheet_shares':'budget_shares';
+    await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'reviewed'}) });
+    setPendingReviews(p=>p.filter(r=>r.share_id!==shareId));
+  };
+
+  const loadBSReview = async (review, saveDate) => {
+    if (!review.customer_draft && !review.original_data) return;
+    const d = {...emptyData(),...(review.original_data||{}),...(review.customer_draft||{})};
+    d.asOfDate = saveDate || review.as_of_date || new Date().toISOString().slice(0,10);
+    setData(d); setStep(0); setScreen('wizard');
+    await markReviewed(review.share_id,'balance_sheet');
+  };
+
+  const loadBudgetReview = async (review, saveDate) => {
+    if (!review.customer_draft) return;
+    const d = {...data, ...review.customer_draft};
+    d.asOfDate = saveDate || review.as_of_date || new Date().toISOString().slice(0,10);
+    setData(d); setActiveTab('budget'); setScreen('wizard');
+    await markReviewed(review.share_id,'budget');
   };
 
   const updateCommodityPrice = (id, field, value) => {
@@ -3779,6 +4476,12 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
             </button>
             <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
+            {data.clientName && (
+              <button onClick={generateBSShare}
+                style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
+                🔗 Share with Customer
+              </button>
+            )}
           </div>
         </div>
       );
@@ -3946,6 +4649,50 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Pending Reviews ── */}
+          {pendingReviews.length > 0 && (
+            <div style={{marginBottom:28}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                <span style={{fontSize:"1.1rem"}}>📬</span>
+                <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>Pending Customer Submissions</div>
+                <div style={{background:"#6B0E1E",color:"white",borderRadius:999,padding:"1px 8px",fontSize:".75rem",fontWeight:700}}>{pendingReviews.length}</div>
+                <button onClick={loadPendingReviews} style={{marginLeft:"auto",background:"none",border:"1px solid #ddd",borderRadius:5,padding:"3px 10px",fontSize:".75rem",cursor:"pointer",color:"#888",fontFamily:"inherit"}}>Refresh</button>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {pendingReviews.map(review=>(
+                  <div key={review.share_id} style={{background:"white",border:"2px solid #22c55e",borderRadius:10,padding:"14px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",boxShadow:"0 1px 6px rgba(34,197,94,.15)"}}>
+                    <span style={{fontSize:"1.4rem"}}>{review.type==='balance_sheet'?'📋':'🌾'}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>{review.client_name}</div>
+                      <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>
+                        {review.type==='balance_sheet'?'Balance Sheet':'Budget'} · Submitted {review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <input type="date"
+                        value={reviewSaveDate[review.share_id]||review.as_of_date||new Date().toISOString().slice(0,10)}
+                        onChange={e=>setReviewSaveDate(d=>({...d,[review.share_id]:e.target.value}))}
+                        style={{border:"1px solid #d1d5db",borderRadius:6,padding:"5px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}}/>
+                      <button
+                        onClick={()=>{
+                          const sd = reviewSaveDate[review.share_id]||review.as_of_date||new Date().toISOString().slice(0,10);
+                          if(review.type==='balance_sheet') loadBSReview(review,sd);
+                          else loadBudgetReview(review,sd);
+                        }}
+                        style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:".82rem"}}>
+                        Load & Review
+                      </button>
+                      <button onClick={()=>markReviewed(review.share_id,review.type)}
+                        style={{background:"none",border:"1px solid #ddd",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:".78rem",color:"#888"}}>
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -4430,6 +5177,14 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               📋 Price List
             </button>
+            <button onClick={()=>setShowExpenseEditor(true)}
+              style={{background:"none",border:"1.5px solid #2d5a8e",borderRadius:6,padding:"5px 12px",color:"#2d5a8e",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+              📝 Expense List
+            </button>
+            <button onClick={generateBudgetShare}
+              style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+              🔗 Share with Customer
+            </button>
             <button className="btn btn-secondary" onClick={()=>setShowShareBudget(true)}
               style={{fontSize:".85rem",background:"#1B4332",color:"white",border:"none"}}>
               📧 Share with Customer
@@ -4572,6 +5327,69 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             <div style={{fontSize:".72rem",color:"#aaa",marginTop:8}}>
               Changes save automatically · Prices marked "list price" on the Budget tab are pulled from this list
             </div>
+          </div>
+        </div>
+      )}
+
+      {showExpenseEditor && (
+        <ExpenseListEditor
+          expenseList={expenseList}
+          setExpenseList={setExpenseList}
+          onClose={()=>setShowExpenseEditor(false)}
+        />
+      )}
+
+      {/* ── Balance Sheet Share Modal ── */}
+      {showBSShareModal && (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"white",borderRadius:14,padding:28,maxWidth:480,width:"100%",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+            <div style={{fontWeight:700,fontSize:"1.05rem",marginBottom:6,color:"#1a1a1a"}}>Share Balance Sheet with Customer</div>
+            {bsShareStatus==='generating'&&<div style={{color:"#6b7280",padding:"20px 0",textAlign:"center"}}>Generating secure link...</div>}
+            {bsShareStatus==='ready'&&(
+              <div>
+                <div style={{fontSize:".85rem",color:"#555",marginBottom:16}}>Send the link and PIN below to your customer. They can review and edit all figures, save their progress, and submit back to you. The link expires in <strong>14 days</strong>.</div>
+                <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:14,marginBottom:12}}>
+                  <div style={{fontSize:".72rem",fontWeight:700,color:"#2d5a8e",marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Share Link</div>
+                  <div style={{fontSize:".82rem",wordBreak:"break-all",color:"#1a1a1a",fontFamily:"monospace",marginBottom:8}}>{bsShareLink}</div>
+                  <button onClick={()=>navigator.clipboard.writeText(bsShareLink).then(()=>alert('Copied!'))} style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:5,padding:"4px 10px",fontSize:".75rem",cursor:"pointer",fontWeight:600}}>Copy Link</button>
+                </div>
+                <div style={{background:"#f5e8ea",border:"1px solid #e0b0b8",borderRadius:8,padding:14,marginBottom:14}}>
+                  <div style={{fontSize:".72rem",fontWeight:700,color:"#6B0E1E",marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Customer PIN</div>
+                  <div style={{fontSize:"2rem",fontWeight:900,letterSpacing:".25em",color:"#6B0E1E",fontFamily:"monospace"}}>{bsSharePin}</div>
+                  <div style={{fontSize:".72rem",color:"#888",marginTop:4}}>Customer must enter this to open the form</div>
+                </div>
+                <button onClick={()=>{const s=encodeURIComponent(`Balance Sheet Review - ${data.clientName}`);const b=encodeURIComponent(`Hello,\n\nPlease review and complete your balance sheet using the secure link below.\n\nLink: ${bsShareLink}\n\nYour PIN: ${bsSharePin}\n\nYou can save your progress and come back anytime. The link expires in 14 days.\n\nThank you,\nFirst Bank of Montana`);window.location.href='mailto:?subject='+s+'&body='+b;}} style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"10px 0",fontWeight:700,fontSize:".9rem",cursor:"pointer",marginBottom:8}}>📧 Open in Email</button>
+              </div>
+            )}
+            {bsShareStatus.startsWith('error')&&<div style={{color:"#c44",fontSize:".85rem",padding:"12px 0"}}>Error: {bsShareStatus.slice(6)}<br/><span style={{fontSize:".75rem",color:"#888"}}>Make sure you ran customer-shares-schema.sql in Supabase.</span></div>}
+            <button onClick={()=>setShowBSShareModal(false)} style={{background:"none",border:"1px solid #ddd",borderRadius:6,padding:"7px 20px",cursor:"pointer",fontFamily:"inherit",fontSize:".85rem",marginTop:4}}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Budget Share Modal ── */}
+      {showBudgetShareModal && (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"white",borderRadius:14,padding:28,maxWidth:480,width:"100%",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+            <div style={{fontWeight:700,fontSize:"1.05rem",marginBottom:6,color:"#1a1a1a"}}>Share Budget Form with Customer</div>
+            {budgetShareStatus==='generating'&&<div style={{color:"#6b7280",padding:"20px 0",textAlign:"center"}}>Generating secure link...</div>}
+            {budgetShareStatus==='ready'&&(
+              <div>
+                <div style={{fontSize:".85rem",color:"#555",marginBottom:16}}>The customer will see a blank budget form with your pre-loaded expense list. They fill in their own income and expenses. Link expires in <strong>14 days</strong>.</div>
+                <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:14,marginBottom:12}}>
+                  <div style={{fontSize:".72rem",fontWeight:700,color:"#2d5a8e",marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Share Link</div>
+                  <div style={{fontSize:".82rem",wordBreak:"break-all",color:"#1a1a1a",fontFamily:"monospace",marginBottom:8}}>{budgetShareLink}</div>
+                  <button onClick={()=>navigator.clipboard.writeText(budgetShareLink).then(()=>alert('Copied!'))} style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:5,padding:"4px 10px",fontSize:".75rem",cursor:"pointer",fontWeight:600}}>Copy Link</button>
+                </div>
+                <div style={{background:"#f5e8ea",border:"1px solid #e0b0b8",borderRadius:8,padding:14,marginBottom:14}}>
+                  <div style={{fontSize:".72rem",fontWeight:700,color:"#6B0E1E",marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Customer PIN</div>
+                  <div style={{fontSize:"2rem",fontWeight:900,letterSpacing:".25em",color:"#6B0E1E",fontFamily:"monospace"}}>{budgetSharePin}</div>
+                </div>
+                <button onClick={()=>{const s=encodeURIComponent(`Budget Form - ${data.clientName}`);const b=encodeURIComponent(`Hello,\n\nPlease complete your agricultural budget using the secure link below.\n\nLink: ${budgetShareLink}\n\nYour PIN: ${budgetSharePin}\n\nYou can save your progress and come back anytime. The link expires in 14 days.\n\nThank you,\nFirst Bank of Montana`);window.location.href='mailto:?subject='+s+'&body='+b;}} style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"10px 0",fontWeight:700,fontSize:".9rem",cursor:"pointer",marginBottom:8}}>📧 Open in Email</button>
+              </div>
+            )}
+            {budgetShareStatus.startsWith('error')&&<div style={{color:"#c44",fontSize:".85rem",padding:"12px 0"}}>Error: {budgetShareStatus.slice(6)}</div>}
+            <button onClick={()=>setShowBudgetShareModal(false)} style={{background:"none",border:"1px solid #ddd",borderRadius:6,padding:"7px 20px",cursor:"pointer",fontFamily:"inherit",fontSize:".85rem",marginTop:4}}>Close</button>
           </div>
         </div>
       )}
