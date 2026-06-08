@@ -892,6 +892,10 @@ function ComparisonView({
   compSheets, compLoading, compInsight, compInsightLoading,
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS
 }) {
+  const [selectedYears, setSelectedYears] = React.useState(null);
+  const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+  const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
+
   if (compLoading) return <div className="comp-loading">Loading saved sheets...</div>;
   if (compSheets.length === 0) return (
     <div className="comp-empty">
@@ -904,12 +908,201 @@ function ComparisonView({
       <p>Only one sheet saved ({compSheets[0].date}). Save a second year to compare.</p>
     </div>
   );
-  const labels = Object.keys(compSheets[0].totals);
-  const years = compSheets.map(s => s.date);
+
+  // Year selector — default to last 3 if more than 3 saved
+  const allYears = compSheets.map(s => s.date);
+  const activeYears = selectedYears || allYears.slice(-3);
+  const sheets = compSheets.filter(s => activeYears.includes(s.date));
+  const years = sheets.map(s => s.date);
+  const latest = sheets[sheets.length - 1];
+  const prior  = sheets[sheets.length - 2];
   const colSpan = years.length + (years.length - 1) + (years.length > 2 ? 1 : 0) + 1;
+  const labels = Object.keys(sheets[0].totals);
+
+  // Key metrics
+  const metrics = [
+    { label: 'Net Worth',       key: 'NET WORTH',         good: 'up'   },
+    { label: 'Total Assets',    key: 'TOTAL ASSETS',      good: 'up'   },
+    { label: 'Total Liabilities', key: 'TOTAL LIABILITIES', good: 'down' },
+    { label: 'Working Capital', key: 'WORKING CAPITAL',   good: 'up'   },
+  ];
+
+  // Ratios
+  const ratioRows = sheets.map(s => {
+    const ta  = s.totals['TOTAL ASSETS']      || 0;
+    const tl  = s.totals['TOTAL LIABILITIES'] || 0;
+    const tc  = s.totals['Total Current Assets'] || 0;
+    const tcl = s.totals['Total Current Liab']   || 0;
+    return {
+      date: s.date,
+      da:   ta  > 0 ? (tl / ta * 100).toFixed(1)  : '—',
+      cr:   tcl > 0 ? (tc / tcl).toFixed(2)        : '—',
+      wc:   tc - tcl,
+      equity: ta > 0 ? ((ta - tl) / ta * 100).toFixed(1) : '—',
+    };
+  });
+
+  // Bar chart for net worth — simple SVG
+  const nwVals = sheets.map(s => s.totals['NET WORTH'] || 0);
+  const chartMax = Math.max(...nwVals.map(Math.abs)) * 1.15 || 1;
+  const barW = 48; const barGap = 20; const chartH = 100;
+  const chartW = sheets.length * (barW + barGap) + barGap;
+  const barColor = v => v >= 0 ? '#1a5c25' : '#7a1a1a';
+
+  const trendArrow = (cur, prev, goodDir) => {
+    if (cur === prev) return { sym: '→', cls: 'flat' };
+    const up = cur > prev;
+    const positive = goodDir === 'up' ? up : !up;
+    return { sym: up ? '↑' : '↓', cls: positive ? 'pos' : 'neg' };
+  };
+
+  const chgStyle = diff => {
+    if (diff === 0) return {};
+    const absPct = Math.abs(diff);
+    if (absPct >= 20) return { background: '#fee2e2', color: '#991b1b', fontWeight: 700 };
+    if (absPct >= 10) return { background: '#fef3c7', color: '#92400e' };
+    return {};
+  };
 
   return (
     <div className="comp-wrap">
+
+      {/* ── Year selector ── */}
+      {allYears.length > 3 && (
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+          <span style={{fontSize:13,color:'#555',fontWeight:600}}>Comparing:</span>
+          {allYears.map(y => (
+            <button key={y} onClick={() => {
+              const sel = activeYears.includes(y)
+                ? activeYears.filter(x => x !== y)
+                : [...activeYears, y].sort();
+              if (sel.length >= 2) setSelectedYears(sel);
+            }} style={{padding:'4px 12px',borderRadius:20,border:'1.5px solid',cursor:'pointer',fontSize:13,fontWeight:600,
+              background: activeYears.includes(y) ? '#6B0E1E' : 'white',
+              color:       activeYears.includes(y) ? 'white'   : '#6B0E1E',
+              borderColor: '#6B0E1E'}}>
+              {y}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Summary cards ── */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12,marginBottom:20}}>
+        {metrics.map(({label, key, good}) => {
+          const cur  = latest.totals[key] || 0;
+          const prev = prior.totals[key]  || 0;
+          const diff = cur - prev;
+          const p    = pct(cur, prev);
+          const tr   = trendArrow(cur, prev, good);
+          const cardBg = tr.cls === 'pos' ? '#e8f5ea' : tr.cls === 'neg' ? '#fef2f2' : '#f5f5f5';
+          const arrowColor = tr.cls === 'pos' ? '#15803d' : tr.cls === 'neg' ? '#b91c1c' : '#888';
+          return (
+            <div key={key} style={{background:cardBg,border:'1px solid #e5e7eb',borderRadius:10,padding:'14px 16px'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>{label}</div>
+              <div style={{fontSize:22,fontWeight:800,color:'#1a1a1a',marginBottom:4}}>{fmt(cur)}</div>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <span style={{fontSize:18,color:arrowColor,fontWeight:700}}>{tr.sym}</span>
+                <span style={{fontSize:12,color:arrowColor,fontWeight:600}}>
+                  {diff !== 0 ? (diff > 0 ? '+' : '') + fmt(diff) : 'No change'}
+                  {p !== null ? ` (${p >= 0 ? '+' : ''}${p.toFixed(1)}%)` : ''}
+                </span>
+              </div>
+              <div style={{fontSize:11,color:'#888',marginTop:3}}>vs {prior.date}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Net Worth chart + Ratio table side by side ── */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:20}}>
+
+        {/* Net Worth Bar Chart */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:16}}>
+          <div style={{fontWeight:700,fontSize:13,color:'#374151',marginBottom:12}}>Net Worth Trend</div>
+          <svg viewBox={`0 0 ${chartW} ${chartH + 28}`} style={{width:'100%',overflow:'visible'}}>
+            {/* Zero line */}
+            <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="#e5e7eb" strokeWidth={1}/>
+            {sheets.map((s, i) => {
+              const v    = s.totals['NET WORTH'] || 0;
+              const h    = Math.abs(v) / chartMax * chartH;
+              const x    = barGap + i * (barW + barGap);
+              const y    = v >= 0 ? chartH - h : chartH;
+              const fill = barColor(v);
+              return (
+                <g key={s.date}>
+                  <rect x={x} y={y} width={barW} height={Math.max(h,2)} fill={fill} rx={3} opacity={.85}/>
+                  <text x={x + barW/2} y={y - 4} textAnchor="middle" fontSize={9} fill={fill} fontWeight={700}>
+                    {v >= 0 ? '$'+Math.round(v/1000)+'K' : '-$'+Math.round(Math.abs(v)/1000)+'K'}
+                  </text>
+                  <text x={x + barW/2} y={chartH + 16} textAnchor="middle" fontSize={10} fill="#555">{s.date}</text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Ratio Table */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:16,overflowX:'auto'}}>
+          <div style={{fontWeight:700,fontSize:13,color:'#374151',marginBottom:12}}>Key Ratios</div>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+            <thead>
+              <tr style={{background:'#f5f5f5'}}>
+                <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3}}>Ratio</th>
+                {ratioRows.map(r => <th key={r.date} style={{padding:'6px 8px',textAlign:'right',fontWeight:700,fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3}}>{r.date}</th>)}
+                <th style={{padding:'6px 8px',textAlign:'center',fontWeight:700,fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3}}>Target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { label:'Debt/Asset Ratio', key:'da', fmt: v=>v+'%', target:'< 50%',
+                  good: (cur,prev) => parseFloat(cur) < parseFloat(prev) },
+                { label:'Current Ratio',    key:'cr', fmt: v=>v+'x',  target:'> 1.5x',
+                  good: (cur,prev) => parseFloat(cur) > parseFloat(prev) },
+                { label:'Equity Ratio',     key:'equity', fmt: v=>v+'%', target:'> 50%',
+                  good: (cur,prev) => parseFloat(cur) > parseFloat(prev) },
+              ].map(({label,key,fmt:f,target,good}) => {
+                const vals = ratioRows.map(r => r[key]);
+                const last = vals[vals.length-1];
+                const prev2 = vals[vals.length-2];
+                const improving = last !== '—' && prev2 !== '—' && good(last, prev2);
+                return (
+                  <tr key={label} style={{borderBottom:'1px solid #f0f0f0'}}>
+                    <td style={{padding:'7px 8px',fontWeight:600,color:'#374151'}}>{label}</td>
+                    {vals.map((v,i) => {
+                      const isLast = i === vals.length - 1;
+                      return (
+                        <td key={i} style={{padding:'7px 8px',textAlign:'right',fontWeight:isLast?700:400,
+                          color: isLast ? (improving ? '#15803d' : '#b91c1c') : '#555'}}>
+                          {v === '—' ? '—' : f(v)}
+                          {isLast && v !== '—' && <span style={{marginLeft:4}}>{improving ? '↑' : '↓'}</span>}
+                        </td>
+                      );
+                    })}
+                    <td style={{padding:'7px 8px',textAlign:'center',fontSize:11,color:'#888'}}>{target}</td>
+                  </tr>
+                );
+              })}
+              <tr style={{borderBottom:'1px solid #f0f0f0'}}>
+                <td style={{padding:'7px 8px',fontWeight:600,color:'#374151'}}>Working Capital</td>
+                {ratioRows.map((r,i) => {
+                  const isLast = i === ratioRows.length - 1;
+                  const pos = r.wc >= 0;
+                  return (
+                    <td key={i} style={{padding:'7px 8px',textAlign:'right',fontWeight:isLast?700:400,
+                      color: isLast ? (pos ? '#15803d' : '#b91c1c') : '#555'}}>
+                      {fmt(r.wc)}
+                    </td>
+                  );
+                })}
+                <td style={{padding:'7px 8px',textAlign:'center',fontSize:11,color:'#888'}}>&gt; $0</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Full comparison table ── */}
       <div className="comp-table-wrap">
         <table className="comp-table">
           <thead>
@@ -917,24 +1110,22 @@ function ComparisonView({
               <th className="comp-th comp-label-th">Category</th>
               {years.map((y,i) => <th key={i} className="comp-th comp-year-th">{y}</th>)}
               {years.slice(1).map((y,i) => (
-                <th key={i} className="comp-th comp-chg-th">
-                  Change {years[i]} to {y}
-                </th>
+                <th key={i} className="comp-th comp-chg-th">Change {years[i]} → {y}</th>
               ))}
               {years.length > 2 && <th className="comp-th comp-trend-th">Trend</th>}
             </tr>
           </thead>
           <tbody>
             {labels.map((label) => {
-              const isBold = BOLD_ROWS.has(label);
-              const isBreak = SECTION_BREAKS.has(label);
+              const isBold   = BOLD_ROWS.has(label);
+              const isBreak  = SECTION_BREAKS.has(label);
               const sectionHead = SECTION_HEADERS[label];
-              const vals = compSheets.map(s => s.totals[label] || 0);
-              const first = vals[0];
-              const last = vals[vals.length - 1];
-              const trendArrow = last > first ? "up" : last < first ? "down" : "flat";
-              const trendSym = last > first ? "↑" : last < first ? "↓" : "→";
-              const rowCls = "comp-row" + (isBold ? " comp-bold-row" : "") + (isBreak ? " comp-break-row" : "");
+              const vals     = sheets.map(s => s.totals[label] || 0);
+              const first    = vals[0];
+              const last     = vals[vals.length - 1];
+              const trendArrow2 = last > first ? 'up' : last < first ? 'down' : 'flat';
+              const trendSym2   = last > first ? '↑' : last < first ? '↓' : '→';
+              const rowCls   = 'comp-row' + (isBold ? ' comp-bold-row' : '') + (isBreak ? ' comp-break-row' : '');
               return (
                 <React.Fragment key={label}>
                   {sectionHead && (
@@ -944,41 +1135,37 @@ function ComparisonView({
                   )}
                   <tr className={rowCls}>
                     <td className="comp-label">{label}</td>
-                    {vals.map((v,i) => {
-                      const valCls = "comp-val" + (isBold ? " comp-bold-val" : "");
-                      return (
-                        <td key={i} className={valCls}>
-                          {v === 0 && !isBold
-                            ? <span className="comp-zero">—</span>
-                            : <span className={v < 0 ? "comp-neg" : ""}>
-                                {v < 0 ? "-$" + Math.abs(v).toLocaleString() : "$" + v.toLocaleString()}
-                              </span>
-                          }
-                        </td>
-                      );
-                    })}
+                    {vals.map((v,i) => (
+                      <td key={i} className={'comp-val' + (isBold ? ' comp-bold-val' : '')}>
+                        {v === 0 && !isBold
+                          ? <span className="comp-zero">—</span>
+                          : <span className={v < 0 ? 'comp-neg' : ''}>
+                              {v < 0 ? '-$'+Math.abs(v).toLocaleString() : '$'+v.toLocaleString()}
+                            </span>
+                        }
+                      </td>
+                    ))}
                     {vals.slice(1).map((v, i) => {
                       const prev = vals[i];
                       const diff = v - prev;
-                      const pct = prev !== 0 ? (diff / Math.abs(prev) * 100) : null;
+                      const p2   = pct(v, prev);
                       if (diff === 0 && prev === 0) {
                         return <td key={i} className="comp-chg"><span className="comp-zero">—</span></td>;
                       }
-                      const chgCls = "comp-chg " + (diff > 0 ? "comp-up" : diff < 0 ? "comp-dn" : "comp-flat");
-                      const diffStr = diff < 0
-                        ? "-$" + Math.abs(diff).toLocaleString()
-                        : "+$" + diff.toLocaleString();
+                      const chgCls = 'comp-chg ' + (diff > 0 ? 'comp-up' : diff < 0 ? 'comp-dn' : 'comp-flat');
+                      const diffStr = diff < 0 ? '-$'+Math.abs(diff).toLocaleString() : '+$'+diff.toLocaleString();
+                      const highlight = p2 !== null ? chgStyle(p2) : {};
                       return (
-                        <td key={i} className={chgCls}>
+                        <td key={i} className={chgCls} style={highlight}>
                           <div className="chg-amt">{diffStr}</div>
-                          {pct !== null && (
-                            <div className="chg-pct">{pct >= 0 ? "+" : ""}{pct.toFixed(1)}%</div>
+                          {p2 !== null && (
+                            <div className="chg-pct">{p2 >= 0 ? '+' : ''}{p2.toFixed(1)}%</div>
                           )}
                         </td>
                       );
                     })}
                     {years.length > 2 && (
-                      <td className={"comp-trend trend-" + trendArrow}>{trendSym}</td>
+                      <td className={'comp-trend trend-' + trendArrow2}>{trendSym2}</td>
                     )}
                   </tr>
                 </React.Fragment>
@@ -987,6 +1174,8 @@ function ComparisonView({
           </tbody>
         </table>
       </div>
+
+      {/* ── AI Insights ── */}
       <div className="insight-panel">
         <div className="insight-header">
           <div>
@@ -997,7 +1186,7 @@ function ComparisonView({
           </div>
           <button className="btn-insight" onClick={generateInsights}
             disabled={compInsightLoading}>
-            {compInsightLoading ? "Analyzing..." : compInsight ? "Re-analyze" : "Generate Insights"}
+            {compInsightLoading ? 'Analyzing...' : compInsight ? 'Re-analyze' : 'Generate Insights'}
           </button>
         </div>
         {compInsightLoading && (
