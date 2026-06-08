@@ -1095,7 +1095,7 @@ function InspectionView({data,setData}){
         setShareStatus('error:Supabase not configured. Add your project URL and key to config.js.');return;
       }
       const payload={share_id:shareId,pin,client_name:data.clientName,as_of_date:data.asOfDate||data.inspDate||new Date().toISOString().slice(0,10),
-        insp_data:{inspCrops:data.inspCrops||[],inspLivestock:data.inspLivestock||[],inspInventory:data.inspInventory||[],
+        lender_email:currentSession?.user?.email||'',insp_data:{inspCrops:data.inspCrops||[],inspLivestock:data.inspLivestock||[],inspInventory:data.inspInventory||[],
           inspPastureCond:data.inspPastureCond||'',inspPastureCmt:data.inspPastureCmt||'',inspWaterCond:data.inspWaterCond||'',
           inspWaterCmt:data.inspWaterCmt||'',inspEquipCond:data.inspEquipCond||'',inspEquipCmt:data.inspEquipCmt||'',
           inspEnvCmt:data.inspEnvCmt||'',inspAddlCmt:data.inspAddlCmt||'',clientName:data.clientName,inspDate:data.inspDate},response:null};
@@ -1477,6 +1477,7 @@ function CustomerInspectForm({ shareId }) {
   const [pin, setPin] = React.useState('');
   const [pinErr, setPinErr] = React.useState('');
   const [inspData, setInspData] = React.useState(null);
+  const [lenderEmail, setLenderEmail] = React.useState('');
   const [crops, setCrops] = React.useState([]);
   const [livestock, setLivestock] = React.useState([]);
   const [pastureCond, setPastureCond] = React.useState('');
@@ -1496,7 +1497,7 @@ function CustomerInspectForm({ shareId }) {
     setPinErr('');
     try {
       const resp = await fetch(
-        SUPABASE_URL_PUB + '/rest/v1/inspection_shares?share_id=eq.' + shareId + '&select=pin,insp_data,client_name,responded_at',
+        SUPABASE_URL_PUB + '/rest/v1/inspection_shares?share_id=eq.' + shareId + '&select=pin,insp_data,client_name,responded_at,lender_email',
         { headers: { 'apikey': SUPABASE_KEY_PUB, 'Content-Type': 'application/json' } }
       );
       const rows = await resp.json();
@@ -1504,6 +1505,7 @@ function CustomerInspectForm({ shareId }) {
       const row = rows[0];
       if (row.responded_at) { setStage('done'); return; }
       if (pin.trim() !== String(row.pin).trim()) { setPinErr('Incorrect PIN. Please check your email and try again.'); return; }
+      setLenderEmail(row.lender_email || '');
       const d = row.insp_data || {};
       setInspData(d);
       setCrops((d.inspCrops || []).map(r => ({...r, actualAcres: r.actualAcres||'', condition: r.condition||'', actualYield: r.actualYield||r.budgetedYield||'', location: r.location||'', deviationReason: r.deviationReason||''})));
@@ -1536,6 +1538,7 @@ function CustomerInspectForm({ shareId }) {
           body: JSON.stringify({ response, responded_at: new Date().toISOString() }) }
       );
       if (!resp.ok) throw new Error(await resp.text());
+      await notifySubmission('inspection', inspData?.clientName||'', shareId, lenderEmail);
       setStage('done');
     } catch(e) { setErrMsg('Submission failed: ' + e.message); }
     setSubmitting(false);
@@ -1641,11 +1644,11 @@ const CUST_SUPABASE_URL = () => (window.SUPABASE_URL||'').replace(/\/+$/,'');
 const CUST_ANON_KEY = () => window.SUPABASE_ANON_KEY||'';
 const custHeaders = () => ({'Content-Type':'application/json','apikey':CUST_ANON_KEY()});
 
-async function notifySubmission(type, clientName, shareId) {
+async function notifySubmission(type, clientName, shareId, lenderEmail) {
   try {
     await fetch('/.netlify/functions/notify-submission', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type, clientName, shareId, submittedAt:new Date().toISOString()}),
+      body:JSON.stringify({type, clientName, shareId, submittedAt:new Date().toISOString(), lenderEmail}),
     });
   } catch {}
 }
@@ -1735,7 +1738,7 @@ function CustomerBalanceSheetForm({shareId}) {
         method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},
         body:JSON.stringify({customer_draft:data,status:'submitted',submitted_at:new Date().toISOString()}),
       });
-      await notifySubmission('balance_sheet',shareRow?.client_name||'',shareId);
+      await notifySubmission('balance_sheet',shareRow?.client_name||'',shareId,shareRow?.lender_email||'');
       setStage('done');
     } catch(e){alert('Submit failed: '+e.message);}
     setSubmitting(false);
@@ -2042,7 +2045,7 @@ function CustomerBudgetForm({shareId}) {
     setSubmitting(true);
     try{
       await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId,{method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},body:JSON.stringify({customer_draft:{budgetCrops:crops,budgetLivestock:livestock,budgetMisc:misc,budgetExpenses:expenses},status:'submitted',submitted_at:new Date().toISOString()})});
-      await notifySubmission('budget',shareRow?.client_name||'',shareId);
+      await notifySubmission('budget',shareRow?.client_name||'',shareId,shareRow?.lender_email||'');
       setStage('done');
     }catch(e){alert('Submit failed: '+e.message);}
     setSubmitting(false);
@@ -3396,7 +3399,7 @@ export default function BalanceSheet() {
       const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
       const pin = String(Math.floor(100000 + Math.random() * 900000));
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, original_data:data, expires_at:expires };
+      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:data, expires_at:expires };
       const resp = await fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
       if (!resp.ok) throw new Error(await resp.text());
       setBSShareLink(window.location.origin+'/?bs='+shareId);
@@ -3410,7 +3413,7 @@ export default function BalanceSheet() {
       const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
       const pin = String(Math.floor(100000 + Math.random() * 900000));
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, original_data:{}, expires_at:expires };
+      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:{}, expires_at:expires };
       const resp = await fetch(SUPABASE_URL+'/rest/v1/budget_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
       if (!resp.ok) throw new Error(await resp.text());
       setBudgetShareLink(window.location.origin+'/?budget='+shareId);

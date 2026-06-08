@@ -9,9 +9,9 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { type, clientName, shareId, submittedAt } = JSON.parse(event.body || '{}');
+    const { type, clientName, shareId, submittedAt, lenderEmail } = JSON.parse(event.body || '{}');
     const RESEND_API_KEY = process.env.RESEND_API_KEY;
-    const NOTIFY_EMAIL   = process.env.NOTIFY_EMAIL || 'chris@1stbmt.com';
+    const NOTIFY_EMAIL   = lenderEmail || process.env.NOTIFY_EMAIL || 'chris@1stbmt.com';
     const FROM_EMAIL     = 'notifications@agrilogixsolutions.com';
     const APP_URL        = process.env.URL || 'https://your-app.netlify.app';
 
