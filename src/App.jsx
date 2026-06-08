@@ -2595,9 +2595,14 @@ export default function BalanceSheet() {
         const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
         setUserFolders(stored ? JSON.parse(stored) : []);
       } catch { setUserFolders([]); }
+      // Load this lender's saved sheets and pending reviews
+      loadSavedList();
+      loadPendingReviews();
     } else {
-      // Logged out — clear folders so next login starts fresh
+      // Logged out — clear everything so next login starts fresh
       setUserFolders([]);
+      setSavedSheets([]);
+      setPendingReviews([]);
     }
   }, [session?.access_token]);
 
@@ -2684,8 +2689,7 @@ export default function BalanceSheet() {
     } catch {}
   };
   useEffect(() => {
-    loadSavedList();
-    loadPendingReviews();
+    // mount-only setup (non-session-dependent)
   }, []);
 
   // Load available entities for the link picker
