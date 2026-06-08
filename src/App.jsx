@@ -1684,6 +1684,14 @@ function CustomerBalanceSheetForm({shareId}) {
   const [data,setData]=React.useState(null);
   const [saving,setSaving]=React.useState(false);
   const [submitting,setSubmitting]=React.useState(false);
+  const [activeTab,setActiveTab]=React.useState('bs'); // 'bs' | 'budget'
+  // Budget tab state (only shown when budgetIncluded)
+  const [budgetCrops,setBudgetCrops]=React.useState([{id:1,acres:'',crop:'',yieldPerAcre:'',unit:'bu',price:'',share:'100',contracted:false}]);
+  const [budgetLivestock,setBudgetLivestock]=React.useState([{id:1,head:'',type:'',lbs:'',price:''}]);
+  const [budgetMisc,setBudgetMisc]=React.useState([{id:1,description:'Government Payments',amount:''}]);
+  const [budgetExpenses,setBudgetExpenses]=React.useState([]);
+  const [expenseList]=React.useState(()=>loadExpenseList());
+  const [customExpense,setCustomExpense]=React.useState('');
   const [open,setOpen]=React.useState({cash:true,farmProducts:true,livestock:true,cropInv:true,breeding:false,re:true,vehicles:false,machinery:false,otherA:false,opNotes:true,termDebt:true,reMort:false,otherL:false});
   const toggle = k => setOpen(o=>({...o,[k]:!o[k]}));
   const n = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
@@ -1703,6 +1711,12 @@ function CustomerBalanceSheetForm({shareId}) {
       setShareRow(row);
       const d = row.customer_draft || row.original_data || {};
       setData({...d});
+      // If combined package, restore budget state
+      const bd = (row.customer_draft||row.original_data||{}).budgetData || {};
+      if(bd.budgetCrops?.length) setBudgetCrops(bd.budgetCrops);
+      if(bd.budgetLivestock?.length) setBudgetLivestock(bd.budgetLivestock);
+      if(bd.budgetMisc?.length) setBudgetMisc(bd.budgetMisc);
+      if(bd.budgetExpenses?.length) setBudgetExpenses(bd.budgetExpenses);
       setStage('form');
     } catch(e){setPinErr('Connection error: '+e.message);}
   };
@@ -1711,13 +1725,16 @@ function CustomerBalanceSheetForm({shareId}) {
     if(!shareRow||!d)return;
     setSaving(true);
     try {
+      const draft = shareRow.original_data?.budgetIncluded
+        ? {...d, budgetData:{budgetCrops,budgetLivestock,budgetMisc,budgetExpenses}}
+        : d;
       await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId,{
         method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},
-        body:JSON.stringify({customer_draft:d}),
+        body:JSON.stringify({customer_draft:draft}),
       });
     } catch {}
     setSaving(false);
-  },[shareRow,shareId]);
+  },[shareRow,shareId,budgetCrops,budgetLivestock,budgetMisc,budgetExpenses]);
 
   const updateData = (updates) => {
     setData(d=>{
@@ -1734,9 +1751,12 @@ function CustomerBalanceSheetForm({shareId}) {
   const submit = async () => {
     setSubmitting(true);
     try {
+      const draft = shareRow?.original_data?.budgetIncluded
+        ? {...data, budgetData:{budgetCrops,budgetLivestock,budgetMisc,budgetExpenses}}
+        : data;
       await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId,{
         method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},
-        body:JSON.stringify({customer_draft:data,status:'submitted',submitted_at:new Date().toISOString()}),
+        body:JSON.stringify({customer_draft:draft,status:'submitted',submitted_at:new Date().toISOString()}),
       });
       await notifySubmission('balance_sheet',shareRow?.client_name||'',shareId,shareRow?.lender_email||'');
       setStage('done');
@@ -1814,13 +1834,26 @@ function CustomerBalanceSheetForm({shareId}) {
           <button onClick={()=>saveDraft(data)} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600}}>💾 Save Draft</button>
         </div>
       </div>
+      {/* Tab bar — only shown when budget is included */}
+      {budgetIncluded && (
+        <div style={{background:"#4a0810",display:"flex",padding:"0 20px"}}>
+          {[['bs','📋 Balance Sheet'],['budget','🌾 Budget']].map(([k,label])=>(
+            <button key={k} onClick={()=>setActiveTab(k)}
+              style={{background:"none",border:"none",color:activeTab===k?"white":"rgba(255,255,255,.5)",fontWeight:activeTab===k?700:400,fontSize:".88rem",padding:"10px 18px",cursor:"pointer",fontFamily:"inherit",borderBottom:activeTab===k?"2px solid white":"2px solid transparent"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 80px'}}>
         <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:14,marginBottom:20}}>
           <div style={{fontWeight:700,color:'#2d5a8e',marginBottom:4,fontSize:14}}>📋 Instructions</div>
-          <div style={{fontSize:13,color:'#555',lineHeight:1.6}}>Your lender has pre-filled this form with existing information. Please review each section, correct any figures, and add anything that's missing. Your progress saves automatically. When you're done, scroll to the bottom and click Submit.</div>
+          <div style={{fontSize:13,color:'#555',lineHeight:1.6}}>{budgetIncluded?'Your lender has shared both a balance sheet and a budget for you to complete. Use the tabs above to switch between them. Your progress saves automatically.':'Your lender has pre-filled this form with existing information. Please review each section, correct any figures, and add anything that\'s missing. Your progress saves automatically. When you\'re done, scroll to the bottom and click Submit.'}</div>
         </div>
 
         {/* ASSETS */}
+        {/* Balance Sheet tab */}
+        {(!budgetIncluded || activeTab==='bs') && <>
         <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase'}}>Assets</div>
 
         <CustSec title="Cash & Bank Accounts" open={open.cash} onToggle={()=>toggle('cash')}>
@@ -1956,8 +1989,97 @@ function CustomerBalanceSheetForm({shareId}) {
           <p style={{fontSize:13,color:'#555',lineHeight:1.6,marginBottom:0}}>I certify that the information provided above is a true and accurate statement of my financial condition as of the date submitted.</p>
         </div>
 
+        {/* Close BS tab conditional */}
+        </>}
+
+        {/* Budget tab */}
+        {budgetIncluded && activeTab==='budget' && (()=>{
+          const bCropTot=budgetCrops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
+          const bLsTot=budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+          const bMiscTot=budgetMisc.reduce((s,r)=>s+n(r.amount),0);
+          const bTotalInc=bCropTot+bLsTot+bMiscTot;
+          const bTotalExp=budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
+          const bNet=bTotalInc-bTotalExp;
+          const fmt2=v=>'$'+(Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}));
+          const inpS={border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,fontFamily:'inherit',outline:'none',boxSizing:'border-box',width:'100%'};
+          return(<>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+              {[['Income',bTotalInc,'#1a5c25'],['Expenses',bTotalExp,'#7a1a1a'],[bNet>=0?'Net Income':'Net Loss',Math.abs(bNet),bNet>=0?'#1a5c25':'#7a1a1a']].map(([l,v,c])=>(
+                <div key={l} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'10px 12px',textAlign:'center'}}>
+                  <div style={{fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:3}}>{l}</div>
+                  <div style={{fontSize:17,fontWeight:700,color:c}}>{fmt2(v)}</div>
+                </div>
+              ))}
+            </div>
+            {/* Crops */}
+            <div style={{background:'#1a5c25',color:'white',fontWeight:700,fontSize:13,padding:'8px 14px',borderRadius:'8px 8px 0 0',textTransform:'uppercase',letterSpacing:.5}}>🌱 Crop Income</div>
+            <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'0 0 8px 8px',padding:14,marginBottom:12}}>
+              <div style={{display:'grid',gridTemplateColumns:'70px 1fr 70px 55px 75px 55px auto',gap:4,fontSize:11,color:'#888',marginBottom:4}}>
+                {['Acres','Crop','Yld/Ac','Unit','Price','Share',''].map(h=><div key={h}>{h}</div>)}
+              </div>
+              {budgetCrops.map((r,i)=>(
+                <div key={r.id||i} style={{display:'grid',gridTemplateColumns:'70px 1fr 70px 55px 75px 55px auto',gap:4,marginBottom:5,alignItems:'center'}}>
+                  <input style={inpS} value={r.acres} onChange={e=>{const c=budgetCrops.map((x,j)=>j===i?{...x,acres:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} placeholder="0"/>
+                  <input style={inpS} value={r.crop} onChange={e=>{const c=budgetCrops.map((x,j)=>j===i?{...x,crop:e.target.value}:x);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} placeholder="Crop"/>
+                  <input style={inpS} value={r.yieldPerAcre} onChange={e=>{const c=budgetCrops.map((x,j)=>j===i?{...x,yieldPerAcre:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} placeholder="0"/>
+                  <select style={{...inpS,padding:'7px 3px'}} value={r.unit||'bu'} onChange={e=>{const c=budgetCrops.map((x,j)=>j===i?{...x,unit:e.target.value}:x);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}}>{['bu','ton','lbs','cwt','bale'].map(u=><option key={u}>{u}</option>)}</select>
+                  <input style={inpS} value={r.price} onChange={e=>{const c=budgetCrops.map((x,j)=>j===i?{...x,price:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} placeholder="0.00"/>
+                  <input style={inpS} value={r.share??'100'} onChange={e=>{const c=budgetCrops.map((x,j)=>j===i?{...x,share:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} placeholder="100"/>
+                  <button onClick={()=>{const c=budgetCrops.filter((_,j)=>j!==i);budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 7px',cursor:'pointer',fontSize:13}}>×</button>
+                </div>
+              ))}
+              <button onClick={()=>{const c=[...budgetCrops,{id:uid(),acres:'',crop:'',yieldPerAcre:'',unit:'bu',price:'',share:'100'}];budSave(c,budgetLivestock,budgetMisc,budgetExpenses);}} style={{background:'#e8f5ea',color:'#1a5c25',border:'1.5px dashed #1a5c25',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600,marginTop:4}}>+ Add Crop</button>
+            </div>
+            {/* Livestock + Misc */}
+            <div style={{background:'#1a5c25',color:'white',fontWeight:700,fontSize:13,padding:'8px 14px',borderRadius:'8px 8px 0 0',textTransform:'uppercase',letterSpacing:.5}}>🐄 Livestock & Misc Income</div>
+            <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'0 0 8px 8px',padding:14,marginBottom:12}}>
+              {budgetLivestock.map((r,i)=>(
+                <div key={r.id||i} style={{display:'flex',gap:6,marginBottom:5,alignItems:'center'}}>
+                  <input style={{...inpS,width:65,flex:'none'}} value={r.head} onChange={e=>{const l=budgetLivestock.map((x,j)=>j===i?{...x,head:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(budgetCrops,l,budgetMisc,budgetExpenses);}} placeholder="Head"/>
+                  <input style={{...inpS,flex:2}} value={r.type} onChange={e=>{const l=budgetLivestock.map((x,j)=>j===i?{...x,type:e.target.value}:x);budSave(budgetCrops,l,budgetMisc,budgetExpenses);}} placeholder="Type"/>
+                  <input style={{...inpS,width:70,flex:'none'}} value={r.lbs} onChange={e=>{const l=budgetLivestock.map((x,j)=>j===i?{...x,lbs:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(budgetCrops,l,budgetMisc,budgetExpenses);}} placeholder="Lbs"/>
+                  <input style={{...inpS,width:80,flex:'none'}} value={r.price} onChange={e=>{const l=budgetLivestock.map((x,j)=>j===i?{...x,price:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(budgetCrops,l,budgetMisc,budgetExpenses);}} placeholder="$/lb"/>
+                  <button onClick={()=>{const l=budgetLivestock.filter((_,j)=>j!==i);budSave(budgetCrops,l,budgetMisc,budgetExpenses);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 7px',cursor:'pointer',fontSize:13}}>×</button>
+                </div>
+              ))}
+              <button onClick={()=>{const l=[...budgetLivestock,{id:uid(),head:'',type:'',lbs:'',price:''}];budSave(budgetCrops,l,budgetMisc,budgetExpenses);}} style={{background:'#e8f5ea',color:'#1a5c25',border:'1.5px dashed #1a5c25',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600,marginBottom:10}}>+ Add Livestock</button>
+              {budgetMisc.map((r,i)=>(
+                <div key={r.id||i} style={{display:'flex',gap:6,marginBottom:5,alignItems:'center'}}>
+                  <input style={{...inpS,flex:2}} value={r.description} onChange={e=>{const m=budgetMisc.map((x,j)=>j===i?{...x,description:e.target.value}:x);budSave(budgetCrops,budgetLivestock,m,budgetExpenses);}} placeholder="Description"/>
+                  <input style={{...inpS,flex:1}} value={r.amount} onChange={e=>{const m=budgetMisc.map((x,j)=>j===i?{...x,amount:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(budgetCrops,budgetLivestock,m,budgetExpenses);}} placeholder="$0"/>
+                  <button onClick={()=>{const m=budgetMisc.filter((_,j)=>j!==i);budSave(budgetCrops,budgetLivestock,m,budgetExpenses);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 7px',cursor:'pointer',fontSize:13}}>×</button>
+                </div>
+              ))}
+              <button onClick={()=>{const m=[...budgetMisc,{id:uid(),description:'',amount:''}];budSave(budgetCrops,budgetLivestock,m,budgetExpenses);}} style={{background:'#e8f5ea',color:'#1a5c25',border:'1.5px dashed #1a5c25',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>+ Add Income</button>
+            </div>
+            {/* Expenses */}
+            <div style={{background:'#7a1a1a',color:'white',fontWeight:700,fontSize:13,padding:'8px 14px',borderRadius:'8px 8px 0 0',textTransform:'uppercase',letterSpacing:.5}}>💰 Expenses</div>
+            <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'0 0 8px 8px',padding:14,marginBottom:16}}>
+              <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:10}}>
+                {expenseList.filter(e=>!budgetExpenses.some(x=>x.description===e.name)).map(e=>(
+                  <button key={e.id} onClick={()=>{const ne=[...budgetExpenses,{id:uid(),description:e.name,amount:''}];budSave(budgetCrops,budgetLivestock,budgetMisc,ne);}} style={{background:'#f5e8ea',color:'#6B0E1E',border:'1px solid #e0b0b8',borderRadius:20,padding:'4px 12px',cursor:'pointer',fontSize:12}}>{e.name}</button>
+                ))}
+              </div>
+              <div style={{display:'flex',gap:8,marginBottom:10}}>
+                <input type="text" value={customExpense} onChange={e=>setCustomExpense(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&customExpense.trim()){const ne=[...budgetExpenses,{id:uid(),description:customExpense.trim(),amount:''}];budSave(budgetCrops,budgetLivestock,budgetMisc,ne);setCustomExpense('');}}} placeholder="Custom expense..." style={{...inpS,flex:1}}/>
+                <button onClick={()=>{if(customExpense.trim()){const ne=[...budgetExpenses,{id:uid(),description:customExpense.trim(),amount:''}];budSave(budgetCrops,budgetLivestock,budgetMisc,ne);setCustomExpense('');}}} style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'7px 14px',cursor:'pointer',fontWeight:600,fontSize:13,whiteSpace:'nowrap'}}>+ Add</button>
+              </div>
+              {budgetExpenses.map((r,i)=>(
+                <div key={r.id||i} style={{display:'flex',gap:8,marginBottom:6,alignItems:'center'}}>
+                  <div style={{flex:2,fontSize:14,color:'#374151',fontWeight:500}}>{r.description}</div>
+                  <input style={{...inpS,flex:1,textAlign:'right'}} value={r.amount} onChange={e=>{const ne=budgetExpenses.map((x,j)=>j===i?{...x,amount:e.target.value.replace(/[^0-9.]/g,'')}:x);budSave(budgetCrops,budgetLivestock,budgetMisc,ne);}} placeholder="$0"/>
+                  <button onClick={()=>{const ne=budgetExpenses.filter((_,j)=>j!==i);budSave(budgetCrops,budgetLivestock,budgetMisc,ne);}} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:14}}>×</button>
+                </div>
+              ))}
+            </div>
+            <div style={{background:bNet>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginBottom:16,display:'flex',justifyContent:'space-between',fontSize:15}}>
+              <span>{bNet>=0?'PROJECTED NET INCOME':'PROJECTED NET LOSS'}</span><span>{fmt2(Math.abs(bNet))}</span>
+            </div>
+          </>);
+        })()}
+
         <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
-          {submitting?'⏳ Submitting…':'✅ Submit My Balance Sheet'}
+          {submitting?'⏳ Submitting…': budgetIncluded?'✅ Submit Balance Sheet & Budget':'✅ Submit My Balance Sheet'}
         </button>
         <div style={{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:10}}>Sent securely to First Bank of Montana · Your draft saves automatically</div>
       </div>
@@ -1982,9 +2104,11 @@ function CustomerBudgetForm({shareId}) {
   const [submitting,setSubmitting]=React.useState(false);
   const saveTimer=React.useRef(null);
 
+  const budgetIncluded = !!(shareRow?.original_data?.budgetIncluded);
   const n=v=>Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
-  const fmt=v=>'$'+(Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}));
   const uid=()=>Math.random().toString(36).slice(2,8);
+  const fmt=v=>'$'+(Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}));
+  const budSave=(c,l,m,e)=>{clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>saveDraft(data),1500);setBudgetCrops(c);setBudgetLivestock(l);setBudgetMisc(m);setBudgetExpenses(e);};
 
   const verifyPin=async()=>{
     setPinErr('');
@@ -2423,6 +2547,9 @@ export default function BalanceSheet() {
   const [budgetShareLink, setBudgetShareLink] = useState('');
   const [budgetSharePin, setBudgetSharePin] = useState('');
   const [budgetShareStatus, setBudgetShareStatus] = useState('');
+  // Package pre-modal (ask about combining before generating)
+  const [showSharePre, setShowSharePre] = useState(false);
+  const [sharePreType, setSharePreType] = useState('bs'); // 'bs' | 'budget'
   // Pending reviews
   const [pendingReviews, setPendingReviews] = useState([]);
   const [reviewSaveDate, setReviewSaveDate] = useState({});
@@ -3393,13 +3520,16 @@ export default function BalanceSheet() {
     return match ? match.price : null;
   };
 
-  const generateBSShare = async () => {
-    setBSShareStatus('generating'); setShowBSShareModal(true);
+  const generateBSShare = async (includeBudget = false) => {
+    setBSShareStatus('generating'); setShowBSShareModal(true); setShowSharePre(false);
     try {
       const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
       const pin = String(Math.floor(100000 + Math.random() * 900000));
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:data, expires_at:expires };
+      const originalData = includeBudget
+        ? { ...data, budgetIncluded: true, budgetData: { budgetCrops: data.budgetCrops||[], budgetLivestock: data.budgetLivestock||[], budgetMisc: data.budgetMisc||[], budgetExpenses: data.budgetExpenses||[], budgetOperatingExpenses: data.budgetOperatingExpenses||[] } }
+        : data;
+      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:originalData, expires_at:expires };
       const resp = await fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
       if (!resp.ok) throw new Error(await resp.text());
       setBSShareLink(window.location.origin+'/?bs='+shareId);
@@ -3407,16 +3537,25 @@ export default function BalanceSheet() {
     } catch(e) { setBSShareStatus('error:'+e.message); }
   };
 
-  const generateBudgetShare = async () => {
-    setBudgetShareStatus('generating'); setShowBudgetShareModal(true);
+  const generateBudgetShare = async (includeBS = false) => {
+    setBudgetShareStatus('generating'); setShowBudgetShareModal(true); setShowSharePre(false);
     try {
       const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
       const pin = String(Math.floor(100000 + Math.random() * 900000));
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-      const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:{}, expires_at:expires };
-      const resp = await fetch(SUPABASE_URL+'/rest/v1/budget_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
-      if (!resp.ok) throw new Error(await resp.text());
-      setBudgetShareLink(window.location.origin+'/?budget='+shareId);
+      if (includeBS) {
+        // Store as a balance_sheet_shares record with budgetIncluded flag
+        const originalData = { ...data, budgetIncluded: true, budgetData: { budgetCrops: data.budgetCrops||[], budgetLivestock: data.budgetLivestock||[], budgetMisc: data.budgetMisc||[], budgetExpenses: data.budgetExpenses||[], budgetOperatingExpenses: data.budgetOperatingExpenses||[] } };
+        const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:originalData, expires_at:expires };
+        const resp = await fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
+        if (!resp.ok) throw new Error(await resp.text());
+        setBudgetShareLink(window.location.origin+'/?bs='+shareId); // combined uses ?bs= route
+      } else {
+        const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:{}, expires_at:expires };
+        const resp = await fetch(SUPABASE_URL+'/rest/v1/budget_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
+        if (!resp.ok) throw new Error(await resp.text());
+        setBudgetShareLink(window.location.origin+'/?budget='+shareId);
+      }
       setBudgetSharePin(pin); setBudgetShareStatus('ready');
     } catch(e) { setBudgetShareStatus('error:'+e.message); }
   };
@@ -4480,7 +4619,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             </button>
             <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
             {data.clientName && (
-              <button onClick={generateBSShare}
+              <button onClick={()=>{ setSharePreType('bs'); setShowSharePre(true); }}
                 style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
                 🔗 Share with Customer
               </button>
@@ -5184,7 +5323,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{background:"none",border:"1.5px solid #2d5a8e",borderRadius:6,padding:"5px 12px",color:"#2d5a8e",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               📝 Expense List
             </button>
-            <button onClick={generateBudgetShare}
+            <button onClick={()=>{ setSharePreType('budget'); setShowSharePre(true); }}
               style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               🔗 Share with Customer
             </button>
@@ -5340,6 +5479,42 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
           setExpenseList={setExpenseList}
           onClose={()=>setShowExpenseEditor(false)}
         />
+      )}
+
+      {/* ── Share Package Pre-Modal ── */}
+      {showSharePre && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"white",borderRadius:14,padding:28,maxWidth:440,width:"100%",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+            <div style={{fontWeight:700,fontSize:"1.05rem",color:"#1a1a1a",marginBottom:6}}>
+              {sharePreType==='bs' ? '📋 Share Balance Sheet' : '🌾 Share Budget'}
+            </div>
+            <p style={{fontSize:".88rem",color:"#555",lineHeight:1.6,marginBottom:20}}>
+              {sharePreType==='bs'
+                ? "Would you like to include the budget along with the balance sheet? The customer will see both in one form with one link and one PIN."
+                : "Would you like to include the balance sheet along with the budget? The customer will see both in one form with one link and one PIN."}
+            </p>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <button
+                onClick={()=> sharePreType==='bs' ? generateBSShare(true) : generateBudgetShare(true)}
+                style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:9,padding:"13px 0",fontWeight:700,fontSize:".95rem",cursor:"pointer",fontFamily:"inherit",textAlign:"left",paddingLeft:18}}>
+                {sharePreType==='bs'
+                  ? '📋🌾  Balance Sheet + Budget  —  one link'
+                  : '🌾📋  Budget + Balance Sheet  —  one link'}
+                <div style={{fontSize:".75rem",fontWeight:400,marginTop:3,opacity:.8}}>Customer fills out both in one session</div>
+              </button>
+              <button
+                onClick={()=> sharePreType==='bs' ? generateBSShare(false) : generateBudgetShare(false)}
+                style={{background:"white",color:"#1a1a1a",border:"1.5px solid #d1d5db",borderRadius:9,padding:"13px 0",fontWeight:700,fontSize:".95rem",cursor:"pointer",fontFamily:"inherit",textAlign:"left",paddingLeft:18}}>
+                {sharePreType==='bs' ? '📋  Balance Sheet only' : '🌾  Budget only'}
+                <div style={{fontSize:".75rem",fontWeight:400,color:"#888",marginTop:3}}>Send a separate link for the other later</div>
+              </button>
+              <button onClick={()=>setShowSharePre(false)}
+                style={{background:"none",border:"none",color:"#888",fontSize:".85rem",cursor:"pointer",padding:"6px 0",fontFamily:"inherit"}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Balance Sheet Share Modal ── */}
