@@ -2649,7 +2649,7 @@ export default function BalanceSheet() {
     if (!newFolders.some(f => JSON.stringify(f) === pathStr)) {
       newFolders.push(path);
       setUserFolders(newFolders);
-      try { localStorage.setItem("fbmt_userFolders", JSON.stringify(newFolders)); } catch {}
+      try { localStorage.setItem(`fbmt_userFolders_${currentSession?.user?.id||"default"}`, JSON.stringify(newFolders)); } catch {}
     }
   };
   // ── Storage ────────────────────────────────────────────────────────────────
@@ -2676,7 +2676,7 @@ export default function BalanceSheet() {
     loadSavedList();
     loadPendingReviews();
     try {
-      const stored = localStorage.getItem("fbmt_userFolders");
+      const stored = localStorage.getItem(`fbmt_userFolders_${currentSession?.user?.id||"default"}`);
       if (stored) setUserFolders(JSON.parse(stored));
     } catch {}
   }, []);
@@ -3479,7 +3479,7 @@ export default function BalanceSheet() {
       return f;
     });
     setUserFolders(updatedFolders);
-    try { localStorage.setItem("fbmt_userFolders", JSON.stringify(updatedFolders)); } catch {}
+    try { localStorage.setItem(`fbmt_userFolders_${currentSession?.user?.id||"default"}`, JSON.stringify(updatedFolders)); } catch {}
 
     // Update all saved sheets that have this folder in their path
     try {
