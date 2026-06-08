@@ -3905,11 +3905,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
     document.head.appendChild(style);
   }, []);
 
-  // Auto-focus the Next button when the step changes
-  useEffect(() => {
-    if (nextBtnRef.current) nextBtnRef.current.focus();
-  }, [step]);
-
   // ── Step Renderer ──────────────────────────────────────────────────────────
   function renderStep() {
     const CONDITIONS = ["— Select —","Cropland","Irrigated Cropland","Pasture / Rangeland","CRP","Timber","Home / Farmstead","Commercial","Vacant Lot","Other"];
