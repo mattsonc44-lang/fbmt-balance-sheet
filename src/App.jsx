@@ -5274,7 +5274,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 {["intro"].map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
-                  return <div key={s} className={cls} onClick={()=>setStep(idx)}>{STEP_LABELS[s]}</div>;
+                  return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
               <div className="sidebar-section">
@@ -5282,7 +5282,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 {ASSET_STEPS.map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
-                  return <div key={s} className={cls} onClick={()=>setStep(idx)}>{STEP_LABELS[s]}</div>;
+                  return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
               <div className="sidebar-section">
@@ -5290,7 +5290,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 {["liab_intro",...LIAB_STEPS].map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
-                  return <div key={s} className={cls} onClick={()=>setStep(idx)}>{STEP_LABELS[s]}</div>;
+                  return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
               <div className="sidebar-section">
@@ -5298,12 +5298,13 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 {["summary"].map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
-                  return <div key={s} className={cls} onClick={()=>setStep(idx)}>{STEP_LABELS[s]}</div>;
+                  return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
             </div>
             <div className="card">
               <div className="card-body">
+                <div className="card-content">{renderStep()}</div>
                 <div className="card-nav">
                   <button className="btn btn-secondary" onClick={prev} disabled={step === 0}>Back</button>
                   <span className="step-info">{step+1} / {STEPS.length}</span>
@@ -5312,7 +5313,6 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                     : <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint}>Print Balance Sheet</button>
                   }
                 </div>
-                <div className="card-content">{renderStep()}</div>
               </div>
             </div>
             <div className="right-panel">
