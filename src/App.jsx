@@ -3876,6 +3876,39 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => setStep(s => Math.min(s+1, STEPS.length-1));
   const prev = () => setStep(s => Math.max(s-1, 0));
+  const nextBtnRef = useRef(null);
+
+  // Inject focus highlight styles once on mount
+  useEffect(() => {
+    const id = 'fbmt-focus-styles';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = `
+      .btn-primary:focus-visible, .btn-primary:focus {
+        outline: 3px solid #fff !important;
+        outline-offset: 2px !important;
+        box-shadow: 0 0 0 4px #6B0E1E, 0 0 0 7px rgba(107,14,30,.45) !important;
+        background: #7a1020 !important;
+      }
+      .btn-secondary:focus-visible, .btn-secondary:focus {
+        outline: 2px solid #6B0E1E !important;
+        outline-offset: 2px !important;
+        box-shadow: 0 0 0 4px rgba(107,14,30,.2) !important;
+      }
+      .btn-save:focus-visible, .btn-save:focus {
+        outline: 2px solid #1B4332 !important;
+        outline-offset: 2px !important;
+        box-shadow: 0 0 0 4px rgba(27,67,50,.2) !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
+  // Auto-focus the Next button when the step changes
+  useEffect(() => {
+    if (nextBtnRef.current) nextBtnRef.current.focus();
+  }, [step]);
 
   // ── Step Renderer ──────────────────────────────────────────────────────────
   function renderStep() {
@@ -5280,8 +5313,8 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                   <button className="btn btn-secondary" onClick={prev} disabled={step === 0}>Back</button>
                   <span className="step-info">{step+1} / {STEPS.length}</span>
                   {step < STEPS.length - 1
-                    ? <button className="btn btn-primary" onClick={next}>Next</button>
-                    : <button className="btn btn-success" onClick={handlePrint}>Print Balance Sheet</button>
+                    ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next}>Next</button>
+                    : <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint}>Print Balance Sheet</button>
                   }
                 </div>
                 <div className="card-content">{renderStep()}</div>
