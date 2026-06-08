@@ -2587,7 +2587,18 @@ export default function BalanceSheet() {
   }, []);
 
   useEffect(() => {
-    if (session?.access_token) supaGetProfile().then(p => setProfile(p)).catch(() => {});
+    if (session?.access_token) {
+      supaGetProfile().then(p => setProfile(p)).catch(() => {});
+      // Load this lender's folders using their user ID
+      try {
+        const userId = session.user?.id || 'default';
+        const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
+        setUserFolders(stored ? JSON.parse(stored) : []);
+      } catch { setUserFolders([]); }
+    } else {
+      // Logged out — clear folders so next login starts fresh
+      setUserFolders([]);
+    }
   }, [session?.access_token]);
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
@@ -2675,10 +2686,6 @@ export default function BalanceSheet() {
   useEffect(() => {
     loadSavedList();
     loadPendingReviews();
-    try {
-      const stored = localStorage.getItem(`fbmt_userFolders_${currentSession?.user?.id||"default"}`);
-      if (stored) setUserFolders(JSON.parse(stored));
-    } catch {}
   }, []);
 
   // Load available entities for the link picker
