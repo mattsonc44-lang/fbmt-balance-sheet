@@ -3877,6 +3877,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   const next = () => setStep(s => Math.min(s+1, STEPS.length-1));
   const prev = () => setStep(s => Math.max(s-1, 0));
   const nextBtnRef = useRef(null);
+  const cardContentRef = useRef(null);
 
   // Inject focus highlight styles once on mount
   useEffect(() => {
@@ -3904,6 +3905,15 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
     `;
     document.head.appendChild(style);
   }, []);
+
+  // Focus first input field when step changes
+  useEffect(() => {
+    if (!cardContentRef.current) return;
+    const first = cardContentRef.current.querySelector(
+      'input:not([type="hidden"]):not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"])'
+    );
+    if (first) first.focus();
+  }, [step]);
 
   // ── Step Renderer ──────────────────────────────────────────────────────────
   function renderStep() {
@@ -5304,7 +5314,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
             </div>
             <div className="card">
               <div className="card-body">
-                <div className="card-content">{renderStep()}</div>
+                <div className="card-content" ref={cardContentRef}>{renderStep()}</div>
                 <div className="card-nav">
                   <button className="btn btn-secondary" onClick={prev} disabled={step === 0}>Back</button>
                   <span className="step-info">{step+1} / {STEPS.length}</span>
