@@ -1749,7 +1749,7 @@ function CustomerInspectForm({ shareId }) {
     try {
       const resp = await fetch(
         SUPABASE_URL_PUB + '/rest/v1/inspection_shares?share_id=eq.' + shareId + '&select=pin,insp_data,client_name,responded_at,lender_email',
-        { headers: { 'apikey': SUPABASE_KEY_PUB, 'Content-Type': 'application/json' } }
+        { headers: { 'apikey': SUPABASE_KEY_PUB, 'Authorization': 'Bearer ' + SUPABASE_KEY_PUB, 'Content-Type': 'application/json' } }
       );
       const rows = await resp.json();
       if (!rows.length) { setPinErr('Link not found or expired.'); return; }
@@ -1785,7 +1785,7 @@ function CustomerInspectForm({ shareId }) {
       const resp = await fetch(
         SUPABASE_URL_PUB + '/rest/v1/inspection_shares?share_id=eq.' + shareId,
         { method: 'PATCH',
-          headers: { 'apikey': SUPABASE_KEY_PUB, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { 'apikey': SUPABASE_KEY_PUB, 'Authorization': 'Bearer ' + SUPABASE_KEY_PUB, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ response, responded_at: new Date().toISOString() }) }
       );
       if (!resp.ok) throw new Error(await resp.text());
