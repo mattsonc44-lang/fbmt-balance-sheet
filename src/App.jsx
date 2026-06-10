@@ -2675,20 +2675,27 @@ async function refreshSession() {
 
 async function supaGetProfile() {
   if (!currentSession?.access_token) return null;
-  const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*&id=eq.' + currentSession.user.id, { headers: supaHeaders() });
+  const resp = await fetch(window.SUPABASE_URL + '/rest/v1/profiles?select=*&id=eq.' + currentSession.user.id, { headers: supaHeaders() });
   if (!resp.ok) return null;
   const rows = await resp.json();
   return rows[0] || null;
 }
 
 function isConfigured() {
-  return SUPABASE_URL && SUPABASE_URL !== 'https://YOUR_PROJECT_ID.supabase.co'
-    && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE';
+  return !!(window.SUPABASE_URL
+    && window.SUPABASE_URL !== 'https://YOUR_PROJECT_ID.supabase.co'
+    && window.SUPABASE_ANON_KEY
+    && window.SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE');
 }
 
 function supaHeaders() {
-  const bearer = currentSession?.access_token || SUPABASE_ANON_KEY;
-  return { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + bearer, 'Prefer': 'return=representation' };
+  const bearer = currentSession?.access_token || window.SUPABASE_ANON_KEY;
+  return {
+    'Content-Type': 'application/json',
+    'apikey': window.SUPABASE_ANON_KEY,
+    'Authorization': 'Bearer ' + bearer,
+    'Prefer': 'return=representation'
+  };
 }
 
 function parseKey(key) {
@@ -2703,7 +2710,7 @@ const storage = {
   async list(prefix) {
     if (!isConfigured()) return { keys: [] };
     const clientPart = prefix.replace('fbmt_bs:', '').replace(/:$/, '').replace(/_/g, ' ');
-    let url = SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date&order=as_of_date.desc';
+    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
     const resp = await fetch(url, { headers: supaHeaders() });
     if (!resp.ok) {
@@ -2718,7 +2725,7 @@ const storage = {
   async get(key) {
     if (!isConfigured()) return null;
     const { clientName, asOfDate } = parseKey(key);
-    const url = SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+    const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
       + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + '&limit=1';
     const resp = await fetch(url, { headers: supaHeaders() });
     if (!resp.ok) return null;
@@ -2735,7 +2742,7 @@ const storage = {
     const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: currentSession?.user?.id || null };
 
     // Check if record already exists
-    const checkUrl = SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+    const checkUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
       + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + '&limit=1';
     const checkResp = await fetch(checkUrl, { headers: supaHeaders() });
     const existing = checkResp.ok ? await checkResp.json() : [];
@@ -2750,7 +2757,7 @@ const storage = {
       });
     } else {
       // New record — insert with POST
-      resp = await fetch(SUPABASE_URL + '/rest/v1/balance_sheets', {
+      resp = await fetch(window.SUPABASE_URL + '/rest/v1/balance_sheets', {
         method: 'POST',
         headers: supaHeaders(),
         body: JSON.stringify(body)
@@ -2765,7 +2772,7 @@ const storage = {
   async delete(key) {
     if (!isConfigured()) return null;
     const { clientName, asOfDate } = parseKey(key);
-    const url = SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+    const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
       + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate;
     const resp = await fetch(url, { method: 'DELETE', headers: supaHeaders() });
     return resp.ok ? { key, deleted: true } : null;
@@ -2889,7 +2896,7 @@ export default function BalanceSheet() {
   // Auto-check for customer response when a sheet with a shareId is open
   useEffect(() => {
     if (!data.inspShareId || !isConfigured()) return;
-    fetch(SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + data.inspShareId + '&select=responded_at',
+    fetch(window.SUPABASE_URL + '/rest/v1/inspection_shares?share_id=eq.' + data.inspShareId + '&select=responded_at',
       { headers: supaHeaders() })
       .then(r => r.json())
       .then(rows => { setHasCustomerResponse(!!(rows[0]?.responded_at)); })
