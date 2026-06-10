@@ -2712,6 +2712,7 @@ const storage = {
       return { keys: [] };
     }
     const rows = await resp.json();
+    console.log('storage.list got', rows.length, 'rows for', prefix);
     return { keys: rows.map(r => makeKey(r.client_name, r.as_of_date)) };
   },
   async get(key) {
@@ -2848,16 +2849,21 @@ export default function BalanceSheet() {
 
   useEffect(() => {
     if (session?.access_token) {
-      supaGetProfile().then(p => setProfile(p)).catch(() => {});
+      supaGetProfile().then(p => {
+        setProfile(p);
+        // Load saved sheets AFTER profile is confirmed so token is fully ready
+        loadSavedList();
+        loadPendingReviews();
+      }).catch(() => {
+        loadSavedList();
+        loadPendingReviews();
+      });
       // Load this lender's folders using their user ID
       try {
         const userId = session.user?.id || 'default';
         const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
         setUserFolders(stored ? JSON.parse(stored) : []);
       } catch { setUserFolders([]); }
-      // Load this lender's saved sheets and pending reviews
-      loadSavedList();
-      loadPendingReviews();
     } else {
       // Logged out — clear everything so next login starts fresh
       setUserFolders([]);
