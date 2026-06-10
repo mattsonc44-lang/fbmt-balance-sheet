@@ -2706,6 +2706,8 @@ function makeKey(clientName, asOfDate) {
   return 'fbmt_bs:' + clientName.replace(/\s+/g, '_') + ':' + asOfDate;
 }
 
+const STORAGE_PREFIX = "fbmt_bs:";
+
 const storage = {
   async list(prefix) {
     console.log('storage.list start, isConfigured:', isConfigured());
