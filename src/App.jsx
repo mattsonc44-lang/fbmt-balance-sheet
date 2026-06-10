@@ -5566,10 +5566,12 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               📋 Price List
             </button>
-            <button onClick={()=>setShowExpenseEditor(true)}
-              style={{background:"none",border:"1.5px solid #2d5a8e",borderRadius:6,padding:"5px 12px",color:"#2d5a8e",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-              📝 Expense List
-            </button>
+            {profile?.role === 'admin' && (
+              <button onClick={()=>setShowExpenseEditor(true)}
+                style={{background:"none",border:"1.5px solid #2d5a8e",borderRadius:6,padding:"5px 12px",color:"#2d5a8e",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+                📝 Expense List
+              </button>
+            )}
             <button onClick={()=>{ setSharePreType('budget'); setShowSharePre(true); }}
               style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               🔗 Share with Customer
