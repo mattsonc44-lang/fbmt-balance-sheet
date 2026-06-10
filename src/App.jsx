@@ -2710,21 +2710,17 @@ const STORAGE_PREFIX = "fbmt_bs:";
 
 const storage = {
   async list(prefix) {
-    console.log('storage.list start, isConfigured:', isConfigured());
     if (!isConfigured()) return { keys: [] };
     const clientPart = prefix.replace('fbmt_bs:', '').replace(/:$/, '').replace(/_/g, ' ');
     let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
-    console.log('storage.list fetching:', url);
     const resp = await fetch(url, { headers: supaHeaders() });
-    console.log('storage.list resp status:', resp.status);
     if (!resp.ok) {
       const err = await resp.text();
       console.error('Supabase list error:', resp.status, err);
       return { keys: [] };
     }
     const rows = await resp.json();
-    console.log('storage.list got', rows.length, 'rows for', prefix);
     return { keys: rows.map(r => makeKey(r.client_name, r.as_of_date)) };
   },
   async get(key) {
@@ -2860,7 +2856,6 @@ export default function BalanceSheet() {
   }, []);
 
   useEffect(() => {
-    console.log('session effect fired, access_token:', !!session?.access_token);
     if (!session?.access_token) {
       setUserFolders([]);
       setSavedSheets([]);
@@ -2876,7 +2871,6 @@ export default function BalanceSheet() {
       const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
       setUserFolders(stored ? JSON.parse(stored) : []);
     } catch(e) { console.warn('folder load error:', e); setUserFolders([]); }
-    console.log('calling loadSavedList...');
     setTimeout(() => {
       loadSavedList();
       loadPendingReviews();
@@ -2947,7 +2941,6 @@ export default function BalanceSheet() {
   };
   // ── Storage ────────────────────────────────────────────────────────────────
   const loadSavedList = async () => {
-    console.log('loadSavedList called, session:', !!currentSession?.access_token);
     try {
       const result = await storage.list(STORAGE_PREFIX);
       if (result && result.keys) {
@@ -2973,7 +2966,6 @@ export default function BalanceSheet() {
   // Reload saved sheets whenever user returns to home screen
   useEffect(() => {
     if (screen === 'home' && currentSession?.access_token) {
-      console.log('home screen shown, loading saved list...');
       loadSavedList();
     }
   }, [screen]);
