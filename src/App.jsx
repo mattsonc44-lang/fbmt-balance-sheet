@@ -1741,6 +1741,8 @@ function CustomerInspectForm({ shareId }) {
   const [addlCmt, setAddlCmt] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [errMsg, setErrMsg] = React.useState('');
+  // isPost: whether this is a post-harvest inspection (used by some share records)
+  const isPost = !!(inspData?.inspMode === 'post' || inspData?.type === 'post');
   const SUPABASE_URL_PUB = (window.SUPABASE_URL || '').replace(/\/+$/, '');
   const SUPABASE_KEY_PUB = window.SUPABASE_ANON_KEY || '';
 
