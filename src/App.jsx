@@ -3142,231 +3142,243 @@ export default function BalanceSheet() {
                        (cell(r6,0) === "Name:" || cell(r6,5) === "As of Date:");
 
         if (isFBMT) {
-          // ── FBMT Native Excel Format ──────────────────────────────────────
-          const R = (i) => rows[i] || []; // 0-indexed
+          // ── FBMT Native Excel Format (keyword-scan approach) ──────────────
+          const R = (i) => rows[i] || [];
+          const has = (row, kw) => row.some(v => v && String(v).toLowerCase().includes(kw.toLowerCase()));
+          const firstNum = (row) => { for (const v of row) { if (typeof v === 'number' && v > 0) return String(v); if (typeof v === 'string' && /^\d[\d,.]*$/.test(v.trim())) return v.trim(); } return ''; };
+          const colNum = (row, i) => { const v = row[i]; return (v && String(v).replace(/[^0-9.]/g,'')) || ''; };
+          const colStr = (row, i) => { const v = row[i]; return v ? String(v).trim() : ''; };
+          const isLoanNum = (v) => v && (String(v).includes('#') || /^[A-Z]{2,}/.test(String(v)) || /credit|visa|mastercard|ford|gmc|deere|case/i.test(String(v)));
+          const isSkipLabel = (v) => !v || ['number','kind','quantity','description','creditor','lien holder','tract','qty','year','make','size','model','item','total','totals','acres'].includes(String(v).toLowerCase().trim());
 
-          // Client info (row 7 = index 6)
-          const clientName = cell(R(6), 1);
-          const rawDate = R(6)[6];
-          const asOfDate = rawDate instanceof Date
-            ? rawDate.toISOString().slice(0,10)
-            : rawDate ? String(rawDate).slice(0,10) : importDate;
-
-          // Cash on Hand (row 10 = index 9, col D = index 3)
-          const cashGlacier = num(R(9), 3);
-
-          // Current Receivables (rows 12-14 = index 11-13, col A=desc, D=value)
-          const receivables = [];
-          for (let i = 11; i <= 13; i++) {
-            const desc = cell(R(i), 0);
-            const val = num(R(i), 3);
-            if (desc && !desc.includes("If Above") && !desc.includes("Federal")) {
-              receivables.push({description: desc, amount: val});
+          // ── Client info: scan for "Name:" row ────────────────────────────
+          let clientName = '', asOfDate = importDate;
+          for (let i = 0; i < Math.min(rows.length, 15); i++) {
+            if (String(R(i)[0]||'').trim() === 'Name:') {
+              clientName = colStr(R(i), 1);
+              // Date is at col 6 in this format
+              const d = R(i)[6] || R(i)[5] || R(i)[3];
+              asOfDate = d instanceof Date ? d.toISOString().slice(0,10) : d ? String(d).slice(0,10) : importDate;
+              break;
             }
           }
 
-          // Federal Payments (row 16 = index 15, col D)
-          const fedAmt = num(R(15), 3) || num(R(16), 3);
-          const federalPayments = fedAmt ? [{program:"Government Payments",amount:fedAmt}] : [{program:"",amount:""}];
-
-          // Market Livestock (rows 19-21 = index 18-20, A=num, B=kind, C=value/head)
-          const livestockMarket = [];
-          for (let i = 18; i <= 21; i++) {
-            const n = cell(R(i), 0);
-            const k = cell(R(i), 1);
-            const v = num(R(i), 2);
-            if (k && !k.includes("Kind") && !k.includes("Number")) {
-              const total = n && v ? String(parseFloat(n) * parseFloat(v)) : v;
-              livestockMarket.push({number: n, kind: k, value: total});
+          // ── Cash: scan for "Cash on Hand" row ────────────────────────────
+          let cashGlacier = '';
+          for (let i = 0; i < Math.min(rows.length, 20); i++) {
+            if (String(R(i)[0]||'').toLowerCase().includes('cash on hand')) {
+              cashGlacier = colNum(R(i), 1) || firstNum(R(i).slice(1));
+              break;
             }
           }
 
-          // Farm Products (rows 24-33 = index 23-32, A=qty, B=kind, C=price/unit)
-          const farmProducts = [];
-          for (let i = 23; i <= 32; i++) {
-            const qty = cell(R(i), 0);
-            const kind = cell(R(i), 1);
-            const price = cell(R(i), 2);
-            if (kind && !kind.includes("Kind") && !kind.includes("Quantity")) {
-              farmProducts.push({quantity: qty||"", unit:"bu", kind: kind, pricePerUnit: price||"", share:"100", contracted:false});
-            }
-          }
-
-          // Cash Investment / Crops (rows 35 = index 34, A=acres, B=kind, C=value/acre)
-          const cropInvestment = [];
-          for (let i = 34; i <= 35; i++) {
-            const acres = cell(R(i), 0);
-            const kind = cell(R(i), 1);
-            const vpa = cell(R(i), 2);
-            if (kind && acres) {
-              cropInvestment.push({cropType: kind, acres: acres, valuePerAcre: vpa||""});
-            }
-          }
-
-          // Supplies (row 37 = index 36, B=desc, D=value)
-          const supplies = [];
-          for (let i = 36; i <= 37; i++) {
-            const desc = cell(R(i), 1);
-            const val = num(R(i), 3);
-            if (desc && !desc.includes("Supplies")) {
-              supplies.push({description: desc, value: val});
-            }
-          }
-
-          // Other Current Assets / Hay etc (rows 39-41 = index 38-40)
+          // ── Securities / Other Current: scan rows 13-17 ──────────────────
           const otherCurrent = [];
-          for (let i = 38; i <= 41; i++) {
-            const qty = cell(R(i), 0);
-            const kind = cell(R(i), 1);
-            const price = cell(R(i), 2);
-            if (kind && !kind.includes("Other Current") && !kind.includes("Creditor")) {
-              const val = qty && price ? String(parseFloat(qty||0) * parseFloat(price||0)) : num(R(i),3);
-              otherCurrent.push({description: (qty ? qty + " " : "") + kind, amount: val});
+          for (let i = 12; i <= 17; i++) {
+            const r = R(i);
+            if (has(r, 'Securities') && firstNum(r)) {
+              otherCurrent.push({description:'Securities', amount: firstNum(r)});
             }
           }
 
-          // Breeding Stock (rows 46-52 = index 45-51, A=num, B=kind, C=value/head)
-          const breedingStock = [];
-          for (let i = 45; i <= 52; i++) {
-            const n = cell(R(i), 0);
-            const k = cell(R(i), 1);
-            const v = cell(R(i), 2);
-            if (k && !k.includes("Kind") && !k.includes("Number")) {
-              const total = n && v ? String(parseFloat(n||0) * parseFloat(v||0)) : "";
-              breedingStock.push({number: n, kind: k, value: total});
+          // ── Federal Payments ─────────────────────────────────────────────
+          let federalPayments = [{program:'', amount:''}];
+          for (let i = 14; i <= 20; i++) {
+            if (has(R(i), 'Federal Payment')) {
+              const amt = firstNum(R(i).slice(1));
+              if (amt) federalPayments = [{program:'Government Payments', amount: amt}];
+              break;
             }
           }
 
-          // Real Estate (from supplement rows 81-86 = index 80-85, A=desc, C=acres, J=value)
-          const realEstate = [];
-          for (let i = 80; i <= 86; i++) {
-            const desc = cell(R(i), 0);
-            const acres = cell(R(i), 2);
-            const val = num(R(i), 9);
-            if (desc && !desc.includes("Description") && !desc.includes("TOTAL")) {
-              const vpa = acres && val && parseFloat(acres) > 0
-                ? String((parseFloat(val) / parseFloat(acres)).toFixed(0)) : "";
-              realEstate.push({acres: acres, reType:"Cropland", description: desc, valuePerAcre: vpa});
-            }
-          }
-
-          // Other Assets (rows 63-66 = index 62-65, B=desc, D=value)
-          const otherAssets = [];
-          for (let i = 62; i <= 66; i++) {
-            const desc = cell(R(i), 1);
-            const val = num(R(i), 3);
-            if (desc) otherAssets.push({description: desc, amount: val});
-          }
-
-          // Operating Notes / Liabilities (rows 12-14 = index 11-13, F=creditor, J=balance)
+          // ── Operating Notes: scan for loan numbers near "Operating" label ─
           const operatingNotes = [];
-          for (let i = 11; i <= 14; i++) {
-            const cred = cell(R(i), 5);
-            const bal = num(R(i), 9);
-            if (cred && !cred.includes("Operating") && !cred.includes("Unsecured")) {
-              operatingNotes.push({creditor: cred, dueDate:"", pmt:"", balance: bal, security:""});
+          for (let i = 11; i <= 20; i++) {
+            const r = R(i);
+            for (let c = 0; c < r.length; c++) {
+              if (isLoanNum(r[c]) && !isSkipLabel(r[c])) {
+                // Balance may be several cols away — scan ahead up to 5 cols
+                let bal = '';
+                for (let k = c+1; k <= Math.min(r.length-1, c+5); k++) {
+                  const v = colNum(r, k);
+                  if (v) { bal = v; break; }
+                }
+                if (bal) { operatingNotes.push({creditor: colStr(r,c), dueDate:'', pmt:'', balance: bal, security:''}); break; }
+              }
             }
           }
 
-          // Intermediate Term Debt (rows 21 = index 20, F=creditor, G=security, H=due, I=pmt, J=principal)
+          // ── Accounts Due: "Credit Cards" and similar ─────────────────────
+          const accountsDue = [];
+          for (let i = 14; i <= 25; i++) {
+            const r = R(i);
+            for (let c = 0; c < r.length; c++) {
+              const v = colStr(r, c);
+              if (/credit card|accounts due/i.test(v)) {
+                const amt = colNum(r, c+1) || colNum(r, c+2) || firstNum(r.slice(c+1));
+                if (amt) { accountsDue.push({creditor: v, amount: amt}); break; }
+              }
+            }
+          }
+
+          // ── Intermediate Debt: scan rows 20-35 for loan/creditor rows ────
           const intermediatDebt = [];
-          for (let i = 20; i <= 25; i++) {
-            const cred = cell(R(i), 5);
-            const sec2 = cell(R(i), 6);
-            const due = cell(R(i), 7);
-            const pmt = num(R(i), 8);
-            const prin = num(R(i), 9);
-            if (cred && !cred.includes("Creditor") && !cred.includes("Intermediate")) {
-              intermediatDebt.push({creditor:cred, security:sec2, dueDate:due, annualPmt:pmt, principal:prin, rate:""});
+          let inDebtSection = false;
+          for (let i = 18; i <= 35; i++) {
+            const r = R(i);
+            if (has(r, 'Intermediate Term') || has(r, 'Installment Debt')) { inDebtSection = true; continue; }
+            if (!inDebtSection) continue;
+            if (has(r, 'Current Portion') || has(r, 'TOTAL') || has(r, 'Real Estate')) break;
+            // Find the creditor column - scan for loan numbers
+            for (let c = 0; c < r.length; c++) {
+              const v = colStr(r, c);
+              if (isLoanNum(v) && !isSkipLabel(v) && v.length > 3) {
+                // Try to find pmt and principal in adjacent cols
+                const pmt = colNum(r, c+3) || colNum(r, c+2);
+                const prin = colNum(r, c+4) || colNum(r, c+3) || colNum(r, c+5);
+                const sec = colStr(r, c+1);
+                const due = colStr(r, c+2);
+                if (pmt || prin) {
+                  intermediatDebt.push({creditor:v, security:sec, dueDate:due, annualPmt:pmt, principal:prin, rate:''});
+                }
+                break;
+              }
             }
           }
 
-          // Current RE Mortgage (rows 40-42 = index 39-41, F=creditor, J=annual pmt)
+          // ── RE Current (annual RE mortgage payments) ──────────────────────
           const reCurrent = [];
-          for (let i = 39; i <= 42; i++) {
-            const cred = cell(R(i), 5);
-            const pmt = num(R(i), 9);
-            if (cred && !cred.includes("Creditor") && !cred.includes("Current Portion") && !cred.includes("Independence - accrued")) {
-              reCurrent.push({creditor: cred, annualPmt: pmt, rate:""});
+          let inRECurrentSection = false;
+          for (let i = 33; i <= 45; i++) {
+            const r = R(i);
+            if (has(r, 'Current Portion of Real Estate')) { inRECurrentSection = true; continue; }
+            if (!inRECurrentSection) continue;
+            if (has(r, 'TOTAL') || has(r, 'State and Fed')) break;
+            for (let c = 0; c < r.length; c++) {
+              const v = colStr(r, c);
+              if (isLoanNum(v) && !isSkipLabel(v)) {
+                const pmt = firstNum(r.slice(c+1));
+                if (pmt) { reCurrent.push({creditor:v, annualPmt:pmt, rate:''}); }
+                break;
+              }
             }
           }
 
-          // Taxes Due (row 43 = index 42)
-          const taxesDue = "";
-
-          // RE Mortgages LT (rows 52-54 = index 51-53, F=lienholder, G=terms, J=principal)
+          // ── RE Mortgages LT ───────────────────────────────────────────────
           const reMortgages = [];
-          for (let i = 51; i <= 56; i++) {
-            const lh = cell(R(i), 5);
-            const terms = cell(R(i), 6);
-            const prin = num(R(i), 9);
-            if (lh && !lh.includes("Lien") && !lh.includes("Real Estate") && lh.trim()) {
-              reMortgages.push({lienHolder: lh, terms: terms, principal: prin, rate:""});
+          let inReMortSection = false;
+          for (let i = 44; i <= 60; i++) {
+            const r = R(i);
+            if (has(r, 'Real Estate Mortgages') && has(r, 'Contracts')) { inReMortSection = true; continue; }
+            if (!inReMortSection) continue;
+            if (has(r, 'TOTAL') || has(r, 'Other Liabilities')) break;
+            for (let c = 0; c < r.length; c++) {
+              const v = colStr(r, c);
+              if (isLoanNum(v) && !isSkipLabel(v)) {
+                const terms = colStr(r, c+1);
+                const prin = firstNum(r.slice(c+1));
+                if (prin) { reMortgages.push({lienHolder:v, terms:terms, principal:prin, rate:''}); }
+                break;
+              }
             }
           }
 
-          // Other Liabilities (rows 56-58 = index 55-57, F=desc, J=balance)
-          const otherLiabilities = [];
-          for (let i = 55; i <= 58; i++) {
-            const desc = cell(R(i), 5);
-            const bal = num(R(i), 9);
-            if (desc && !desc.includes("Other Liabilities")) {
-              otherLiabilities.push({description: desc, balance: bal});
+          // ── Real Estate: scan main body rows 53-62 ────────────────────────
+          const realEstate = [];
+          let inRESection = false;
+          for (let i = 50; i <= 63; i++) {
+            const r = R(i);
+            if (has(r, 'REAL ESTATE:') || (String(r[0]||'').toUpperCase().trim() === 'REAL ESTATE:')) { inRESection = true; continue; }
+            if (!inRESection) continue;
+            if (has(r, 'Real Estate Sale') || has(r, 'TOTAL') || has(r, 'Titled Vehicle')) break;
+            const v0 = colStr(r, 0), v1 = colStr(r, 1), v2 = colStr(r, 2);
+            // Pattern A: acres(num) desc value  
+            if (typeof r[0] === 'number' && r[0] > 0 && colStr(r,1)) {
+              const val = colNum(r,2) || colNum(r,3);
+              const acres = String(r[0]);
+              const vpa = val && parseFloat(val)>0 ? String((parseFloat(val)/parseFloat(acres)).toFixed(0)) : '';
+              realEstate.push({acres, reType:'Cropland', description:colStr(r,1), valuePerAcre:vpa});
+            }
+            // Pattern B: desc in col 0 or col 1, value in col 3
+            else {
+              const desc = colStr(r,0) || colStr(r,1);
+              if (desc && !isSkipLabel(desc) && !has(r,'Acres') && !has(r,'Description')) {
+                const val = colNum(r,3) || colNum(r,2) || colNum(r,1);
+                if (val && parseFloat(val) > 0) realEstate.push({acres:'', reType:'Other', description:desc, valuePerAcre:val});
+              }
             }
           }
 
-          // Vehicles (from supplement rows 112-121 = index 111-120)
+          // ── Other Assets: Life insurance, Retirement, Misc items ──────────
+          const otherAssets = [];
+          let inOtherASection = false;
+          for (let i = 60; i <= 73; i++) {
+            const r = R(i);
+            if (has(r, 'Other Assets')) { inOtherASection = true; continue; }
+            if (!inOtherASection) continue;
+            if (has(r, 'For the purpose') || has(r, 'Signature') || has(r, 'TOTAL')) break;
+            const desc = colStr(r,0) || colStr(r,1);
+            const val = colNum(r,3) || colNum(r,2) || firstNum(r);
+            if (desc && val && !isSkipLabel(desc) && !has(r,'Other Assets')) {
+              otherAssets.push({description: desc, amount: val});
+            }
+          }
+
+          // ── Vehicles: from supplement schedule ────────────────────────────
           const vehicles = [];
-          for (let i = 111; i <= 121; i++) {
-            const yr = cell(R(i), 1);
-            const make = cell(R(i), 2);
-            const model = cell(R(i), 5);
-            const item = cell(R(i), 6);
-            const cond = cell(R(i), 8);
-            const val = num(R(i), 9);
-            const fullMake = [make, model || item].filter(Boolean).join(" ");
-            if (fullMake && val) {
-              vehicles.push({year: yr, make: fullMake, vin:"", condition: cond, value: val});
+          let inVehicleSection = false;
+          for (let i = 100; i <= Math.min(rows.length-1, 135); i++) {
+            const r = R(i);
+            if (has(r, 'TITLED VEHICLES')) { inVehicleSection = true; continue; }
+            if (!inVehicleSection) continue;
+            if (has(r, 'TOTAL') || has(r, 'MACHINERY')) break;
+            if (isSkipLabel(r[0]) && isSkipLabel(r[1])) continue;
+            // Find year (4-digit number)
+            let yr='', make='', val='';
+            for (let c=0; c<r.length; c++) {
+              const v = r[c];
+              if (!yr && typeof v === 'number' && v >= 1900 && v <= 2030) { yr=String(v); continue; }
+              if (!yr && typeof v === 'string' && /^(19|20)\d\d$/.test(v.trim())) { yr=v.trim(); continue; }
+              if (yr && !make && v && !isSkipLabel(v) && typeof v==='string') { make=v.trim(); continue; }
+              if (yr && typeof v === 'number' && v > 500 && v < 5000000) { val=String(v); break; }
             }
+            if (yr && (make||val) && val) vehicles.push({year:yr, make:make, vin:'', condition:'', value:val});
           }
 
-          // Machinery (from supplement rows 126-141 = index 125-140)
+          // ── Machinery: from supplement schedule ───────────────────────────
           const machinery = [];
-          for (let i = 125; i <= 141; i++) {
-            const yr = cell(R(i), 1);
-            const make = cell(R(i), 2);
-            const size = cell(R(i), 3);
-            const model = cell(R(i), 5);
-            const item = cell(R(i), 6);
-            const serial = cell(R(i), 7);
-            const cond = cell(R(i), 8);
-            const val = num(R(i), 9);
-            const fullMake = [make, model || item].filter(Boolean).join(" ");
-            if (fullMake && val) {
-              machinery.push({year: yr, make: fullMake, size: size||"", serial: serial||"", condition: cond||"", value: val});
+          let inMachSection = false;
+          for (let i = 120; i <= Math.min(rows.length-1, 155); i++) {
+            const r = R(i);
+            if (has(r, 'MACHINERY') || has(r, 'FARM MACHINERY')) { inMachSection = true; continue; }
+            if (!inMachSection) continue;
+            if (has(r, 'TOTAL') || has(r, 'FARM PRODUCTS')) break;
+            if (isSkipLabel(r[0]) && isSkipLabel(r[1])) continue;
+            let yr='', make='', val='';
+            for (let c=0; c<r.length; c++) {
+              const v = r[c];
+              if (!yr && typeof v === 'number' && v >= 1900 && v <= 2030) { yr=String(v); continue; }
+              if (!yr && typeof v === 'string' && /^(19|20)\d\d$/.test(v.trim())) { yr=v.trim(); continue; }
+              if (yr && !make && v && !isSkipLabel(v) && typeof v==='string') { make=v.trim(); continue; }
+              if (yr && typeof v === 'number' && v > 100 && v < 5000000) { val=String(v); break; }
             }
+            if (yr && (make||val) && val) machinery.push({year:yr, make:make, size:'', serial:'', condition:'', value:val});
           }
 
           const fill = (arr, key) => arr.length ? arr : emptyData()[key];
           const result = {
             ...emptyData(),
-            clientName, asOfDate, cashGlacier, federalPayments, taxesDue,
-            receivables: fill(receivables,"receivables"),
-            livestockMarket: fill(livestockMarket,"livestockMarket"),
-            farmProducts: fill(farmProducts,"farmProducts"),
-            cropInvestment: fill(cropInvestment,"cropInvestment"),
-            supplies: fill(supplies,"supplies"),
-            otherCurrent: fill(otherCurrent,"otherCurrent"),
-            breedingStock: fill(breedingStock,"breedingStock"),
-            realEstate: fill(realEstate,"realEstate"),
-            otherAssets: fill(otherAssets,"otherAssets"),
-            operatingNotes: fill(operatingNotes,"operatingNotes"),
-            intermediatDebt: fill(intermediatDebt,"intermediatDebt"),
-            reCurrent: fill(reCurrent,"reCurrent"),
-            reMortgages: fill(reMortgages,"reMortgages"),
-            otherLiabilities: fill(otherLiabilities,"otherLiabilities"),
-            vehicles: fill(vehicles,"vehicles"),
-            machinery: fill(machinery,"machinery"),
+            clientName, asOfDate, cashGlacier, federalPayments,
+            otherCurrent: fill(otherCurrent,'otherCurrent'),
+            operatingNotes: fill(operatingNotes,'operatingNotes'),
+            accountsDue: fill(accountsDue,'accountsDue'),
+            intermediatDebt: fill(intermediatDebt,'intermediatDebt'),
+            reCurrent: fill(reCurrent,'reCurrent'),
+            reMortgages: fill(reMortgages,'reMortgages'),
+            realEstate: fill(realEstate,'realEstate'),
+            otherAssets: fill(otherAssets,'otherAssets'),
+            vehicles: fill(vehicles,'vehicles'),
+            machinery: fill(machinery,'machinery'),
           };
           setImportData(result);
 
