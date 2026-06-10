@@ -5580,10 +5580,12 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               style={{fontSize:".85rem"}}>
               Print Budget
             </button>
-            <button onClick={()=>setShowPriceList(true)}
-              style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-              📋 Price List
-            </button>
+            {profile?.role === 'admin' && (
+              <button onClick={()=>setShowPriceList(true)}
+                style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+                📋 Price List
+              </button>
+            )}
             {profile?.role === 'admin' && (
               <button onClick={()=>setShowExpenseEditor(true)}
                 style={{background:"none",border:"1.5px solid #2d5a8e",borderRadius:6,padding:"5px 12px",color:"#2d5a8e",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
