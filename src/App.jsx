@@ -749,7 +749,7 @@ function BudgetView({
         <div className="budget-subsection">
           <div className="budget-sub-label">Operating Expenses</div>
           {/* Quick-add from expense list */}
-          {commodityPrices && expenseList && expenseList.length > 0 && (
+          {expenseList && expenseList.length > 0 && (
             <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12,padding:'10px 12px',background:'#f8f9fa',borderRadius:8,border:'1px solid #e5e7eb'}}>
               <div style={{width:'100%',fontSize:11,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Quick Add</div>
               {expenseList
