@@ -1891,6 +1891,9 @@ function CustomerBalanceSheetForm({shareId}) {
   const fmt = v => v===''||v===null||v===undefined?'$0':'$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
   const saveTimer = React.useRef(null);
 
+  // Derived from shareRow — must be available throughout render
+  const budgetIncluded = !!(shareRow?.original_data?.budgetIncluded);
+
   const verifyPin = async () => {
     setPinErr('');
     try {
