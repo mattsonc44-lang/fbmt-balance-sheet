@@ -405,7 +405,65 @@ function saveExpenseList(list) {
   try { localStorage.setItem('fbmt_expenseList',JSON.stringify(list)); } catch {}
 }
 
-const STORAGE_PREFIX = "fbmt_bs:";
+// ── Expense Typeahead Dropdown ────────────────────────────────────────────────
+function ExpenseDropdown({ value, onChange, expenseList, placeholder }) {
+  const [open, setOpen] = React.useState(false);
+  const [highlight, setHighlight] = React.useState(0);
+  const [query, setQuery] = React.useState(value || "");
+  const ref = React.useRef(null);
+
+  React.useEffect(() => { setQuery(value || ""); }, [value]);
+  React.useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const items = (expenseList || [])
+    .filter(e => e.name && (!query || e.name.toLowerCase().includes(query.toLowerCase())))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const select = (item) => { onChange(item.name); setQuery(item.name); setOpen(false); setHighlight(0); };
+
+  const onKeyDown = (e) => {
+    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) { setOpen(true); setHighlight(0); return; }
+    if (!open) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setHighlight(h => Math.min(h+1, items.length-1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight(h => Math.max(h-1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (items[highlight]) select(items[highlight]); }
+    else if (e.key === "Escape") { setOpen(false); }
+  };
+
+  return (
+    <div ref={ref} style={{position:"relative", flex:1}}>
+      <input className="text-input" type="text" value={query}
+        placeholder={placeholder || "Type or select expense..."}
+        autoComplete="off"
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setHighlight(0); }}
+        onFocus={() => { setOpen(true); setHighlight(0); }}
+        onKeyDown={onKeyDown}
+        style={{width:"100%", paddingRight:22}} />
+      <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
+        fontSize:9,color:"#aaa",pointerEvents:"none",lineHeight:1}}>▼</span>
+      {open && items.length > 0 && (
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
+          border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
+          zIndex:999,maxHeight:220,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
+          {items.map((item, idx) => (
+            <div key={item.id} onMouseDown={() => select(item)} onMouseEnter={() => setHighlight(idx)}
+              style={{padding:"7px 12px",cursor:"pointer",fontSize:".85rem",
+                background:idx===highlight?"#f5e8ea":"white",
+                color:idx===highlight?"#6B0E1E":"#1a1a1a",
+                fontWeight:idx===highlight?600:400,
+                borderBottom:"1px solid #f5f5f5"}}>
+              {item.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const STEPS = [
   "intro","cash_glacier","cash_other","receivables","federal_payments",
@@ -749,30 +807,16 @@ function BudgetView({
         <div className="budget-subsection">
           <div className="budget-sub-label">Operating Expenses</div>
           {/* Quick-add from expense list */}
-          {expenseList && expenseList.length > 0 && (
-            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12,padding:'10px 12px',background:'#f8f9fa',borderRadius:8,border:'1px solid #e5e7eb'}}>
-              <div style={{width:'100%',fontSize:11,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Quick Add</div>
-              {expenseList
-                .filter(e => !data.budgetExpenses.some(r => r.description === e.name))
-                .map(e => (
-                  <button key={e.id} type="button"
-                    onClick={() => addRow('budgetExpenses', {description: e.name, amount: ''})}
-                    style={{background:'white',color:'#374151',border:'1.5px solid #d1d5db',borderRadius:20,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:500,fontFamily:'inherit',transition:'all .1s'}}
-                    onMouseEnter={ev=>{ev.target.style.borderColor='#6B0E1E';ev.target.style.color='#6B0E1E';}}
-                    onMouseLeave={ev=>{ev.target.style.borderColor='#d1d5db';ev.target.style.color='#374151';}}>
-                    + {e.name}
-                  </button>
-                ))
-              }
-            </div>
-          )}
           {data.budgetExpenses.map((r, i) => (
             <div key={i} className="bg-row" data-rowkey={`budgetExpenses-${i}`}>
               <span className="row-num">{i+1}</span>
               <div className="input-group" style={{flex:1}}>
-                <input className="text-input" type="text" value={r.description}
-                  placeholder="e.g., Seed, Fertilizer, Fuel, Labor"
-                  onChange={e => setArr("budgetExpenses",i,"description",e.target.value)} />
+                <ExpenseDropdown
+                  value={r.description}
+                  onChange={v => setArr("budgetExpenses",i,"description",v)}
+                  expenseList={expenseList}
+                  placeholder="Type or select expense..."
+                />
               </div>
               <div className="input-group" style={{width:150,flexShrink:0}}>
                 <div className="input-wrap">
