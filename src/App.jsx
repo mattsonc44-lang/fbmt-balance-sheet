@@ -2848,24 +2848,19 @@ export default function BalanceSheet() {
   }, []);
 
   useEffect(() => {
+    console.log('session effect fired, access_token:', !!session?.access_token);
     if (session?.access_token) {
-      supaGetProfile().then(p => {
-        setProfile(p);
-        // Load saved sheets AFTER profile is confirmed so token is fully ready
-        loadSavedList();
-        loadPendingReviews();
-      }).catch(() => {
-        loadSavedList();
-        loadPendingReviews();
-      });
-      // Load this lender's folders using their user ID
+      supaGetProfile().then(p => setProfile(p)).catch(() => {});
+      // Load folders for this lender
       try {
         const userId = session.user?.id || 'default';
         const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
         setUserFolders(stored ? JSON.parse(stored) : []);
       } catch { setUserFolders([]); }
+      // Load saved sheets and pending reviews immediately
+      loadSavedList();
+      loadPendingReviews();
     } else {
-      // Logged out — clear everything so next login starts fresh
       setUserFolders([]);
       setSavedSheets([]);
       setPendingReviews([]);
@@ -2936,6 +2931,7 @@ export default function BalanceSheet() {
   };
   // ── Storage ────────────────────────────────────────────────────────────────
   const loadSavedList = async () => {
+    console.log('loadSavedList called, session:', !!currentSession?.access_token);
     try {
       const result = await storage.list(STORAGE_PREFIX);
       if (result && result.keys) {
@@ -2957,6 +2953,14 @@ export default function BalanceSheet() {
   useEffect(() => {
     // mount-only setup (non-session-dependent)
   }, []);
+
+  // Reload saved sheets whenever user returns to home screen
+  useEffect(() => {
+    if (screen === 'home' && currentSession?.access_token) {
+      console.log('home screen shown, loading saved list...');
+      loadSavedList();
+    }
+  }, [screen]);
 
   // Load available entities for the link picker
   useEffect(() => {
@@ -5160,10 +5164,16 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                 ? "Clients (" + Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{})).length + ")"
                 : "Clients"}
             </span>
-            <button onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
-              style={{background:"none",border:"1.5px dashed #6B0E1E",borderRadius:6,padding:"3px 12px",color:"#6B0E1E",fontSize:".78rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-              + New Folder
-            </button>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>loadSavedList()}
+                style={{background:"none",border:"1px solid #d1d5db",borderRadius:6,padding:"3px 10px",color:"#888",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
+                ↻ Refresh
+              </button>
+              <button onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
+                style={{background:"none",border:"1.5px dashed #6B0E1E",borderRadius:6,padding:"3px 12px",color:"#6B0E1E",fontSize:".78rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                + New Folder
+              </button>
+            </div>
           </div>
 
           {/* ── Create Folder Modal ── */}
