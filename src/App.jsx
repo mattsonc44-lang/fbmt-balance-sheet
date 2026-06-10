@@ -2859,22 +2859,26 @@ export default function BalanceSheet() {
 
   useEffect(() => {
     console.log('session effect fired, access_token:', !!session?.access_token);
-    if (session?.access_token) {
-      supaGetProfile().then(p => setProfile(p)).catch(() => {});
-      // Load folders for this lender
-      try {
-        const userId = session.user?.id || 'default';
-        const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
-        setUserFolders(stored ? JSON.parse(stored) : []);
-      } catch { setUserFolders([]); }
-      // Load saved sheets and pending reviews immediately
-      loadSavedList();
-      loadPendingReviews();
-    } else {
+    if (!session?.access_token) {
       setUserFolders([]);
       setSavedSheets([]);
       setPendingReviews([]);
+      return;
     }
+    // Run everything in try/catch so nothing can silently kill it
+    try {
+      supaGetProfile().then(p => setProfile(p)).catch(() => {});
+    } catch(e) { console.warn('profile load error:', e); }
+    try {
+      const userId = session?.user?.id || 'default';
+      const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
+      setUserFolders(stored ? JSON.parse(stored) : []);
+    } catch(e) { console.warn('folder load error:', e); setUserFolders([]); }
+    console.log('calling loadSavedList...');
+    setTimeout(() => {
+      loadSavedList();
+      loadPendingReviews();
+    }, 100);
   }, [session?.access_token]);
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
