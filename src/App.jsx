@@ -543,7 +543,7 @@ function BudgetView({
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
-  setArr, removeRow, addRow, lookupPrice, commodityPrices
+  setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
 }) {
   return (
     <div className="budget-wrap">
@@ -748,6 +748,24 @@ function BudgetView({
         </div>
         <div className="budget-subsection">
           <div className="budget-sub-label">Operating Expenses</div>
+          {/* Quick-add from expense list */}
+          {commodityPrices && expenseList && expenseList.length > 0 && (
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12,padding:'10px 12px',background:'#f8f9fa',borderRadius:8,border:'1px solid #e5e7eb'}}>
+              <div style={{width:'100%',fontSize:11,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Quick Add</div>
+              {expenseList
+                .filter(e => !data.budgetExpenses.some(r => r.description === e.name))
+                .map(e => (
+                  <button key={e.id} type="button"
+                    onClick={() => addRow('budgetExpenses', {description: e.name, amount: ''})}
+                    style={{background:'white',color:'#374151',border:'1.5px solid #d1d5db',borderRadius:20,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:500,fontFamily:'inherit',transition:'all .1s'}}
+                    onMouseEnter={ev=>{ev.target.style.borderColor='#6B0E1E';ev.target.style.color='#6B0E1E';}}
+                    onMouseLeave={ev=>{ev.target.style.borderColor='#d1d5db';ev.target.style.color='#374151';}}>
+                    + {e.name}
+                  </button>
+                ))
+              }
+            </div>
+          )}
           {data.budgetExpenses.map((r, i) => (
             <div key={i} className="bg-row" data-rowkey={`budgetExpenses-${i}`}>
               <span className="row-num">{i+1}</span>
@@ -768,7 +786,7 @@ function BudgetView({
           ))}
           <button className="add-btn"
             onClick={() => addRow("budgetExpenses",{description:"",amount:""})}>
-            + Add Expense
+            + Add Custom Expense
           </button>
           <div className="budget-subtotal">
             <span>Total Operating Expenses</span>
@@ -5607,6 +5625,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               addRow={addRow}
               lookupPrice={lookupPrice}
               commodityPrices={commodityPrices}
+              expenseList={expenseList}
             />
           </div>
         </div>
