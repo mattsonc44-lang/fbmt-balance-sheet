@@ -1831,7 +1831,11 @@ function CustomerInspectForm({ shareId }) {
 // ── Shared customer form helpers ─────────────────────────────────────────────
 const CUST_SUPABASE_URL = () => (window.SUPABASE_URL||'').replace(/\/+$/,'');
 const CUST_ANON_KEY = () => window.SUPABASE_ANON_KEY||'';
-const custHeaders = () => ({'Content-Type':'application/json','apikey':CUST_ANON_KEY()});
+const custHeaders = () => ({
+  'Content-Type': 'application/json',
+  'apikey': CUST_ANON_KEY(),
+  'Authorization': 'Bearer ' + CUST_ANON_KEY(),
+});
 
 async function notifySubmission(type, clientName, shareId, lenderEmail) {
   try {
@@ -1891,8 +1895,11 @@ function CustomerBalanceSheetForm({shareId}) {
     setPinErr('');
     try {
       const resp = await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId+'&select=*',{headers:custHeaders()});
-      const rows = await resp.json();
-      if(!rows.length){setPinErr('Link not found or expired.');return;}
+      const body = await resp.text();
+      if (!resp.ok) { setPinErr('Server error ('+resp.status+'): '+body.slice(0,200)); return; }
+      let rows;
+      try { rows = JSON.parse(body); } catch { setPinErr('Invalid response from server: '+body.slice(0,100)); return; }
+      if (!Array.isArray(rows) || !rows.length) { setPinErr('Link not found or expired. (share_id: '+shareId+')'); return; }
       const row = rows[0];
       if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
       if(row.status==='reviewed'){setStage('reviewed');return;}
@@ -1900,7 +1907,6 @@ function CustomerBalanceSheetForm({shareId}) {
       setShareRow(row);
       const d = row.customer_draft || row.original_data || {};
       setData({...d});
-      // If combined package, restore budget state
       const bd = (row.customer_draft||row.original_data||{}).budgetData || {};
       if(bd.budgetCrops?.length) setBudgetCrops(bd.budgetCrops);
       if(bd.budgetLivestock?.length) setBudgetLivestock(bd.budgetLivestock);
