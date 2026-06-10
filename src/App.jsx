@@ -2708,11 +2708,14 @@ function makeKey(clientName, asOfDate) {
 
 const storage = {
   async list(prefix) {
+    console.log('storage.list start, isConfigured:', isConfigured());
     if (!isConfigured()) return { keys: [] };
     const clientPart = prefix.replace('fbmt_bs:', '').replace(/:$/, '').replace(/_/g, ' ');
     let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
+    console.log('storage.list fetching:', url);
     const resp = await fetch(url, { headers: supaHeaders() });
+    console.log('storage.list resp status:', resp.status);
     if (!resp.ok) {
       const err = await resp.text();
       console.error('Supabase list error:', resp.status, err);
