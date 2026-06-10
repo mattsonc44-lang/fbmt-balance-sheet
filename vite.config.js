@@ -3,7 +3,16 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig({
   plugins: [
-    react(),
+    react({
+      // Use esbuild for JSX transform instead of Babel
+      // Babel's scope analysis was generating an 'isPost' intermediate variable
+      // that caused ReferenceError in customer-facing inspection links
+      jsxRuntime: 'automatic',
+      babel: {
+        babelrc: false,
+        configFile: false,
+      }
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'icons/*.png'],
@@ -28,7 +37,6 @@ export default defineConfig({
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,ico,png,svg}'],
         navigateFallback: null,
-        // Never precache index.html — always fetch fresh from network
         globIgnores: ['**/index.html'],
         runtimeCaching: [
           {
