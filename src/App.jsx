@@ -1303,7 +1303,7 @@ const iInp=(val,onChange,ph='',type='text',extra={})=>React.createElement('input
 const iTa=(val,onChange,ph,rows=3)=>React.createElement('textarea',{value:val,onChange:e=>onChange(e.target.value),placeholder:ph,rows,style:{border:'1px solid #d1d5db',borderRadius:4,padding:'6px 8px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}});
 
 function InspectionView({data,setData}){
-  const isPost = data.inspMode === 'post';
+  const isPostHarvest = data.inspMode === 'post';
   const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
   const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(null);
@@ -1392,10 +1392,10 @@ function InspectionView({data,setData}){
   if(submitted)return React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:48}},React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420}},React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),React.createElement('div',{style:{fontWeight:800,fontSize:22,color:ISH,marginBottom:8}},'Report Complete!'),React.createElement('button',{onClick:()=>setSubmitted(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer',marginTop:12}},'New Inspection')));
 
   const toggleBar = React.createElement('div',{style:{display:'flex',alignItems:'center',gap:0,marginBottom:20,background:'#f0fdf4',borderRadius:8,padding:4,width:'fit-content',border:'1px solid #d1fae5'}},
-    React.createElement('button',{type:'button',onClick:()=>setData(d=>({...d,inspMode:'pre'})),style:{padding:'7px 20px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:isPost?'transparent':'white',color:isPost?'#6b7280':ISH,boxShadow:isPost?'none':'0 1px 3px rgba(0,0,0,.1)',transition:'all .15s'}},'🌱 Pre-Harvest'),
-    React.createElement('button',{type:'button',onClick:()=>setData(d=>({...d,inspMode:'post'})),style:{padding:'7px 20px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:isPost?'white':'transparent',color:isPost?ISH:'#6b7280',boxShadow:isPost?'0 1px 3px rgba(0,0,0,.1)':'none',transition:'all .15s'}},'🏚 Post-Harvest'));
+    React.createElement('button',{type:'button',onClick:()=>setData(d=>({...d,inspMode:'pre'})),style:{padding:'7px 20px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:isPostHarvest?'transparent':'white',color:isPostHarvest?'#6b7280':ISH,boxShadow:isPostHarvest?'none':'0 1px 3px rgba(0,0,0,.1)',transition:'all .15s'}},'🌱 Pre-Harvest'),
+    React.createElement('button',{type:'button',onClick:()=>setData(d=>({...d,inspMode:'post'})),style:{padding:'7px 20px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:isPostHarvest?'white':'transparent',color:isPostHarvest?ISH:'#6b7280',boxShadow:isPostHarvest?'0 1px 3px rgba(0,0,0,.1)':'none',transition:'all .15s'}},'🏚 Post-Harvest'));
 
-  if(isPost) return React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},toggleBar,React.createElement(PostHarvestView,{data,setData}));
+  if(isPostHarvest) return React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},toggleBar,React.createElement(PostHarvestView,{data,setData}));
 
   return React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},
     !window.html2pdf&&React.createElement('script',{src:'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'}),
@@ -1742,8 +1742,8 @@ function CustomerInspectForm({ shareId }) {
   const [addlCmt, setAddlCmt] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [errMsg, setErrMsg] = React.useState('');
-  // isPost: whether this is a post-harvest inspection (used by some share records)
-  const isPost = !!(inspData?.inspMode === 'post' || inspData?.type === 'post');
+  // isPostHarvest: whether this is a post-harvest inspection (used by some share records)
+  const isPostHarvest = !!(inspData?.inspMode === 'post' || inspData?.type === 'post');
   const SUPABASE_URL_PUB = (window.SUPABASE_URL || '').replace(/\/+$/, '');
   const SUPABASE_KEY_PUB = window.SUPABASE_ANON_KEY || '';
 
@@ -2715,9 +2715,7 @@ function makeKey(clientName, asOfDate) {
   return 'fbmt_bs:' + clientName.replace(/\s+/g, '_') + ':' + asOfDate;
 }
 
-// Module-level sentinel — prevents Vite/Rollup from hoisting inspMode checks
 // into an undefined scope. Referenced by InspectionView and CustomerInspectForm.
-var isPost = false;
 
 const STORAGE_PREFIX = "fbmt_bs:";
 
