@@ -1830,7 +1830,9 @@ function CustomerInspectForm({ shareId }) {
       React.createElement('button',{onClick:verifyPin,style:{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:8,padding:12,fontWeight:700,fontSize:16,cursor:'pointer',fontFamily:'inherit'}},'Open My Form →')));
 
   // Form stage
-  if (stage === 'form') return React.createElement('div',{style:baseStyle},
+  if (stage !== 'form') return null;
+  try {
+  return React.createElement('div',{style:baseStyle},
     React.createElement('div',{style:{background:'#6B0E1E',padding:'14px 20px',display:'flex',alignItems:'center',gap:12}},
       React.createElement('span',{style:{fontSize:22}},'🌾'),
       React.createElement('div',null,
@@ -1885,8 +1887,12 @@ function CustomerInspectForm({ shareId }) {
           React.createElement('textarea',{value:addlCmt,onChange:e=>setAddlCmt(e.target.value),placeholder:'Any other information your lender should know...',rows:4,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}))),
       React.createElement('button',{onClick:submitResponse,disabled:submitting,style:{width:'100%',background:'#1B4332',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(27,67,50,.3)',fontFamily:'inherit'}},submitting?'⏳ Submitting…':'✅ Submit My Inspection'),
       React.createElement('div',{style:{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:12}},'Your response is sent securely to First Bank of Montana.')));
-
-  return null;
+  } catch(e) {
+    return React.createElement('div',{style:{fontFamily:'sans-serif',padding:32,maxWidth:500,margin:'0 auto'}},
+      React.createElement('div',{style:{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:10,padding:20}}),
+      React.createElement('div',{style:{fontWeight:700,color:'#991b1b',marginBottom:8}},'Form Error'),
+      React.createElement('div',{style:{fontSize:13,color:'#555',wordBreak:'break-all'}}, String(e)));
+  }
 }
 
 
