@@ -2715,6 +2715,10 @@ function makeKey(clientName, asOfDate) {
   return 'fbmt_bs:' + clientName.replace(/\s+/g, '_') + ':' + asOfDate;
 }
 
+// Module-level sentinel — prevents Vite/Rollup from hoisting inspMode checks
+// into an undefined scope. Referenced by InspectionView and CustomerInspectForm.
+var isPost = false;
+
 const STORAGE_PREFIX = "fbmt_bs:";
 
 const storage = {
