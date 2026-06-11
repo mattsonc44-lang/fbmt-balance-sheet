@@ -1858,65 +1858,70 @@ function CustomerInspectForm({ shareId }) {
       React.createElement('div',{style:{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:16,marginBottom:24}},
         React.createElement('div',{style:{fontWeight:700,color:'#2d5a8e',marginBottom:4,fontSize:14}},'📋 Instructions'),
         React.createElement('div',{style:{fontSize:13,color:'#555',lineHeight:1.6}},'Your lender has pre-filled the budgeted (planned) values below. Please fill in the actual amounts for what was planted or harvested this season. Grey fields are pre-filled by your lender — just fill in the white fields.')),
-      // Crops — deviation % and reason only
-      crops.length > 0 && React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
-        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🌱 Crops')),
-        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:12}},
-          crops.map((r,i)=>{
-            const budg = parseFloat(r.budgetedAcres||0);
-            const actl = parseFloat(r.actualAcres||0);
-            const devPct = budg > 0 && actl > 0 ? Math.round(((actl - budg) / budg) * 100) : null;
-            const hasDeviation = devPct !== null && Math.abs(devPct) > 1;
-            return React.createElement('div',{key:i,style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#e5e7eb'}`,borderRadius:8,padding:14,background:hasDeviation?'#fffbeb':'#fafafa'}},
-              React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
-                React.createElement('div',{style:{fontWeight:700,fontSize:15,color:'#1a1a1a'}},r.budgetedCrop||'Crop '+(i+1)),
-                devPct !== null && React.createElement('div',{style:{fontWeight:700,fontSize:14,color:Math.abs(devPct)>10?'#dc2626':Math.abs(devPct)>0?'#d97706':'#16a34a',background:Math.abs(devPct)>10?'#fef2f2':Math.abs(devPct)>0?'#fffbeb':'#f0fdf4',padding:'3px 10px',borderRadius:20}},
-                  `${devPct > 0 ? '+' : ''}${devPct}%`)),
-              React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
-                React.createElement('div',null,
-                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#888',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'Budgeted Acres'),
-                  React.createElement('div',{style:{background:'#f5f5f5',border:'1px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:14,color:'#6b7280',fontWeight:600}},r.budgetedAcres||'—')),
-                React.createElement('div',null,
-                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Acres'),
-                  React.createElement('input',{type:'number',value:r.actualAcres,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,actualAcres:e.target.value}:c)),placeholder:r.budgetedAcres||'0',style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#6B0E1E'}`,borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
-              hasDeviation && React.createElement('div',{style:{fontSize:12,color:'#92400e',fontWeight:600,marginBottom:6}},
-                `⚠️ ${Math.abs(devPct)}% deviation from plan — please explain below.`),
-              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:hasDeviation?'#92400e':'#6b7280',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},
-                hasDeviation ? '⚠️ Reason for Deviation (required)' : 'Notes'),
-              React.createElement('textarea',{value:r.deviationReason,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,deviationReason:e.target.value}:c)),placeholder:hasDeviation?'e.g. wet spring, replanted to barley, hail damage...':'Optional notes',rows:2,style:{border:`1.5px solid ${hasDeviation&&!r.deviationReason?'#f59e0b':'#d1d5db'}`,borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}));
-          }))),
-      // Livestock — deviation % and reason only
-      livestock.length > 0 && React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
-        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🐄 Livestock')),
-        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:12}},
-          livestock.map((r,i)=>{
-            const budg = parseFloat(r.budgetedHead||r.number||0);
-            const actl = parseFloat(r.actualHead||0);
-            const devPct = budg > 0 && actl > 0 ? Math.round(((actl - budg) / budg) * 100) : null;
-            const hasDeviation = devPct !== null && Math.abs(devPct) > 1;
-            return React.createElement('div',{key:i,style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#e5e7eb'}`,borderRadius:8,padding:14,background:hasDeviation?'#fffbeb':'#fafafa'}},
-              React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
-                React.createElement('div',{style:{fontWeight:700,fontSize:15,color:'#1a1a1a'}},r.kind||'Livestock '+(i+1)),
-                devPct !== null && React.createElement('div',{style:{fontWeight:700,fontSize:14,color:Math.abs(devPct)>10?'#dc2626':Math.abs(devPct)>0?'#d97706':'#16a34a',background:Math.abs(devPct)>10?'#fef2f2':Math.abs(devPct)>0?'#fffbeb':'#f0fdf4',padding:'3px 10px',borderRadius:20}},
-                  `${devPct > 0 ? '+' : ''}${devPct}%`)),
-              React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
-                React.createElement('div',null,
-                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#888',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'Budgeted Head'),
-                  React.createElement('div',{style:{background:'#f5f5f5',border:'1px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:14,color:'#6b7280',fontWeight:600}},r.budgetedHead||r.number||'—')),
-                React.createElement('div',null,
-                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Head'),
-                  React.createElement('input',{type:'number',value:r.actualHead,onChange:e=>setLivestock(ls=>ls.map((c,j)=>j===i?{...c,actualHead:e.target.value}:c)),placeholder:r.budgetedHead||r.number||'0',style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#6B0E1E'}`,borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
-              hasDeviation && React.createElement('div',{style:{fontSize:12,color:'#92400e',fontWeight:600,marginBottom:6}},
-                `⚠️ ${Math.abs(devPct)}% deviation from plan — please explain below.`),
-              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:hasDeviation?'#92400e':'#6b7280',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},
-                hasDeviation ? '⚠️ Reason for Deviation (required)' : 'Notes'),
-              React.createElement('textarea',{value:r.deviationReason,onChange:e=>setLivestock(ls=>ls.map((c,j)=>j===i?{...c,deviationReason:e.target.value}:c)),placeholder:hasDeviation?'e.g. sold early, drought conditions...':'Optional notes',rows:2,style:{border:`1.5px solid ${hasDeviation&&!r.deviationReason?'#f59e0b':'#d1d5db'}`,borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}));
-          }))),
-      // Additional Comments
-      React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:24,overflow:'hidden'}},
-        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'📋 Additional Comments')),
-        React.createElement('div',{style:{padding:16}},
-          React.createElement('textarea',{value:addlCmt,onChange:e=>setAddlCmt(e.target.value),placeholder:'Any other information your lender should know...',rows:4,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}))),
+      // Crops — same table as banker's InspectionView
+      (()=>{
+        const uC=(id,f,v)=>setCrops(cs=>cs.map(r=>r.id===id?{...r,[f]:v}:r));
+        const uL=(id,f,v)=>setLivestock(ls=>ls.map(r=>r.id===id?{...r,[f]:v}:r));
+        const cRT=r=>(parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+        const lRT=r=>(parseFloat(r.actualHead||r.budgetedHead||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+        const cropTot=crops.reduce((s,r)=>s+cRT(r),0);
+        const lsTot=livestock.reduce((s,r)=>s+lRT(r),0);
+        return React.createElement(React.Fragment,null,
+          // Crops table
+          crops.length > 0 && React.createElement(ICard,{title:'🌱  CROP CONDITION — Budget vs. Actual'},
+            React.createElement('div',{style:{overflowX:'auto'}},
+              React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
+                React.createElement('thead',null,React.createElement('tr',null,['Crop','Budget Ac','Actual Ac','Deviation','Location','Condition','Yield/Ac','Value/Unit','Total'].map((h,i)=>React.createElement('th',{key:i,style:{...ITHS,minWidth:i===5?190:i===0?100:80,textAlign:i===0||i===4?'left':'center',background:i===1?'#374151':ITH}},h)))),
+                React.createElement('tbody',null,crops.map((r,i)=>{
+                  const pct=devPct(r.actualAcres,r.budgetedAcres),showDev=pct!==null&&Math.abs(pct)>=5,ds=r.actualAcres?devStyle(pct):{};
+                  return React.createElement(React.Fragment,{key:r.id||i},
+                    React.createElement('tr',{style:{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}},
+                      React.createElement('td',{style:ITDS},
+                        React.createElement('div',{style:{fontWeight:600,fontSize:13}},r.budgetedCrop||'Crop '+(i+1)),
+                        r.substituted&&React.createElement('div',{style:{fontSize:11,color:'#d97706',fontWeight:700,marginTop:2}},'↺ '+r.substituteCrop)),
+                      React.createElement('td',{style:{...ITDS,textAlign:'center',background:'#f8f6f2'}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:'#6b7280'}},r.budgetedAcres||'—'),React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budgeted')),
+                      React.createElement('td',{style:ITDS},iInp(r.actualAcres,v=>uC(r.id||i,'actualAcres',v),r.budgetedAcres||'0','number')),
+                      React.createElement('td',{style:{...ITDS,textAlign:'center'}},r.actualAcres&&r.budgetedAcres?React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},devBadge(pct),React.createElement('div',{style:{fontSize:10,color:'#6b7280'}},(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')+((parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0))+' ac')):React.createElement('span',{style:{color:'#d1d5db',fontSize:11}},'—')),
+                      React.createElement('td',{style:ITDS},iInp(r.location,v=>uC(r.id||i,'location',v),'Field/Sec')),
+                      React.createElement('td',{style:ITDS},React.createElement(ICP,{value:r.condition,onChange:v=>uC(r.id||i,'condition',v)})),
+                      React.createElement('td',{style:ITDS},React.createElement('div',{style:{display:'flex',gap:3}},iInp(r.actualYield||r.budgetedYield,v=>uC(r.id||i,'actualYield',v),r.budgetedYield||'0','number',{flex:1}),React.createElement('div',{style:{fontSize:11,color:'#6b7280',alignSelf:'center',padding:'0 2px'}},r.budgetedUnit||'bu')),r.budgetedYield&&React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budget: '+r.budgetedYield)),
+                      React.createElement('td',{style:ITDS},iInp(r.valuePerUnit||r.budgetedPrice,v=>uC(r.id||i,'valuePerUnit',v),r.budgetedPrice||'$0','number')),
+                      React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}},cRT(r)>0?iFmt$(cRT(r)):'—')),
+                    showDev&&React.createElement('tr',{style:{background:Math.abs(pct)>=20?'#fef2f2':'#fffbeb'}},
+                      React.createElement('td',{colSpan:9,style:{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}},
+                        React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+                          React.createElement('span',{style:{fontSize:11,fontWeight:700,color:Math.abs(pct)>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}},Math.abs(pct)>=20?'⛔':'⚠️',' Deviation reason:'),
+                          iInp(r.deviationReason,v=>uC(r.id||i,'deviationReason',v),Math.abs(pct)>=20?'Required — explain major deviation…':'Explain deviation…','text',{border:`1px solid ${Math.abs(pct)>=20?'#fca5a5':'#fcd34d'}`,background:'white'})))));
+                })),
+                React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:7,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'CROP TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(cropTot)),React.createElement('td',null)))))),
+          // Livestock table
+          livestock.length > 0 && React.createElement(ICard,{title:'🐄  LIVESTOCK CONDITION — Budget vs. Actual'},
+            React.createElement('div',{style:{overflowX:'auto'}},
+              React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
+                React.createElement('thead',null,React.createElement('tr',null,['Type','Budget Hd','Actual Hd','Deviation','Condition','Est. Wt','Value/Hd','Total'].map((h,i)=>React.createElement('th',{key:i,style:{...ITHS,minWidth:i===4?190:80,textAlign:i===0?'left':'center',background:i===1?'#374151':ITH}},h)))),
+                React.createElement('tbody',null,livestock.map((r,i)=>{
+                  const pct=devPct(r.actualHead,r.budgetedHead),showDev=pct!==null&&Math.abs(pct)>=5,ds=r.actualHead?devStyle(pct):{};
+                  return React.createElement(React.Fragment,{key:r.id||i},
+                    React.createElement('tr',{style:{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}},
+                      React.createElement('td',{style:ITDS},React.createElement('div',{style:{fontWeight:600,fontSize:13}},r.budgetedType||r.kind||'Livestock '+(i+1))),
+                      React.createElement('td',{style:{...ITDS,textAlign:'center',background:'#f8f6f2'}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:'#6b7280'}},r.budgetedHead||'—'),React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budgeted')),
+                      React.createElement('td',{style:ITDS},iInp(r.actualHead,v=>uL(r.id||i,'actualHead',v),r.budgetedHead||'0','number')),
+                      React.createElement('td',{style:{...ITDS,textAlign:'center'}},r.actualHead&&r.budgetedHead?React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},devBadge(pct),React.createElement('div',{style:{fontSize:10,color:'#6b7280'}},(parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)>0?'+':'')+((parseFloat(r.actualHead||0)-parseFloat(r.budgetedHead||0)).toFixed(0))+' hd')):React.createElement('span',{style:{color:'#d1d5db',fontSize:11}},'—')),
+                      React.createElement('td',{style:ITDS},React.createElement(ICP,{value:r.condition,onChange:v=>uL(r.id||i,'condition',v)})),
+                      React.createElement('td',{style:ITDS},iInp(r.estWeight,v=>uL(r.id||i,'estWeight',v),'lbs','number')),
+                      React.createElement('td',{style:ITDS},iInp(r.valuePerUnit||r.budgetedPrice,v=>uL(r.id||i,'valuePerUnit',v),r.budgetedPrice||'$0','number')),
+                      React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}},lRT(r)>0?iFmt$(lRT(r)):'—')),
+                    showDev&&React.createElement('tr',{style:{background:Math.abs(pct)>=20?'#fef2f2':'#fffbeb'}},
+                      React.createElement('td',{colSpan:8,style:{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}},
+                        React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+                          React.createElement('span',{style:{fontSize:11,fontWeight:700,color:Math.abs(pct)>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}},Math.abs(pct)>=20?'⛔':'⚠️',' Deviation reason:'),
+                          iInp(r.deviationReason,v=>uL(r.id||i,'deviationReason',v),Math.abs(pct)>=20?'Required — explain major deviation…':'Explain deviation…','text',{border:`1px solid ${Math.abs(pct)>=20?'#fca5a5':'#fcd34d'}`,background:'white'})))));
+                })),
+                React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:6,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'LIVESTOCK TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(lsTot)),React.createElement('td',null)))))),
+          // Additional Comments
+          React.createElement(ICard,{title:'📋  Additional Comments'},
+            React.createElement('textarea',{value:addlCmt,onChange:e=>setAddlCmt(e.target.value),placeholder:'Any other information your lender should know...',rows:4,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}})));
+      })(),
       React.createElement('button',{onClick:submitResponse,disabled:submitting,style:{width:'100%',background:'#1B4332',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(27,67,50,.3)',fontFamily:'inherit'}},submitting?'⏳ Submitting…':'✅ Submit My Inspection'),
       React.createElement('div',{style:{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:12}},'Your response is sent securely to First Bank of Montana.')));
   } catch(e) {
