@@ -1852,7 +1852,7 @@ function CustomerInspectForm({ shareId }) {
       React.createElement('div',null,
         React.createElement('div',{style:{color:'white',fontWeight:700,fontSize:16}},'First Bank of Montana — Crop Inspection'),
         React.createElement('div',{style:{color:'rgba(255,255,255,.65)',fontSize:12}},inspData?.clientName||''))),
-    React.createElement('div',{style:{maxWidth:700,margin:'0 auto',padding:'24px 16px'}},
+    React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},
       errMsg&&React.createElement('div',{style:{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#991b1b'}},'⚠️ '+errMsg),
       // Instruction box
       React.createElement('div',{style:{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:16,marginBottom:24}},
