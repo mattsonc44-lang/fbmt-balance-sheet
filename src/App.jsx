@@ -1393,6 +1393,13 @@ function InspectionView({data,setData}){
     setSavingInsp(false);
   };
   React.useEffect(() => { loadInspections(); }, []);
+  // Sync customerResponse when data changes (e.g. loading a saved inspection)
+  React.useEffect(() => {
+    if (data._customerResponse) {
+      setCustomerResponse(data._customerResponse);
+      setShowResponseReview(true);
+    }
+  }, [data._customerResponse]);
   const checkCustomerResponse=async()=>{
     setCheckingResponse(true);
     try{
@@ -1402,7 +1409,8 @@ function InspectionView({data,setData}){
       const resp=await fetch(SUPABASE_URL_L+'/rest/v1/inspection_shares?share_id=eq.'+sid+'&select=response,responded_at',{headers:supaHeaders()});
       const rows=await resp.json();
       if(rows[0]?.response){
-        const cr=rows[0].response;
+        const raw=rows[0].response;
+        const cr=typeof raw==='string'?JSON.parse(raw):raw;
         setCustomerResponse(cr);
         setShowResponseReview(true);
       }else{alert('No response yet — the customer has not submitted the form.');}
@@ -1438,7 +1446,7 @@ function InspectionView({data,setData}){
             savedInspections.map((s,i)=>React.createElement('div',{key:i,style:{padding:'8px 12px',cursor:'pointer',borderBottom:'1px solid #f3f4f6',fontSize:13},
               onMouseEnter:e=>e.currentTarget.style.background='#f0f6ff',
               onMouseLeave:e=>e.currentTarget.style.background='white',
-              onClick:()=>{setData(s.data);setShowInspSaves(false);}},
+              onClick:()=>{setData(s.data);setShowInspSaves(false);if(s.data&&s.data._customerResponse){setCustomerResponse(s.data._customerResponse);setShowResponseReview(true);}}},
               React.createElement('div',{style:{fontWeight:600,color:'#1a1a1a'}},s.client_name.replace('[Insp] ','')),
               React.createElement('div',{style:{fontSize:11,color:'#6b7280'}},s.as_of_date))))),
         React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
