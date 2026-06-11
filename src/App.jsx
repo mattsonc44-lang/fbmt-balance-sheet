@@ -3678,12 +3678,29 @@ export default function BalanceSheet() {
           }
 
           // ── RE MORTGAGES LT ───────────────────────────────────────────────
+          // Scan rows between L_reCur and L_otherLiab/L_totalLiab for entries
+          // that have a lender name in col 5 AND a principal amount in col 8.
+          // We do NOT rely on the section header keyword (& encoding can vary).
           const reMortgages=[];
-          for (const r of secRows('L_reMort','L_otherLiab','L_totalLiab')) {
-            const lh=col(r,5);
-            if (!lh||isSkip(lh)||['Lien Holder','Real Estate Mortgages','Principal'].some(s=>lh.includes(s))||lh.toUpperCase().includes('REAL ESTATE:')) continue;
-            const prin=anyNum(r,8,9);
-            if (prin&&parseFloat(prin)>0) reMortgages.push({lienHolder:lh,terms:col(r,6),principal:prin,rate:''});
+          {
+            const reStart = SEC['L_reCur']!==undefined ? SEC['L_reCur']+1 : 0;
+            const reEnd   = Math.min(
+              SEC['L_otherLiab']!==undefined ? SEC['L_otherLiab'] : rows.length,
+              SEC['L_totalLiab']!==undefined ? SEC['L_totalLiab'] : rows.length
+            );
+            for (let ri=reStart; ri<reEnd; ri++) {
+              const r=R(ri);
+              const lh=col(r,5);
+              if (!lh||isSkip(lh)) continue;
+              if (['Lien Holder','Real Estate Mortgages','Current Portion','Principal',
+                   'Creditor','Annual','Pmt'].some(s=>lh.includes(s))) continue;
+              if (lh.toUpperCase().includes('TOTAL')) continue;
+              const prin=num(r,8);
+              // LT principal always in col 8; current-portion annual pmts are in col 9 — keep separate
+              if (prin&&parseFloat(prin)>1000) {
+                reMortgages.push({lienHolder:lh,terms:col(r,6),principal:prin,rate:''});
+              }
+            }
           }
 
           // ── VEHICLES (supplement schedule) ────────────────────────────────
