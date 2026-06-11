@@ -1439,25 +1439,33 @@ function InspectionView({data,setData}){
                 React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
                   React.createElement('thead',null,
                     React.createElement('tr',{style:{background:'#f0fdf4'}},
-                      ['Crop','Budget Ac','Customer Ac','Deviation','Location','Condition','Yield/Ac','Value/Unit','Total','Deviation Reason'].map((h,i)=>
-                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:12,background:i===1?'#374151':i===2?'#1B4332':'#f0fdf4',color:i<=2?'white':'#374151',whiteSpace:'nowrap'}},h)))),
+                      ['Crop','Budget Ac','Customer Ac','Ac Dev','Budget Yield','Customer Yield','Yield Dev','Budget Price','Customer Price','Price Dev','Total','Deviation Reason'].map((h,i)=>
+                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:11,background:i===1||i===4||i===7?'#374151':i===2||i===5||i===8?'#1B4332':'#f0fdf4',color:i===1||i===2||i===4||i===5||i===7||i===8?'white':'#374151',whiteSpace:'nowrap'}},h)))),
                   React.createElement('tbody',null,(data.inspCrops||[]).map((r,i)=>{
                     const cr=customerResponse.crops?.[i]||{};
-                    const pct=devPct(cr.actualAcres||r.actualAcres, r.budgetedAcres);
-                    const rowBg=pct!==null&&Math.abs(pct)>=20?'#fef2f2':pct!==null&&Math.abs(pct)>=5?'#fffbeb':'white';
-                    const cRT=r=>(parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+                    const acPct=devPct(cr.actualAcres||r.actualAcres, r.budgetedAcres);
+                    const yldPct=devPct(cr.actualYield||r.actualYield, r.budgetedYield);
+                    const pricePct=devPct(cr.valuePerUnit||r.valuePerUnit, r.budgetedPrice);
+                    const anyDev=[acPct,yldPct,pricePct].filter(p=>p!==null&&Math.abs(p)>=5);
+                    const maxDev=anyDev.length?Math.max(...anyDev.map(Math.abs)):0;
+                    const rowBg=maxDev>=20?'#fef2f2':maxDev>=5?'#fffbeb':'white';
+                    const custAcres=cr.actualAcres||r.actualAcres;
+                    const custYield=cr.actualYield||r.actualYield||r.budgetedYield;
+                    const custPrice=cr.valuePerUnit||r.valuePerUnit||r.budgetedPrice;
+                    const tot=(parseFloat(custAcres||0))*(parseFloat(custYield||0))*(parseFloat(custPrice||0));
                     return React.createElement('tr',{key:i,style:{background:rowBg,borderBottom:'1px solid #f0fdf4'}},
                       React.createElement('td',{style:{padding:'8px 10px',fontWeight:600}},r.budgetedCrop||'Crop '+(i+1)),
                       React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedAcres||'—'),
                       React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.actualAcres||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pct)||React.createElement('span',{style:{color:'#9ca3af'}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',color:'#374151'}},cr.location||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},cr.condition?React.createElement('span',{style:{background:'#d1fae5',color:'#065f46',padding:'2px 8px',borderRadius:20,fontWeight:600,fontSize:12}},cr.condition):'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},cr.actualYield||r.budgetedYield||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},cr.valuePerUnit||r.budgetedPrice||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},
-                        (()=>{const tot=(parseFloat(cr.actualAcres||r.actualAcres||0))*(parseFloat(cr.actualYield||r.actualYield||r.budgetedYield||0))*(parseFloat(cr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0));return tot>0?iFmt$(tot):'—';})()),
-                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:200}},cr.deviationReason||'—'));
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(acPct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedYield||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.actualYield||r.actualYield||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(yldPct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedPrice?'$'+r.budgetedPrice:'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.valuePerUnit||r.valuePerUnit?'$'+(cr.valuePerUnit||r.valuePerUnit):'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pricePct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},tot>0?iFmt$(tot):'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:180}},cr.deviationReason||'—'));
                   }))))),
             // Livestock comparison
             (data.inspLivestock||[]).length > 0 && React.createElement('div',{style:{marginBottom:24}},
@@ -1466,23 +1474,27 @@ function InspectionView({data,setData}){
                 React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
                   React.createElement('thead',null,
                     React.createElement('tr',{style:{background:'#f0fdf4'}},
-                      ['Type','Budget Hd','Customer Hd','Deviation','Condition','Est. Wt','Value/Hd','Total','Deviation Reason'].map((h,i)=>
-                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:12,background:i===1?'#374151':i===2?'#1B4332':'#f0fdf4',color:i<=2?'white':'#374151',whiteSpace:'nowrap'}},h)))),
+                      ['Type','Budget Hd','Customer Hd','Hd Dev','Budget Price','Customer Price','Price Dev','Total','Deviation Reason'].map((h,i)=>
+                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:11,background:i===1||i===4?'#374151':i===2||i===5?'#1B4332':'#f0fdf4',color:i===1||i===2||i===4||i===5?'white':'#374151',whiteSpace:'nowrap'}},h)))),
                   React.createElement('tbody',null,(data.inspLivestock||[]).map((r,i)=>{
                     const lr=customerResponse.livestock?.[i]||{};
-                    const pct=devPct(lr.actualHead||r.actualHead, r.budgetedHead);
-                    const rowBg=pct!==null&&Math.abs(pct)>=20?'#fef2f2':pct!==null&&Math.abs(pct)>=5?'#fffbeb':'white';
+                    const hdPct=devPct(lr.actualHead||r.actualHead, r.budgetedHead);
+                    const pricePct=devPct(lr.valuePerUnit||r.valuePerUnit, r.budgetedPrice);
+                    const maxDev=Math.max(...[hdPct,pricePct].filter(p=>p!==null).map(Math.abs),0);
+                    const rowBg=maxDev>=20?'#fef2f2':maxDev>=5?'#fffbeb':'white';
+                    const custHead=lr.actualHead||r.actualHead||r.budgetedHead;
+                    const custPrice=lr.valuePerUnit||r.valuePerUnit||r.budgetedPrice;
+                    const tot=(parseFloat(custHead||0))*(parseFloat(custPrice||0));
                     return React.createElement('tr',{key:i,style:{background:rowBg,borderBottom:'1px solid #f0fdf4'}},
                       React.createElement('td',{style:{padding:'8px 10px',fontWeight:600}},r.budgetedType||r.kind||'Livestock '+(i+1)),
                       React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedHead||'—'),
                       React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},lr.actualHead||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pct)||React.createElement('span',{style:{color:'#9ca3af'}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},lr.condition?React.createElement('span',{style:{background:'#d1fae5',color:'#065f46',padding:'2px 8px',borderRadius:20,fontWeight:600,fontSize:12}},lr.condition):'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},lr.estWeight||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},lr.valuePerUnit||r.budgetedPrice||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},
-                        (()=>{const tot=(parseFloat(lr.actualHead||r.actualHead||r.budgetedHead||0))*(parseFloat(lr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0));return tot>0?iFmt$(tot):'—';})()),
-                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:200}},lr.deviationReason||'—'));
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(hdPct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedPrice?'$'+r.budgetedPrice:'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},lr.valuePerUnit||r.valuePerUnit?'$'+(lr.valuePerUnit||r.valuePerUnit):'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pricePct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},tot>0?iFmt$(tot):'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:180}},lr.deviationReason||'—'));
                   }))))),
             // Additional comments
             customerResponse.addlCmt&&React.createElement('div',{style:{background:'#f8fafc',borderRadius:8,padding:16,marginBottom:20,border:'1px solid #e5e7eb'}},
