@@ -4400,8 +4400,8 @@ export default function BalanceSheet() {
     setLoadingReviews(true);
     try {
       const [bsResp, budResp] = await Promise.all([
-        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?status=in.(submitted,reviewed)&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/budget_shares?status=in.(submitted,reviewed)&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?customer_draft=not.is.null&status=neq.dismissed&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?customer_draft=not.is.null&status=neq.dismissed&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
       ]);
       const bsRows = bsResp.ok ? await bsResp.json() : [];
       const budRows = budResp.ok ? await budResp.json() : [];
@@ -4442,16 +4442,22 @@ export default function BalanceSheet() {
 
   const acceptCustomerBS = async () => {
     if (!bsCompare) return;
-    const {review, orig, draft} = bsCompare;
-    const d = {...emptyData(), ...orig, ...draft};
-    d.asOfDate = reviewSaveDate[review.share_id] || review.as_of_date || new Date().toISOString().slice(0,10);
-    d.clientName = orig.clientName || draft.clientName || review.client_name || '';
-    await storage.set(STORAGE_PREFIX + d.clientName, JSON.stringify(d));
-    setData(d);
-    await markReviewed(review.share_id, review.type);
-    setBsCompare(null);
-    await loadSavedList();
-    setScreen('wizard'); setStep(0);
+    try {
+      const {review, orig, draft} = bsCompare;
+      // Merge: emptyData defaults → banker original → customer draft (draft wins)
+      const d = {...emptyData(), ...orig, ...draft};
+      d.clientName = orig.clientName || draft.clientName || review.client_name || '';
+      d.asOfDate   = reviewSaveDate[review.share_id] || review.as_of_date || orig.asOfDate || new Date().toISOString().slice(0,10);
+      const key = makeKey(d.clientName, d.asOfDate);
+      await storage.set(key, JSON.stringify(d));
+      await markReviewed(review.share_id, review.type);
+      setData(d);
+      setBsCompare(null);
+      await loadSavedList();
+      setScreen('wizard'); setStep(0);
+    } catch(e) {
+      alert('Save failed: ' + e.message);
+    }
   };
   const updateCommodityPrice = (id, field, value) => {
     const updated = commodityPrices.map(p => p.id === id ? {...p, [field]: value} : p);
