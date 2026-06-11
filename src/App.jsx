@@ -1778,6 +1778,16 @@ function CustomerInspectForm({ shareId }) {
   };
 
   const submitResponse = async () => {
+    // Check for deviations without explanation
+    const missing = crops.filter(r => {
+      const budg = parseFloat(r.budgetedAcres||0);
+      const actl = parseFloat(r.actualAcres||0);
+      return r.actualAcres !== '' && budg > 0 && Math.abs(actl - budg) > 0.5 && !r.deviationReason.trim();
+    });
+    if (missing.length > 0) {
+      setErrMsg(`Please explain the acreage deviation for: ${missing.map(r=>r.budgetedCrop||'crop').join(', ')}`);
+      return;
+    }
     setSubmitting(true); setErrMsg('');
     try {
       const response = {
@@ -1848,43 +1858,61 @@ function CustomerInspectForm({ shareId }) {
       React.createElement('div',{style:{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:16,marginBottom:24}},
         React.createElement('div',{style:{fontWeight:700,color:'#2d5a8e',marginBottom:4,fontSize:14}},'📋 Instructions'),
         React.createElement('div',{style:{fontSize:13,color:'#555',lineHeight:1.6}},'Your lender has pre-filled the budgeted (planned) values below. Please fill in the actual amounts for what was planted or harvested this season. Grey fields are pre-filled by your lender — just fill in the white fields.')),
-      // Crops
+      // Crops — deviation % and reason only
       crops.length > 0 && React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
         React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🌱 Crops')),
-        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:16}},
-          crops.map((r,i)=>React.createElement('div',{key:i,style:{border:'1px solid #e5e7eb',borderRadius:8,padding:14,background:'#fafafa'}},
-            React.createElement('div',{style:{fontWeight:700,fontSize:15,color:'#1a1a1a',marginBottom:10}},r.budgetedCrop||'Crop '+(i+1)),
-            React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
-              React.createElement('div',null,
-                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#888',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'Budgeted Acres (planned)'),
-                React.createElement('div',{style:{background:'#f5f5f5',border:'1px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:14,color:'#6b7280',fontWeight:600}},r.budgetedAcres||'—')),
-              React.createElement('div',null,
-                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Acres Planted'),
-                React.createElement('input',{type:'number',value:r.actualAcres,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,actualAcres:e.target.value}:c)),placeholder:r.budgetedAcres||'0',style:{border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
-            React.createElement('div',{style:{marginBottom:10}},
-              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:6,textTransform:'uppercase',letterSpacing:.3}},'✏️ Crop Condition'),
-              React.createElement('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},conds.map(o=>condBtn(r.condition,v=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,condition:v}:c)),o)))),
-            React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
-              React.createElement('div',null,
-                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Yield / Acre'),
-                React.createElement('input',{type:'number',value:r.actualYield,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,actualYield:e.target.value}:c)),placeholder:r.budgetedYield||'0',style:{border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}})),
-              React.createElement('div',null,
-                React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Field / Section'),
-                React.createElement('input',{type:'text',value:r.location,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,location:e.target.value}:c)),placeholder:'e.g. NW Section 14',style:{border:'1.5px solid #6B0E1E',borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
-            React.createElement('div',null,
-              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Notes (if different from plan)'),
-              React.createElement('textarea',{value:r.deviationReason,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,deviationReason:e.target.value}:c)),placeholder:'e.g. wet spring, replanted 50 acres to barley...',rows:2,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}})))))),
-      // Conditions
-      React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
-        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🌿 Field & Ranch Conditions')),
-        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:16}},
-          [['🟤 Pasture',pastureCond,setPastureCond,pastureCmt,setPastureCmt,['Excellent','Good','Fair','Poor']],
-           ['💧 Water / Irrigation',waterCond,setWaterCond,waterCmt,setWaterCmt,['Excess','Adequate','Limited']],
-           ['🚜 Equipment',equipCond,setEquipCond,equipCmt,setEquipCmt,['Excellent','Good','Fair','Poor']]].map(([label,cval,cset,tval,tset,opts])=>
-            React.createElement('div',{key:label},
-              React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:8,color:'#374151'}},label),
-              React.createElement('div',{style:{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}},opts.map(o=>condBtn(cval,cset,o))),
-              React.createElement('textarea',{value:tval,onChange:e=>tset(e.target.value),placeholder:'Comments...',rows:2,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}))))),
+        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:12}},
+          crops.map((r,i)=>{
+            const budg = parseFloat(r.budgetedAcres||0);
+            const actl = parseFloat(r.actualAcres||0);
+            const devPct = budg > 0 && actl > 0 ? Math.round(((actl - budg) / budg) * 100) : null;
+            const hasDeviation = devPct !== null && Math.abs(devPct) > 1;
+            return React.createElement('div',{key:i,style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#e5e7eb'}`,borderRadius:8,padding:14,background:hasDeviation?'#fffbeb':'#fafafa'}},
+              React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+                React.createElement('div',{style:{fontWeight:700,fontSize:15,color:'#1a1a1a'}},r.budgetedCrop||'Crop '+(i+1)),
+                devPct !== null && React.createElement('div',{style:{fontWeight:700,fontSize:14,color:Math.abs(devPct)>10?'#dc2626':Math.abs(devPct)>0?'#d97706':'#16a34a',background:Math.abs(devPct)>10?'#fef2f2':Math.abs(devPct)>0?'#fffbeb':'#f0fdf4',padding:'3px 10px',borderRadius:20}},
+                  `${devPct > 0 ? '+' : ''}${devPct}%`)),
+              React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
+                React.createElement('div',null,
+                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#888',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'Budgeted Acres'),
+                  React.createElement('div',{style:{background:'#f5f5f5',border:'1px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:14,color:'#6b7280',fontWeight:600}},r.budgetedAcres||'—')),
+                React.createElement('div',null,
+                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Acres'),
+                  React.createElement('input',{type:'number',value:r.actualAcres,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,actualAcres:e.target.value}:c)),placeholder:r.budgetedAcres||'0',style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#6B0E1E'}`,borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
+              hasDeviation && React.createElement('div',{style:{fontSize:12,color:'#92400e',fontWeight:600,marginBottom:6}},
+                `⚠️ ${Math.abs(devPct)}% deviation from plan — please explain below.`),
+              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:hasDeviation?'#92400e':'#6b7280',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},
+                hasDeviation ? '⚠️ Reason for Deviation (required)' : 'Notes'),
+              React.createElement('textarea',{value:r.deviationReason,onChange:e=>setCrops(cs=>cs.map((c,j)=>j===i?{...c,deviationReason:e.target.value}:c)),placeholder:hasDeviation?'e.g. wet spring, replanted to barley, hail damage...':'Optional notes',rows:2,style:{border:`1.5px solid ${hasDeviation&&!r.deviationReason?'#f59e0b':'#d1d5db'}`,borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}));
+          }))),
+      // Livestock — deviation % and reason only
+      livestock.length > 0 && React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:20,overflow:'hidden'}},
+        React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'🐄 Livestock')),
+        React.createElement('div',{style:{padding:16,display:'flex',flexDirection:'column',gap:12}},
+          livestock.map((r,i)=>{
+            const budg = parseFloat(r.budgetedHead||r.number||0);
+            const actl = parseFloat(r.actualHead||0);
+            const devPct = budg > 0 && actl > 0 ? Math.round(((actl - budg) / budg) * 100) : null;
+            const hasDeviation = devPct !== null && Math.abs(devPct) > 1;
+            return React.createElement('div',{key:i,style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#e5e7eb'}`,borderRadius:8,padding:14,background:hasDeviation?'#fffbeb':'#fafafa'}},
+              React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+                React.createElement('div',{style:{fontWeight:700,fontSize:15,color:'#1a1a1a'}},r.kind||'Livestock '+(i+1)),
+                devPct !== null && React.createElement('div',{style:{fontWeight:700,fontSize:14,color:Math.abs(devPct)>10?'#dc2626':Math.abs(devPct)>0?'#d97706':'#16a34a',background:Math.abs(devPct)>10?'#fef2f2':Math.abs(devPct)>0?'#fffbeb':'#f0fdf4',padding:'3px 10px',borderRadius:20}},
+                  `${devPct > 0 ? '+' : ''}${devPct}%`)),
+              React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
+                React.createElement('div',null,
+                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#888',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'Budgeted Head'),
+                  React.createElement('div',{style:{background:'#f5f5f5',border:'1px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:14,color:'#6b7280',fontWeight:600}},r.budgetedHead||r.number||'—')),
+                React.createElement('div',null,
+                  React.createElement('label',{style:{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},'✏️ Actual Head'),
+                  React.createElement('input',{type:'number',value:r.actualHead,onChange:e=>setLivestock(ls=>ls.map((c,j)=>j===i?{...c,actualHead:e.target.value}:c)),placeholder:r.budgetedHead||r.number||'0',style:{border:`1.5px solid ${hasDeviation?'#f59e0b':'#6B0E1E'}`,borderRadius:6,padding:'8px 12px',fontSize:14,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}))),
+              hasDeviation && React.createElement('div',{style:{fontSize:12,color:'#92400e',fontWeight:600,marginBottom:6}},
+                `⚠️ ${Math.abs(devPct)}% deviation from plan — please explain below.`),
+              React.createElement('label',{style:{fontSize:11,fontWeight:600,color:hasDeviation?'#92400e':'#6b7280',display:'block',marginBottom:3,textTransform:'uppercase',letterSpacing:.3}},
+                hasDeviation ? '⚠️ Reason for Deviation (required)' : 'Notes'),
+              React.createElement('textarea',{value:r.deviationReason,onChange:e=>setLivestock(ls=>ls.map((c,j)=>j===i?{...c,deviationReason:e.target.value}:c)),placeholder:hasDeviation?'e.g. sold early, drought conditions...':'Optional notes',rows:2,style:{border:`1.5px solid ${hasDeviation&&!r.deviationReason?'#f59e0b':'#d1d5db'}`,borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}}));
+          }))),
+      // Additional Comments
       React.createElement('div',{style:{background:'white',borderRadius:10,border:'1px solid #d1fae5',marginBottom:24,overflow:'hidden'}},
         React.createElement('div',{style:{background:'#1B4332',padding:'10px 16px'}},React.createElement('span',{style:{color:'white',fontWeight:700,fontSize:15}},'📋 Additional Comments')),
         React.createElement('div',{style:{padding:16}},
