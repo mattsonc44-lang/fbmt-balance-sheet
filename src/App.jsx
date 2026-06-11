@@ -1412,6 +1412,7 @@ function InspectionView({data,setData}){
         const raw=rows[0].response;
         const cr=typeof raw==='string'?JSON.parse(raw):raw;
         setCustomerResponse(cr);
+        setData(d=>({...d,_customerResponse:cr}));
         setShowResponseReview(true);
       }else{alert('No response yet — the customer has not submitted the form.');}
     }catch(e){alert('Error: '+e.message);}
