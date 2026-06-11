@@ -4400,8 +4400,8 @@ export default function BalanceSheet() {
     setLoadingReviews(true);
     try {
       const [bsResp, budResp] = await Promise.all([
-        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?status=eq.submitted&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data&order=submitted_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/budget_shares?status=eq.submitted&select=share_id,client_name,as_of_date,submitted_at,customer_draft&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?status=in.(submitted,reviewed)&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?status=in.(submitted,reviewed)&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
       ]);
       const bsRows = bsResp.ok ? await bsResp.json() : [];
       const budRows = budResp.ok ? await budResp.json() : [];
@@ -4415,7 +4415,12 @@ export default function BalanceSheet() {
 
   const markReviewed = async (shareId, type) => {
     const table = type==='balance_sheet'?'balance_sheet_shares':'budget_shares';
-    await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'reviewed'}) });
+    await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'saved'}) });
+    await loadPendingReviews();
+  };
+  const dismissReview = async (shareId, type) => {
+    const table = type==='balance_sheet'?'balance_sheet_shares':'budget_shares';
+    await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'dismissed'}) });
     setPendingReviews(p=>p.filter(r=>r.share_id!==shareId));
   };
 
@@ -5695,7 +5700,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                   <div key={review.share_id} style={{background:"white",border:"2px solid #22c55e",borderRadius:10,padding:"14px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",boxShadow:"0 1px 6px rgba(34,197,94,.15)"}}>
                     <span style={{fontSize:"1.4rem"}}>{review.type==='balance_sheet'?'📋':'🌾'}</span>
                     <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>{review.client_name}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>{review.client_name}</span>
+                        {review.status==='reviewed'&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",padding:"1px 7px",borderRadius:10,fontWeight:700}}>Previously Reviewed</span>}
+                        {review.status==='saved'&&<span style={{fontSize:10,background:"#d1fae5",color:"#065f46",padding:"1px 7px",borderRadius:10,fontWeight:700}}>✓ Saved</span>}
+                      </div>
                       <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>
                         {review.type==='balance_sheet'?'Balance Sheet':'Budget'} · Submitted {review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}
                       </div>
@@ -5710,9 +5719,9 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                         style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:".82rem"}}>
                         📊 Review Changes
                       </button>
-                      <button onClick={()=>markReviewed(review.share_id,review.type)}
-                        style={{background:"none",border:"1px solid #ddd",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:".78rem",color:"#888"}}>
-                        Dismiss
+                      <button onClick={()=>dismissReview(review.share_id,review.type)}
+                        style={{background:"none",border:"1px solid #fca5a5",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:".78rem",color:"#dc2626"}}>
+                        🗑 Remove
                       </button>
                     </div>
                   </div>
