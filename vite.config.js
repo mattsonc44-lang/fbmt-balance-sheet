@@ -44,8 +44,6 @@ export default defineConfig({
     })
   ],
   build: {
-    // Force esbuild minifier — prevents Rollup/terser from generating 'isPost'
-    minify: 'esbuild',
-    target: 'es2017'
+    minify: false
   }
 })
