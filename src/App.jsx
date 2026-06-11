@@ -1306,7 +1306,7 @@ function InspectionView({data,setData}){
   const isPostHarvest = data.inspMode === 'post';
   const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
-  const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(null);
+  const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(null),[showResponseReview,setShowResponseReview]=React.useState(false);
   const [showShareInsp,setShowShareInsp]=React.useState(false),[shareInspEmail,setShareInspEmail]=React.useState(''),[shareInspSending,setShareInspSending]=React.useState(false),[shareInspSent,setShareInspSent]=React.useState(false),[shareInspErr,setShareInspErr]=React.useState('');
   React.useEffect(()=>{
     if(!data.inspCrops||data.inspCrops.length===0){
@@ -1374,14 +1374,7 @@ function InspectionView({data,setData}){
       if(rows[0]?.response){
         const cr=rows[0].response;
         setCustomerResponse(cr);
-        setData(d=>({...d,
-          inspCrops:(d.inspCrops||[]).map((r,i)=>{const c=cr.crops?.[i]||{};return{...r,actualAcres:c.actualAcres||r.actualAcres,condition:c.condition||r.condition,actualYield:c.actualYield||r.actualYield,location:c.location||r.location,deviationReason:c.deviationReason||r.deviationReason};}),
-          inspLivestock:(d.inspLivestock||[]).map((r,i)=>{const l=cr.livestock?.[i]||{};return{...r,actualHead:l.actualHead||r.actualHead,condition:l.condition||r.condition,estWeight:l.estWeight||r.estWeight,deviationReason:l.deviationReason||r.deviationReason};}),
-          inspPastureCond:cr.pastureCond||d.inspPastureCond,inspPastureCmt:cr.pastureCmt||d.inspPastureCmt,
-          inspWaterCond:cr.waterCond||d.inspWaterCond,inspWaterCmt:cr.waterCmt||d.inspWaterCmt,
-          inspEquipCond:cr.equipCond||d.inspEquipCond,inspEquipCmt:cr.equipCmt||d.inspEquipCmt,
-          inspEnvCmt:cr.envCmt||d.inspEnvCmt,inspAddlCmt:cr.addlCmt||d.inspAddlCmt}));
-        alert('✅ Customer response loaded! Their answers have been filled in.');
+        setShowResponseReview(true);
       }else{alert('No response yet — the customer has not submitted the form.');}
     }catch(e){alert('Error: '+e.message);}
     setCheckingResponse(false);
@@ -1425,7 +1418,87 @@ function InspectionView({data,setData}){
             React.createElement('div',{style:{fontSize:'.72rem',color:'#888',marginTop:4}},'Customer must enter this to open the form')),
           React.createElement('button',{onClick:()=>{const subject=encodeURIComponent('Inspection Form - '+data.clientName);const body=encodeURIComponent('Please fill out your crop inspection form.\n\nClick the link to open your form:\n'+shareLink+'\n\nYour PIN: '+sharePin+'\n\nSteps:\n1. Click the link above\n2. Enter your PIN when prompted\n3. Fill in your actual acres, yields, and conditions\n4. Submit the form\n\nThank you,\nFirst Bank of Montana');window.location.href='mailto:?subject='+subject+'&body='+body;},style:{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'10px 0',fontWeight:700,fontSize:'.9rem',cursor:'pointer',marginBottom:8}},'📧 Open in Email (Outlook / Mail)'),
           React.createElement('button',{onClick:checkCustomerResponse,disabled:checkingResponse,style:{width:'100%',background:'none',border:'1.5px solid #22c55e',borderRadius:7,padding:'8px 0',fontWeight:700,fontSize:'.88rem',cursor:'pointer',color:'#15803d',marginBottom:8}},checkingResponse?'Checking...':'🔄 Check for Customer Response'),
-          customerResponse&&React.createElement('div',{style:{background:'#e8f5ea',border:'1px solid #22c55e',borderRadius:7,padding:10,fontSize:'.85rem',color:'#15803d',fontWeight:700,marginBottom:8}},'✅ Customer has responded — answers loaded into the form.')),
+          customerResponse&&React.createElement('div',{style:{background:'#e8f5ea',border:'1px solid #22c55e',borderRadius:7,padding:10,fontSize:'.85rem',color:'#15803d',fontWeight:700,marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            '✅ Customer has responded — answers loaded into the form.',
+            React.createElement('button',{onClick:()=>setShowResponseReview(true),style:{background:'#15803d',color:'white',border:'none',borderRadius:5,padding:'4px 12px',fontWeight:700,fontSize:'.78rem',cursor:'pointer',fontFamily:'inherit'}},'📊 Review Comparison'))),
+      // Response Review Modal
+      showResponseReview&&customerResponse&&React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:3000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:'20px 12px'}},
+        React.createElement('div',{style:{background:'white',borderRadius:12,width:'100%',maxWidth:1100,boxShadow:'0 20px 60px rgba(0,0,0,.3)',margin:'auto'}},
+          // Header
+          React.createElement('div',{style:{background:ISH,borderRadius:'12px 12px 0 0',padding:'16px 24px',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            React.createElement('div',null,
+              React.createElement('div',{style:{color:'white',fontWeight:800,fontSize:18}},'📊 Budget vs. Customer Response'),
+              React.createElement('div',{style:{color:'rgba(255,255,255,.7)',fontSize:13,marginTop:2}},data.clientName||'',' — ',customerResponse.submittedAt?new Date(customerResponse.submittedAt).toLocaleDateString():'Submitted')),
+            React.createElement('button',{onClick:()=>setShowResponseReview(false),style:{background:'rgba(255,255,255,.15)',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontWeight:700,cursor:'pointer',fontSize:14}},'✕ Close')),
+          // Body
+          React.createElement('div',{style:{padding:24}},
+            // Crops comparison
+            (data.inspCrops||[]).length > 0 && React.createElement('div',{style:{marginBottom:24}},
+              React.createElement('div',{style:{fontWeight:700,fontSize:15,color:ISH,marginBottom:10}},'🌱 Crops'),
+              React.createElement('div',{style:{overflowX:'auto'}},
+                React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
+                  React.createElement('thead',null,
+                    React.createElement('tr',{style:{background:'#f0fdf4'}},
+                      ['Crop','Budget Ac','Customer Ac','Deviation','Location','Condition','Yield/Ac','Value/Unit','Total','Deviation Reason'].map((h,i)=>
+                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:12,background:i===1?'#374151':i===2?'#1B4332':'#f0fdf4',color:i<=2?'white':'#374151',whiteSpace:'nowrap'}},h)))),
+                  React.createElement('tbody',null,(data.inspCrops||[]).map((r,i)=>{
+                    const cr=customerResponse.crops?.[i]||{};
+                    const pct=devPct(cr.actualAcres||r.actualAcres, r.budgetedAcres);
+                    const rowBg=pct!==null&&Math.abs(pct)>=20?'#fef2f2':pct!==null&&Math.abs(pct)>=5?'#fffbeb':'white';
+                    const cRT=r=>(parseFloat(r.actualAcres||0))*(parseFloat(r.actualYield||r.budgetedYield||0))*(parseFloat(r.valuePerUnit||r.budgetedPrice||0));
+                    return React.createElement('tr',{key:i,style:{background:rowBg,borderBottom:'1px solid #f0fdf4'}},
+                      React.createElement('td',{style:{padding:'8px 10px',fontWeight:600}},r.budgetedCrop||'Crop '+(i+1)),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedAcres||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.actualAcres||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pct)||React.createElement('span',{style:{color:'#9ca3af'}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',color:'#374151'}},cr.location||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},cr.condition?React.createElement('span',{style:{background:'#d1fae5',color:'#065f46',padding:'2px 8px',borderRadius:20,fontWeight:600,fontSize:12}},cr.condition):'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},cr.actualYield||r.budgetedYield||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},cr.valuePerUnit||r.budgetedPrice||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},
+                        (()=>{const tot=(parseFloat(cr.actualAcres||r.actualAcres||0))*(parseFloat(cr.actualYield||r.actualYield||r.budgetedYield||0))*(parseFloat(cr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0));return tot>0?iFmt$(tot):'—';})()),
+                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:200}},cr.deviationReason||'—'));
+                  }))))),
+            // Livestock comparison
+            (data.inspLivestock||[]).length > 0 && React.createElement('div',{style:{marginBottom:24}},
+              React.createElement('div',{style:{fontWeight:700,fontSize:15,color:ISH,marginBottom:10}},'🐄 Livestock'),
+              React.createElement('div',{style:{overflowX:'auto'}},
+                React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
+                  React.createElement('thead',null,
+                    React.createElement('tr',{style:{background:'#f0fdf4'}},
+                      ['Type','Budget Hd','Customer Hd','Deviation','Condition','Est. Wt','Value/Hd','Total','Deviation Reason'].map((h,i)=>
+                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:12,background:i===1?'#374151':i===2?'#1B4332':'#f0fdf4',color:i<=2?'white':'#374151',whiteSpace:'nowrap'}},h)))),
+                  React.createElement('tbody',null,(data.inspLivestock||[]).map((r,i)=>{
+                    const lr=customerResponse.livestock?.[i]||{};
+                    const pct=devPct(lr.actualHead||r.actualHead, r.budgetedHead);
+                    const rowBg=pct!==null&&Math.abs(pct)>=20?'#fef2f2':pct!==null&&Math.abs(pct)>=5?'#fffbeb':'white';
+                    return React.createElement('tr',{key:i,style:{background:rowBg,borderBottom:'1px solid #f0fdf4'}},
+                      React.createElement('td',{style:{padding:'8px 10px',fontWeight:600}},r.budgetedType||r.kind||'Livestock '+(i+1)),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedHead||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},lr.actualHead||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pct)||React.createElement('span',{style:{color:'#9ca3af'}},'—')),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},lr.condition?React.createElement('span',{style:{background:'#d1fae5',color:'#065f46',padding:'2px 8px',borderRadius:20,fontWeight:600,fontSize:12}},lr.condition):'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},lr.estWeight||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},lr.valuePerUnit||r.budgetedPrice||'—'),
+                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},
+                        (()=>{const tot=(parseFloat(lr.actualHead||r.actualHead||r.budgetedHead||0))*(parseFloat(lr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0));return tot>0?iFmt$(tot):'—';})()),
+                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:200}},lr.deviationReason||'—'));
+                  }))))),
+            // Additional comments
+            customerResponse.addlCmt&&React.createElement('div',{style:{background:'#f8fafc',borderRadius:8,padding:16,marginBottom:20,border:'1px solid #e5e7eb'}},
+              React.createElement('div',{style:{fontWeight:700,color:ISH,marginBottom:6}},'📋 Customer Comments'),
+              React.createElement('div',{style:{fontSize:13,color:'#374151',lineHeight:1.6}},customerResponse.addlCmt)),
+            // Accept button
+            React.createElement('div',{style:{display:'flex',gap:12,justifyContent:'flex-end',paddingTop:16,borderTop:'1px solid #e5e7eb'}},
+              React.createElement('button',{onClick:()=>setShowResponseReview(false),style:{background:'#f3f4f6',color:'#374151',border:'none',borderRadius:6,padding:'9px 20px',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Close'),
+              React.createElement('button',{onClick:()=>{
+                const cr=customerResponse;
+                setData(d=>({...d,
+                  inspCrops:(d.inspCrops||[]).map((r,i)=>{const c=cr.crops?.[i]||{};return{...r,actualAcres:c.actualAcres||r.actualAcres,condition:c.condition||r.condition,actualYield:c.actualYield||r.actualYield,location:c.location||r.location,deviationReason:c.deviationReason||r.deviationReason,valuePerUnit:c.valuePerUnit||r.valuePerUnit};}),
+                  inspLivestock:(d.inspLivestock||[]).map((r,i)=>{const l=cr.livestock?.[i]||{};return{...r,actualHead:l.actualHead||r.actualHead,condition:l.condition||r.condition,estWeight:l.estWeight||r.estWeight,deviationReason:l.deviationReason||r.deviationReason,valuePerUnit:l.valuePerUnit||r.valuePerUnit};}),
+                  inspAddlCmt:cr.addlCmt||d.inspAddlCmt}));
+                setShowResponseReview(false);
+              },style:{background:'#1B4332',color:'white',border:'none',borderRadius:6,padding:'9px 20px',fontWeight:700,cursor:'pointer',fontFamily:'inherit'}},'✅ Accept & Load into Form'))))),
         shareStatus.startsWith('error')&&React.createElement('div',{style:{color:'#c44',fontSize:'.85rem',padding:'12px 0'}},'Error: ',shareStatus.slice(6),React.createElement('br'),React.createElement('span',{style:{fontSize:'.75rem',color:'#888'}},'Make sure you ran inspection_shares.sql in Supabase.')),
         React.createElement('button',{onClick:()=>setShowShareModal(false),style:{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'7px 20px',cursor:'pointer',fontFamily:'inherit',fontSize:'.85rem',marginTop:4}},'Close'))),
     React.createElement('div',{style:{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}},[['#22c55e','On Budget (< 5%)'],['#f59e0b','Minor Deviation (5–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>React.createElement('div',{key:l,style:{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}},React.createElement('div',{style:{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}),l))),
