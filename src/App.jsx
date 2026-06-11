@@ -3535,7 +3535,11 @@ export default function BalanceSheet() {
           const supplies=[];
           const supSections = ['A_supplies','A_cropInv'];
           for (const secKey of supSections) {
-            for (const r of secRows(secKey,'A_otherCur','A_breeding','A_re','A_totalCur')) {
+            // A_cropInv must stop at A_supplies to avoid double-counting
+            const stopKeys = secKey==='A_cropInv'
+              ? ['A_supplies','A_otherCur','A_breeding','A_re','A_totalCur']
+              : ['A_otherCur','A_breeding','A_re','A_totalCur'];
+            for (const r of secRows(secKey,...stopKeys)) {
               const qty=col(r,0), kind=col(r,1);
               const desc = (typeof r[0]==='number'&&r[0]>0&&kind) ? `${qty} ${kind}` : (col(r,0)||kind);
               const val=anyNum(r,3,2);
@@ -3550,7 +3554,7 @@ export default function BalanceSheet() {
           for (const r of secRows('A_otherCur','A_totalCur','A_breeding','A_re')) {
             const desc=col(r,0)||col(r,1);
             const val=anyNum(r,3,2);
-            if (desc&&val&&!isSkip(desc)&&!desc.toLowerCase().includes('other current')&&!desc.toUpperCase().includes('TOTAL')) {
+            if (desc&&val&&!isSkip(desc)&&!desc.toLowerCase().includes('other current')&&!/^total/i.test(desc.trim())) {
               otherCurrent.push({description:desc,amount:val});
             }
           }
@@ -3589,28 +3593,25 @@ export default function BalanceSheet() {
 
           // ── REAL ESTATE ───────────────────────────────────────────────────
           const realEstate=[];
+          const reImprovements=[]; // buildings with no acres → merge into otherAssets
           for (const r of secRows('A_re','A_reContracts','A_vehicles','A_totalAssets')) {
             const d0=col(r,0), d1=col(r,1), val3=num(r,3);
             if (!d0&&!d1) continue;
             if (['Acres','Description','REAL ESTATE'].some(h=>d0.toUpperCase().includes(h)||d1.toUpperCase().includes(h))) continue;
-            if (d0.toUpperCase().includes('TOTAL')||d1.toUpperCase().includes('TOTAL')) continue;
-            // Pattern A: col0=acres, col1=desc, col2=price/acre (given directly)
+            if (/^total/i.test(d0.trim())||/^total/i.test(d1.trim())) continue;
+            // Pattern A: col0=acres (number), col1=desc — use col3 total as authoritative, derive vpa
             if (typeof r[0]==='number'&&r[0]>0&&d1) {
               const acres=String(r[0]);
-              const priceAcre=num(r,2); // price per acre given directly in col 2
-              const total=val3;
-              // If col2 is a reasonable price/acre (< total), use it directly
-              const vpa = priceAcre && parseFloat(priceAcre) < parseFloat(total||'9999999') ? priceAcre
-                : (total&&parseFloat(acres)>0 ? String((parseFloat(total)/parseFloat(acres)).toFixed(0)) : '');
+              const total=parseFloat(val3||0);
+              const vpa=total>0&&parseFloat(acres)>0 ? String((total/parseFloat(acres)).toFixed(0)) : num(r,2);
               realEstate.push({acres,reType:'Cropland',description:d1,valuePerAcre:vpa});
             }
-            // Pattern B: col0 empty, col1=desc, col3=value (buildings)
+            // Pattern B/C: no acres — buildings & improvements — send to otherAssets
             else if (!d0&&d1&&val3) {
-              realEstate.push({acres:'',reType:'Other',description:d1,valuePerAcre:val3});
+              reImprovements.push({description:'RE — '+d1,amount:val3});
             }
-            // Pattern C: col0=desc (no leading digit), col3=value
             else if (d0&&!d0.match(/^\d/)&&val3) {
-              realEstate.push({acres:'',reType:'Other',description:d0,valuePerAcre:val3});
+              reImprovements.push({description:'RE — '+d0,amount:val3});
             }
           }
 
@@ -3619,10 +3620,13 @@ export default function BalanceSheet() {
           for (const r of secRows('A_otherAssets','A_totalAssets')) {
             const desc=col(r,0)||col(r,1);
             const val=anyNum(r,3,2);
-            if (desc&&val&&!isSkip(desc)&&!desc.toLowerCase().includes('other assets')&&!desc.toUpperCase().includes('TOTAL')) {
+            // Use /^total/i so "760 acres total capacity" is NOT excluded
+            if (desc&&val&&!isSkip(desc)&&!desc.toLowerCase().includes('other assets')&&!/^total/i.test(desc.trim())) {
               otherAssets.push({description:desc,amount:val});
             }
           }
+          // Merge buildings/improvements from real estate into otherAssets
+          otherAssets.push(...reImprovements);
 
           // ── OPERATING NOTES ───────────────────────────────────────────────
           const operatingNotes=[];
@@ -3749,7 +3753,7 @@ export default function BalanceSheet() {
             otherCurrent:     fill(otherCurrent,'otherCurrent'),
             breedingStock:    fill(breedingStock,'breedingStock'),
             realEstate:       fill(realEstate,'realEstate'),
-            otherAssets:      fill(otherAssets,'otherAssets'),
+            otherAssets:      fill([...otherAssets,...reImprovements],'otherAssets'),
             operatingNotes:   fill(operatingNotes,'operatingNotes'),
             accountsDue:      fill(accountsDue,'accountsDue'),
             intermediatDebt:  fill(intermediatDebt,'intermediatDebt'),
