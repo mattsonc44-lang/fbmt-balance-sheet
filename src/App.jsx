@@ -1304,7 +1304,7 @@ const iTa=(val,onChange,ph,rows=3)=>React.createElement('textarea',{value:val,on
 
 function InspectionView({data,setData}){
   const isPostHarvest = data.inspMode === 'post';
-  const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
+  const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null),reportRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
   const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(data._customerResponse||null),[showResponseReview,setShowResponseReview]=React.useState(false);
   const [savedInspections,setSavedInspections]=React.useState([]),[showInspSaves,setShowInspSaves]=React.useState(false),[savingInsp,setSavingInsp]=React.useState(false);
