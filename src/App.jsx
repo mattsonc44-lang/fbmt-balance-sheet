@@ -1772,8 +1772,9 @@ function CustomerInspectForm({ shareId }) {
       setEquipCmt(d.inspEquipCmt||'');
       setEnvCmt(d.inspEnvCmt||'');
       setAddlCmt(d.inspAddlCmt||'');
+      console.log('INSP: setStage form', {crops: (d.inspCrops||[]).length, insp_data_keys: Object.keys(d)});
       setStage('form');
-    } catch(e) { setPinErr('Connection error: ' + e.message); }
+    } catch(e) { console.error('INSP verifyPin error:', e); setPinErr('Connection error: ' + e.message); }
   };
 
   const submitResponse = async () => {
@@ -1891,10 +1892,10 @@ function CustomerInspectForm({ shareId }) {
       React.createElement('button',{onClick:submitResponse,disabled:submitting,style:{width:'100%',background:'#1B4332',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(27,67,50,.3)',fontFamily:'inherit'}},submitting?'⏳ Submitting…':'✅ Submit My Inspection'),
       React.createElement('div',{style:{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:12}},'Your response is sent securely to First Bank of Montana.')));
   } catch(e) {
-    return React.createElement('div',{style:{fontFamily:'sans-serif',padding:32,maxWidth:500,margin:'0 auto'}},
-      React.createElement('div',{style:{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:10,padding:20}}),
-      React.createElement('div',{style:{fontWeight:700,color:'#991b1b',marginBottom:8}},'Form Error'),
-      React.createElement('div',{style:{fontSize:13,color:'#555',wordBreak:'break-all'}}, String(e)));
+    console.error('INSP form render error:', e);
+    return React.createElement('div',{style:{fontFamily:'sans-serif',padding:32,maxWidth:500,margin:'60px auto',background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:10}},
+      React.createElement('div',{style:{fontWeight:700,color:'#991b1b',fontSize:18,marginBottom:12}},'⚠️ Form Error'),
+      React.createElement('div',{style:{fontSize:13,color:'#555',wordBreak:'break-all',whiteSpace:'pre-wrap'}}, String(e)));
   }
 }
 
