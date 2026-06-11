@@ -1474,70 +1474,110 @@ function InspectionView({data,setData}){
             React.createElement('button',{onClick:()=>setShowResponseReview(false),style:{background:'rgba(255,255,255,.15)',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontWeight:700,cursor:'pointer',fontSize:14}},'✕ Close')),
           // Body
           React.createElement('div',{style:{padding:24}},
-            // Crops comparison
+            // Crops comparison — stacked budget / actual / variance rows
             (data.inspCrops||[]).length > 0 && React.createElement('div',{style:{marginBottom:24}},
               React.createElement('div',{style:{fontWeight:700,fontSize:15,color:ISH,marginBottom:10}},'🌱 Crops'),
               React.createElement('div',{style:{overflowX:'auto'}},
                 React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
-                  React.createElement('thead',null,
-                    React.createElement('tr',{style:{background:'#f0fdf4'}},
-                      ['Crop','Budget Ac','Customer Ac','Ac Dev','Budget Yield','Customer Yield','Yield Dev','Budget Price','Customer Price','Price Dev','Total','Deviation Reason'].map((h,i)=>
-                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:11,background:i===1||i===4||i===7?'#374151':i===2||i===5||i===8?'#1B4332':'#f0fdf4',color:i===1||i===2||i===4||i===5||i===7||i===8?'white':'#374151',whiteSpace:'nowrap'}},h)))),
+                  React.createElement('thead',null,React.createElement('tr',null,
+                    ['','Crop','Acres','Yield / Ac','Price / Unit','Total Value','Notes'].map((h,i)=>
+                      React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,fontSize:11,textAlign:i>1?'center':'left',borderBottom:'2px solid #d1fae5',background:'#f0fdf4',color:'#374151',whiteSpace:'nowrap'}},h)))),
                   React.createElement('tbody',null,(data.inspCrops||[]).map((r,i)=>{
                     const cr=customerResponse.crops?.[i]||{};
-                    const acPct=devPct(cr.actualAcres||r.actualAcres, r.budgetedAcres);
-                    const yldPct=devPct(cr.actualYield||r.actualYield, r.budgetedYield);
-                    const pricePct=devPct(cr.valuePerUnit||r.valuePerUnit, r.budgetedPrice);
-                    const anyDev=[acPct,yldPct,pricePct].filter(p=>p!==null&&Math.abs(p)>=5);
-                    const maxDev=anyDev.length?Math.max(...anyDev.map(Math.abs)):0;
-                    const rowBg=maxDev>=20?'#fef2f2':maxDev>=5?'#fffbeb':'white';
-                    const custAcres=cr.actualAcres||r.actualAcres;
-                    const custYield=cr.actualYield||r.actualYield||r.budgetedYield;
-                    const custPrice=cr.valuePerUnit||r.valuePerUnit||r.budgetedPrice;
-                    const tot=(parseFloat(custAcres||0))*(parseFloat(custYield||0))*(parseFloat(custPrice||0));
-                    return React.createElement('tr',{key:i,style:{background:rowBg,borderBottom:'1px solid #f0fdf4'}},
-                      React.createElement('td',{style:{padding:'8px 10px',fontWeight:600}},r.budgetedCrop||'Crop '+(i+1)),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedAcres||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.actualAcres||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(acPct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedYield||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.actualYield||r.actualYield||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(yldPct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedPrice?'$'+r.budgetedPrice:'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},cr.valuePerUnit||r.valuePerUnit?'$'+(cr.valuePerUnit||r.valuePerUnit):'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pricePct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},tot>0?iFmt$(tot):'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:180}},cr.deviationReason||'—'));
-                  }))))),
-            // Livestock comparison
+                    const budAc=parseFloat(r.budgetedAcres||0),actAc=parseFloat(cr.actualAcres||r.actualAcres||0);
+                    const budYld=parseFloat(r.budgetedYield||0),actYld=parseFloat(cr.actualYield||r.actualYield||r.budgetedYield||0);
+                    const budPrc=parseFloat(r.budgetedPrice||0),actPrc=parseFloat(cr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0);
+                    const budTot=budAc*budYld*budPrc,actTot=actAc*actYld*actPrc;
+                    const dollarDev=actTot-budTot,hasDev=Math.abs(dollarDev)>1;
+                    const devColor=dollarDev>=0?'#15803d':'#dc2626';
+                    const pctDiff=budTot>0?Math.abs(dollarDev/budTot*100):0;
+                    const borderColor=pctDiff>=20?'#dc2626':pctDiff>=5?'#f59e0b':'#d1fae5';
+                    return React.createElement(React.Fragment,{key:i},
+                      React.createElement('tr',{style:{background:'#f8f6f2',borderTop:`3px solid ${borderColor}`}},
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,fontSize:11,color:'#6b7280',whiteSpace:'nowrap'}},'BUDGET'),
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,color:'#374151'}},r.budgetedCrop||'Crop '+(i+1)),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center'}},r.budgetedAcres||'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center'}},budYld>0?budYld+' '+(r.budgetedUnit||'bu'):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center'}},budPrc>0?iFmt$(budPrc):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'right',fontWeight:700}},budTot>0?iFmt$(budTot):'—'),
+                        React.createElement('td',null)),
+                      React.createElement('tr',{style:{background:'#f0fdf4'}},
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,fontSize:11,color:'#15803d',whiteSpace:'nowrap'}},'ACTUAL'),
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,color:'#15803d'}},
+                          r.budgetedCrop||'Crop '+(i+1),
+                          cr.condition&&React.createElement('span',{style:{fontSize:11,background:'#d1fae5',color:'#065f46',padding:'1px 6px',borderRadius:10,marginLeft:6,fontWeight:600}},cr.condition)),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center',fontWeight:600,color:actAc!==budAc&&budAc>0?devColor:'#15803d'}},actAc>0?actAc:'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center',fontWeight:600,color:actYld!==budYld&&budYld>0?devColor:'#15803d'}},actYld>0?actYld+' '+(r.budgetedUnit||'bu'):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center',fontWeight:600,color:actPrc!==budPrc&&budPrc>0?devColor:'#15803d'}},actPrc>0?iFmt$(actPrc):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},actTot>0?iFmt$(actTot):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',fontSize:12,color:'#6b7280'}},cr.deviationReason||'')),
+                      hasDev&&React.createElement('tr',{style:{background:dollarDev<0?'#fef2f2':'#ecfdf5',borderBottom:`3px solid ${borderColor}`}},
+                        React.createElement('td',{style:{padding:'5px 10px',fontWeight:700,fontSize:11,color:devColor,whiteSpace:'nowrap'}},'VARIANCE'),
+                        React.createElement('td',{style:{padding:'5px 10px',fontSize:12,color:devColor,fontWeight:600}},r.budgetedCrop||''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'center',fontSize:11,color:devColor}},devPct(actAc,budAc)!==null?(devPct(actAc,budAc)>0?'+':'')+devPct(actAc,budAc).toFixed(1)+'%':''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'center',fontSize:11,color:devColor}},devPct(actYld,budYld)!==null?(devPct(actYld,budYld)>0?'+':'')+devPct(actYld,budYld).toFixed(1)+'%':''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'center',fontSize:11,color:devColor}},devPct(actPrc,budPrc)!==null?(devPct(actPrc,budPrc)>0?'+':'')+devPct(actPrc,budPrc).toFixed(1)+'%':''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'right',fontWeight:800,fontSize:15,color:devColor}},
+                          (dollarDev>0?'+':'')+iFmt$(dollarDev)),
+                        React.createElement('td',null)));
+                  })),
+                  React.createElement('tfoot',null,
+                    React.createElement('tr',{style:{background:'#e5e7eb',borderTop:'2px solid #9ca3af'}},
+                      React.createElement('td',{style:{padding:'7px 10px',fontWeight:700,fontSize:11,color:'#374151'}},'BUDGET'),
+                      React.createElement('td',{colSpan:4,style:{padding:'7px 10px',fontWeight:700,color:'#374151',textAlign:'right'}},'TOTAL'),
+                      React.createElement('td',{style:{padding:'7px 10px',textAlign:'right',fontWeight:800,color:'#374151',fontSize:14}},
+                        iFmt$((data.inspCrops||[]).reduce((s,r)=>s+(parseFloat(r.budgetedAcres||0))*(parseFloat(r.budgetedYield||0))*(parseFloat(r.budgetedPrice||0)),0))),
+                      React.createElement('td',null)),
+                    React.createElement('tr',{style:{background:'#d1fae5',borderTop:'2px solid #6ee7b7'}},
+                      React.createElement('td',{style:{padding:'7px 10px',fontWeight:700,fontSize:11,color:'#15803d'}},'ACTUAL'),
+                      React.createElement('td',{colSpan:4,style:{padding:'7px 10px',fontWeight:700,color:'#15803d',textAlign:'right'}},'TOTAL'),
+                      React.createElement('td',{style:{padding:'7px 10px',textAlign:'right',fontWeight:800,color:'#15803d',fontSize:14}},
+                        iFmt$((data.inspCrops||[]).reduce((s,r,i)=>{const cr=customerResponse.crops?.[i]||{};return s+(parseFloat(cr.actualAcres||r.actualAcres||0))*(parseFloat(cr.actualYield||r.actualYield||r.budgetedYield||0))*(parseFloat(cr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0));},0))),
+                      React.createElement('td',null)))))),
+            // Livestock comparison — stacked layout
             (data.inspLivestock||[]).length > 0 && React.createElement('div',{style:{marginBottom:24}},
               React.createElement('div',{style:{fontWeight:700,fontSize:15,color:ISH,marginBottom:10}},'🐄 Livestock'),
               React.createElement('div',{style:{overflowX:'auto'}},
                 React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
-                  React.createElement('thead',null,
-                    React.createElement('tr',{style:{background:'#f0fdf4'}},
-                      ['Type','Budget Hd','Customer Hd','Hd Dev','Budget Price','Customer Price','Price Dev','Total','Deviation Reason'].map((h,i)=>
-                        React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,textAlign:i>0?'center':'left',borderBottom:'2px solid #d1fae5',fontSize:11,background:i===1||i===4?'#374151':i===2||i===5?'#1B4332':'#f0fdf4',color:i===1||i===2||i===4||i===5?'white':'#374151',whiteSpace:'nowrap'}},h)))),
+                  React.createElement('thead',null,React.createElement('tr',null,
+                    ['','Type','Head','Price / Hd','Total Value','Notes'].map((h,i)=>
+                      React.createElement('th',{key:i,style:{padding:'8px 10px',fontWeight:700,fontSize:11,textAlign:i>1?'center':'left',borderBottom:'2px solid #d1fae5',background:'#f0fdf4',color:'#374151',whiteSpace:'nowrap'}},h)))),
                   React.createElement('tbody',null,(data.inspLivestock||[]).map((r,i)=>{
                     const lr=customerResponse.livestock?.[i]||{};
-                    const hdPct=devPct(lr.actualHead||r.actualHead, r.budgetedHead);
-                    const pricePct=devPct(lr.valuePerUnit||r.valuePerUnit, r.budgetedPrice);
-                    const maxDev=Math.max(...[hdPct,pricePct].filter(p=>p!==null).map(Math.abs),0);
-                    const rowBg=maxDev>=20?'#fef2f2':maxDev>=5?'#fffbeb':'white';
-                    const custHead=lr.actualHead||r.actualHead||r.budgetedHead;
-                    const custPrice=lr.valuePerUnit||r.valuePerUnit||r.budgetedPrice;
-                    const tot=(parseFloat(custHead||0))*(parseFloat(custPrice||0));
-                    return React.createElement('tr',{key:i,style:{background:rowBg,borderBottom:'1px solid #f0fdf4'}},
-                      React.createElement('td',{style:{padding:'8px 10px',fontWeight:600}},r.budgetedType||r.kind||'Livestock '+(i+1)),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedHead||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},lr.actualHead||'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(hdPct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#374151',color:'white',fontWeight:600}},r.budgetedPrice?'$'+r.budgetedPrice:'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center',background:'#1B4332',color:'white',fontWeight:600}},lr.valuePerUnit||r.valuePerUnit?'$'+(lr.valuePerUnit||r.valuePerUnit):'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'center'}},devBadge(pricePct)||React.createElement('span',{style:{color:'#9ca3af',fontSize:11}},'—')),
-                      React.createElement('td',{style:{padding:'8px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},tot>0?iFmt$(tot):'—'),
-                      React.createElement('td',{style:{padding:'8px 10px',fontSize:12,color:'#6b7280',maxWidth:180}},lr.deviationReason||'—'));
+                    const budHd=parseFloat(r.budgetedHead||0),actHd=parseFloat(lr.actualHead||r.actualHead||0);
+                    const budPrc=parseFloat(r.budgetedPrice||0),actPrc=parseFloat(lr.valuePerUnit||r.valuePerUnit||r.budgetedPrice||0);
+                    const budTot=budHd*budPrc,actTot=actHd*actPrc;
+                    const dollarDev=actTot-budTot,hasDev=Math.abs(dollarDev)>1;
+                    const devColor=dollarDev>=0?'#15803d':'#dc2626';
+                    const pctDiff=budTot>0?Math.abs(dollarDev/budTot*100):0;
+                    const borderColor=pctDiff>=20?'#dc2626':pctDiff>=5?'#f59e0b':'#d1fae5';
+                    return React.createElement(React.Fragment,{key:i},
+                      React.createElement('tr',{style:{background:'#f8f6f2',borderTop:`3px solid ${borderColor}`}},
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,fontSize:11,color:'#6b7280'}},'BUDGET'),
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,color:'#374151'}},r.budgetedType||r.kind||'Livestock '+(i+1)),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center'}},r.budgetedHead||'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center'}},budPrc>0?iFmt$(budPrc):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'right',fontWeight:700}},budTot>0?iFmt$(budTot):'—'),
+                        React.createElement('td',null)),
+                      React.createElement('tr',{style:{background:'#f0fdf4'}},
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,fontSize:11,color:'#15803d'}},'ACTUAL'),
+                        React.createElement('td',{style:{padding:'6px 10px',fontWeight:700,color:'#15803d'}},
+                          r.budgetedType||r.kind||'Livestock '+(i+1),
+                          lr.condition&&React.createElement('span',{style:{fontSize:11,background:'#d1fae5',color:'#065f46',padding:'1px 6px',borderRadius:10,marginLeft:6,fontWeight:600}},lr.condition)),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center',fontWeight:600,color:actHd!==budHd&&budHd>0?devColor:'#15803d'}},actHd>0?actHd:'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'center',fontWeight:600,color:actPrc!==budPrc&&budPrc>0?devColor:'#15803d'}},actPrc>0?iFmt$(actPrc):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',textAlign:'right',fontWeight:700,color:'#15803d'}},actTot>0?iFmt$(actTot):'—'),
+                        React.createElement('td',{style:{padding:'6px 10px',fontSize:12,color:'#6b7280'}},lr.deviationReason||'')),
+                      hasDev&&React.createElement('tr',{style:{background:dollarDev<0?'#fef2f2':'#ecfdf5',borderBottom:`3px solid ${borderColor}`}},
+                        React.createElement('td',{style:{padding:'5px 10px',fontWeight:700,fontSize:11,color:devColor}},'VARIANCE'),
+                        React.createElement('td',{style:{padding:'5px 10px',fontSize:12,color:devColor,fontWeight:600}},r.budgetedType||r.kind||''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'center',fontSize:11,color:devColor}},devPct(actHd,budHd)!==null?(devPct(actHd,budHd)>0?'+':'')+devPct(actHd,budHd).toFixed(1)+'%':''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'center',fontSize:11,color:devColor}},devPct(actPrc,budPrc)!==null?(devPct(actPrc,budPrc)>0?'+':'')+devPct(actPrc,budPrc).toFixed(1)+'%':''),
+                        React.createElement('td',{style:{padding:'5px 10px',textAlign:'right',fontWeight:800,fontSize:15,color:devColor}},
+                          (dollarDev>0?'+':'')+iFmt$(dollarDev)),
+                        React.createElement('td',null)));
                   }))))),
+            // Additional comments
             // Additional comments
             customerResponse.addlCmt&&React.createElement('div',{style:{background:'#f8fafc',borderRadius:8,padding:16,marginBottom:20,border:'1px solid #e5e7eb'}},
               React.createElement('div',{style:{fontWeight:700,color:ISH,marginBottom:6}},'📋 Customer Comments'),
