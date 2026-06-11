@@ -3239,7 +3239,9 @@ export default function BalanceSheet() {
                 const sec = colStr(r, c+1);
                 const due = colStr(r, c+2);
                 if (pmt || prin) {
-                  intermediatDebt.push({creditor:v, security:sec, dueDate:due, annualPmt:pmt, principal:prin, rate:''});
+                  // Cap annual pmt at principal — loan may be nearly paid off
+                  const safePmt = (pmt && prin && parseFloat(pmt) > parseFloat(prin)) ? prin : pmt;
+                  intermediatDebt.push({creditor:v, security:sec, dueDate:due, annualPmt:safePmt, principal:prin, rate:''});
                 }
                 break;
               }
@@ -3271,13 +3273,13 @@ export default function BalanceSheet() {
             const r = R(i);
             if (has(r, 'Real Estate Mortgages') && has(r, 'Contracts')) { inReMortSection = true; continue; }
             if (!inReMortSection) continue;
-            if (has(r, 'TOTAL') || has(r, 'Other Liabilities')) break;
+            if (has(r, 'TOTAL') || has(r, 'Other Liabilities') || String(r[0]||'').toUpperCase().trim() === 'REAL ESTATE:') break;
             for (let c = 0; c < r.length; c++) {
               const v = colStr(r, c);
               if (isLoanNum(v) && !isSkipLabel(v)) {
                 const terms = colStr(r, c+1);
                 const prin = firstNum(r.slice(c+1));
-                if (prin) { reMortgages.push({lienHolder:v, terms:terms, principal:prin, rate:''}); }
+                if (prin && parseFloat(prin) > 0) { reMortgages.push({lienHolder:v, terms:terms, principal:prin, rate:''}); }
                 break;
               }
             }
