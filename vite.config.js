@@ -3,14 +3,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig({
   plugins: [
-    react({
-      babel: {
-        babelrc: false,
-        configFile: false,
-        plugins: [],
-        presets: []
-      }
-    }),
+    react(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'icons/*.png'],
@@ -49,5 +42,10 @@ export default defineConfig({
         ]
       }
     })
-  ]
+  ],
+  build: {
+    // Force esbuild minifier — prevents Rollup/terser from generating 'isPost'
+    minify: 'esbuild',
+    target: 'es2017'
+  }
 })
