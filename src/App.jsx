@@ -3492,7 +3492,6 @@ export default function BalanceSheet() {
             ['operating & unsecured notes','L_opNotes'],['accounts due','L_acctsDue'],
             ['intermediate term','L_intermed'],
             ['current portion of real estate','L_reCur'],
-            ['real estate mortgages & contracts','L_reMort'],
             ['other liabilities (itemize)','L_otherLiab'],
             ['total liabilities','L_totalLiab'],
           ];
@@ -3502,6 +3501,10 @@ export default function BalanceSheet() {
             if (a0==='name:') SEC['nameRow']=i;
             for (const [kw,nm] of ASKW) { if (a0.includes(kw)) { if(SEC[nm]===undefined)SEC[nm]=i; } }
             for (const [kw,nm] of LKWW) { if (l5.includes(kw)) { if(SEC[nm]===undefined)SEC[nm]=i; } }
+            // L_reMort: "Real Estate Mortgages" but NOT "Current Portion of..."
+            if (l5.includes('real estate mortgages') && !l5.includes('current portion') && SEC['L_reMort']===undefined) {
+              SEC['L_reMort']=i;
+            }
           }
 
           // Helper: iterate rows in a section
