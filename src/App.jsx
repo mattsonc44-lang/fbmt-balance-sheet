@@ -1463,6 +1463,9 @@ function InspectionView({data,setData}){
           React.createElement('button',{onClick:checkCustomerResponse,disabled:checkingResponse,style:{width:'100%',background:'none',border:'1.5px solid #22c55e',borderRadius:7,padding:'8px 0',fontWeight:700,fontSize:'.88rem',cursor:'pointer',color:'#15803d',marginBottom:8}},checkingResponse?'Checking...':'🔄 Check for Customer Response'),
           customerResponse&&React.createElement('div',{style:{background:'#e8f5ea',border:'1px solid #22c55e',borderRadius:7,padding:10,fontSize:'.85rem',color:'#15803d',fontWeight:700,marginBottom:8}},
             '✅ Customer has responded.')),
+        shareStatus.startsWith('error')&&React.createElement('div',{style:{color:'#c44',fontSize:'.85rem',padding:'12px 0'}},'Error: ',shareStatus.slice(6),React.createElement('br'),React.createElement('span',{style:{fontSize:'.75rem',color:'#888'}},'Make sure you ran inspection_shares.sql in Supabase.')),
+        React.createElement('button',{onClick:()=>setShowShareModal(false),style:{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'7px 20px',cursor:'pointer',fontFamily:'inherit',fontSize:'.85rem',marginTop:4}},'Close'))),
+    // Response Review Modal (moved outside share modal)
       // Response Review Modal
       showResponseReview&&customerResponse&&React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:3000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:'20px 12px'}},
         React.createElement('div',{style:{background:'white',borderRadius:12,width:'100%',maxWidth:1100,boxShadow:'0 20px 60px rgba(0,0,0,.3)',margin:'auto'}},
@@ -1593,8 +1596,6 @@ function InspectionView({data,setData}){
                   inspAddlCmt:cr.addlCmt||d.inspAddlCmt}));
                 setShowResponseReview(false);
               },style:{background:'#1B4332',color:'white',border:'none',borderRadius:6,padding:'9px 20px',fontWeight:700,cursor:'pointer',fontFamily:'inherit'}},'✅ Accept & Load into Form'))))),
-        shareStatus.startsWith('error')&&React.createElement('div',{style:{color:'#c44',fontSize:'.85rem',padding:'12px 0'}},'Error: ',shareStatus.slice(6),React.createElement('br'),React.createElement('span',{style:{fontSize:'.75rem',color:'#888'}},'Make sure you ran inspection_shares.sql in Supabase.')),
-        React.createElement('button',{onClick:()=>setShowShareModal(false),style:{background:'none',border:'1px solid #ddd',borderRadius:6,padding:'7px 20px',cursor:'pointer',fontFamily:'inherit',fontSize:'.85rem',marginTop:4}},'Close'))),
     React.createElement('div',{style:{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}},[['#22c55e','On Budget (< 5%)'],['#f59e0b','Minor Deviation (5–20%)'],['#dc2626','Major Deviation (> 20%)']].map(([c,l])=>React.createElement('div',{key:l,style:{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#6b7280'}},React.createElement('div',{style:{width:12,height:12,borderRadius:2,background:c+'30',border:`2px solid ${c}`}}),l))),
     React.createElement('div',{ref:printRef},
       // Header
