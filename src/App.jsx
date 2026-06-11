@@ -3669,7 +3669,7 @@ export default function BalanceSheet() {
           const reMortgages=[];
           for (const r of secRows('L_reMort','L_otherLiab','L_totalLiab')) {
             const lh=col(r,5);
-            if (!lh||isSkip(lh)||['Lien Holder','Real Estate Mortgages','Principal'].some(s=>lh.includes(s))||lh.toUpperCase().includes('REAL ESTATE:')) break;
+            if (!lh||isSkip(lh)||['Lien Holder','Real Estate Mortgages','Principal'].some(s=>lh.includes(s))||lh.toUpperCase().includes('REAL ESTATE:')) continue;
             const prin=anyNum(r,8,9);
             if (prin&&parseFloat(prin)>0) reMortgages.push({lienHolder:lh,terms:col(r,6),principal:prin,rate:''});
           }
