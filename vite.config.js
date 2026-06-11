@@ -4,13 +4,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig({
   plugins: [
     react({
-      // Use esbuild for JSX transform instead of Babel
-      // Babel's scope analysis was generating an 'isPost' intermediate variable
-      // that caused ReferenceError in customer-facing inspection links
-      jsxRuntime: 'automatic',
       babel: {
         babelrc: false,
         configFile: false,
+        plugins: [],
+        presets: []
       }
     }),
     VitePWA({
