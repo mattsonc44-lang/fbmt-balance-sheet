@@ -3092,6 +3092,118 @@ const storage = {
 };
 
 // ─── Main BalanceSheet Component ──────────────────────────────────────────────
+function BSCompareModal({review, onAccept, onDiscard}) {
+  const {orig={}, draft={}} = review;
+  const nm = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
+  const fmt = v => v===0?'—':'$'+Math.round(v).toLocaleString();
+  const calcBS = d => ({
+    cash:       nm(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+nm(r.amount),0),
+    farmProd:   (d.farmProducts||[]).reduce((s,r)=>s+nm(r.quantity)*nm(r.pricePerUnit)*(nm(r.share||'100')/100),0),
+    supplies:   (d.supplies||[]).reduce((s,r)=>s+nm(r.value),0),
+    otherCur:   (d.otherCurrent||[]).reduce((s,r)=>s+nm(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+nm(r.amount),0),
+    lsMkt:      (d.livestockMarket||[]).reduce((s,r)=>s+nm(r.value),0),
+    breeding:   (d.breedingStock||[]).reduce((s,r)=>s+nm(r.value),0),
+    re:         (d.realEstate||[]).reduce((s,r)=>s+nm(r.acres)*nm(r.valuePerAcre),0),
+    vehicles:   (d.vehicles||[]).reduce((s,r)=>s+nm(r.value),0),
+    machinery:  (d.machinery||[]).reduce((s,r)=>s+nm(r.value),0),
+    otherAssets:(d.otherAssets||[]).reduce((s,r)=>s+nm(r.amount),0),
+    opNotes:    (d.operatingNotes||[]).reduce((s,r)=>s+nm(r.balance),0),
+    acctsDue:   (d.accountsDue||[]).reduce((s,r)=>s+nm(r.amount),0),
+    intermed:   (d.intermediatDebt||[]).reduce((s,r)=>s+nm(r.principal),0),
+    reCur:      (d.reCurrent||[]).reduce((s,r)=>s+nm(r.annualPmt),0),
+    reMort:     (d.reMortgages||[]).reduce((s,r)=>s+nm(r.principal),0),
+    otherLiab:  (d.otherLiabilities||[]).reduce((s,r)=>s+nm(r.amount),0),
+  });
+  const O = calcBS(orig), C = calcBS(draft);
+  const oTA = O.cash+O.farmProd+O.supplies+O.otherCur+O.lsMkt+O.breeding+O.re+O.vehicles+O.machinery+O.otherAssets;
+  const cTA = C.cash+C.farmProd+C.supplies+C.otherCur+C.lsMkt+C.breeding+C.re+C.vehicles+C.machinery+C.otherAssets;
+  const oTL = O.opNotes+O.acctsDue+O.intermed+O.reCur+O.reMort+O.otherLiab;
+  const cTL = C.opNotes+C.acctsDue+C.intermed+C.reCur+C.reMort+C.otherLiab;
+  const rows = [
+    {label:'ASSETS', header:true},
+    {label:'Cash & Bank',         ok:O.cash,        ck:C.cash},
+    {label:'Farm Products',       ok:O.farmProd,     ck:C.farmProd},
+    {label:'Supplies / Prepaid',  ok:O.supplies,     ck:C.supplies},
+    {label:'Other Current',       ok:O.otherCur,     ck:C.otherCur},
+    {label:'Livestock (Market)',  ok:O.lsMkt,        ck:C.lsMkt},
+    {label:'Breeding Stock',      ok:O.breeding,     ck:C.breeding},
+    {label:'Real Estate',         ok:O.re,           ck:C.re},
+    {label:'Vehicles',            ok:O.vehicles,     ck:C.vehicles},
+    {label:'Machinery',           ok:O.machinery,    ck:C.machinery},
+    {label:'Other Assets',        ok:O.otherAssets,  ck:C.otherAssets},
+    {label:'TOTAL ASSETS',        ok:oTA, ck:cTA, total:true},
+    {label:'LIABILITIES', header:true},
+    {label:'Operating Notes',     ok:O.opNotes,      ck:C.opNotes},
+    {label:'Accounts Due',        ok:O.acctsDue,     ck:C.acctsDue},
+    {label:'Intermediate Debt',   ok:O.intermed,     ck:C.intermed},
+    {label:'RE Current Portion',  ok:O.reCur,        ck:C.reCur},
+    {label:'RE Mortgages LT',     ok:O.reMort,       ck:C.reMort},
+    {label:'Other Liabilities',   ok:O.otherLiab,    ck:C.otherLiab},
+    {label:'TOTAL LIABILITIES',   ok:oTL, ck:cTL, total:true},
+    {label:'NET WORTH',           ok:oTA-oTL, ck:cTA-cTL, total:true, nw:true},
+  ];
+  const THS = {padding:'8px 14px',fontWeight:700,fontSize:12,textAlign:'right',background:'#1B4332',color:'white',whiteSpace:'nowrap'};
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:4000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:16}}>
+      <div style={{background:'white',borderRadius:10,width:'100%',maxWidth:820,margin:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+        <div style={{background:'#1a1a1a',borderRadius:'10px 10px 0 0',padding:'12px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{color:'white',fontWeight:700,fontSize:15}}>📋 Review Customer Submission — {review.review?.client_name||''}</div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={onAccept} style={{background:'#15803d',color:'white',border:'none',borderRadius:5,padding:'7px 16px',fontWeight:700,fontSize:12,cursor:'pointer'}}>✅ Accept & Save</button>
+            <button onClick={onDiscard} style={{background:'rgba(255,255,255,.15)',color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}}>✕ Discard</button>
+          </div>
+        </div>
+        <div style={{padding:'20px 24px'}}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:14}}>
+            Submitted {review.review?.submitted_at ? new Date(review.review.submitted_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
+            {' · '}As of {review.review?.as_of_date||''}
+          </div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead>
+                <tr>
+                  <th style={{...THS,textAlign:'left',width:'38%'}}>Section</th>
+                  <th style={THS}>Banker Original</th>
+                  <th style={THS}>Customer Submitted</th>
+                  <th style={THS}>Difference</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i) => {
+                  if (r.header) return (
+                    <tr key={i}><td colSpan={4} style={{padding:'10px 14px 4px',fontWeight:800,fontSize:11,color:'#6b7280',letterSpacing:1,textTransform:'uppercase',borderBottom:'2px solid #d1fae5',background:'#f9fafb'}}>{r.label}</td></tr>
+                  );
+                  const dv = r.ck - r.ok;
+                  const changed = Math.abs(dv) >= 1;
+                  const up = dv > 0;
+                  const pct = r.ok > 0 ? ((dv/r.ok)*100).toFixed(1) : null;
+                  const bg = r.nw ? (r.ck>=0?'#dcfce7':'#fef2f2') : r.total ? '#f0fdf4' : changed ? '#fffbeb' : 'white';
+                  const border = '1px solid #f3f4f6';
+                  return (
+                    <tr key={i}>
+                      <td style={{padding:'7px 14px',fontWeight:r.total?700:400,background:bg,borderBottom:border}}>{r.label}</td>
+                      <td style={{padding:'7px 14px',textAlign:'right',fontWeight:r.total?700:400,background:bg,borderBottom:border}}>{fmt(r.ok)}</td>
+                      <td style={{padding:'7px 14px',textAlign:'right',fontWeight:changed||r.total?700:400,color:changed?(up?'#15803d':'#dc2626'):'inherit',background:bg,borderBottom:border}}>{fmt(r.ck)}</td>
+                      <td style={{padding:'7px 14px',textAlign:'right',background:bg,borderBottom:border}}>
+                        {changed
+                          ? <span style={{color:up?'#15803d':'#dc2626',fontWeight:700}}>{up?'+':''}{fmt(dv)}{pct ? <span style={{fontSize:11,marginLeft:4,opacity:.8}}>({up?'+':''}{pct}%)</span> : ''}</span>
+                          : <span style={{color:'#9ca3af'}}>—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{marginTop:16,padding:'12px 16px',background:'#f0fdf4',borderRadius:8,fontSize:12,color:'#374151',border:'1px solid #d1fae5'}}>
+            <strong>Accept & Save</strong> replaces the banker's values with the customer submission and saves to the client record. <strong>Discard</strong> closes without changes.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
@@ -3134,6 +3246,7 @@ export default function BalanceSheet() {
   const [pendingReviews, setPendingReviews] = useState([]);
   const [reviewSaveDate, setReviewSaveDate] = useState({});
   const [loadingReviews, setLoadingReviews] = useState(false);
+  const [bsCompare, setBsCompare] = useState(null); // {review, orig, draft}
   const [activeTab, setActiveTab] = useState("balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
@@ -4322,6 +4435,19 @@ export default function BalanceSheet() {
     await markReviewed(review.share_id,'budget');
   };
 
+  const acceptCustomerBS = async () => {
+    if (!bsCompare) return;
+    const {review, orig, draft} = bsCompare;
+    const d = {...emptyData(), ...orig, ...draft};
+    d.asOfDate = reviewSaveDate[review.share_id] || review.as_of_date || new Date().toISOString().slice(0,10);
+    d.clientName = orig.clientName || draft.clientName || review.client_name || '';
+    await storage.set(STORAGE_PREFIX + d.clientName, JSON.stringify(d));
+    setData(d);
+    await markReviewed(review.share_id, review.type);
+    setBsCompare(null);
+    await loadSavedList();
+    setScreen('wizard'); setStep(0);
+  };
   const updateCommodityPrice = (id, field, value) => {
     const updated = commodityPrices.map(p => p.id === id ? {...p, [field]: value} : p);
     setCommodityPrices(updated);
@@ -5580,13 +5706,9 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                         onChange={e=>setReviewSaveDate(d=>({...d,[review.share_id]:e.target.value}))}
                         style={{border:"1px solid #d1d5db",borderRadius:6,padding:"5px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}}/>
                       <button
-                        onClick={()=>{
-                          const sd = reviewSaveDate[review.share_id]||review.as_of_date||new Date().toISOString().slice(0,10);
-                          if(review.type==='balance_sheet') loadBSReview(review,sd);
-                          else loadBudgetReview(review,sd);
-                        }}
+                        onClick={()=>setBsCompare({review, orig:review.original_data||{}, draft:review.customer_draft||{}})}
                         style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:".82rem"}}>
-                        Load & Review
+                        📊 Review Changes
                       </button>
                       <button onClick={()=>markReviewed(review.share_id,review.type)}
                         style={{background:"none",border:"1px solid #ddd",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:".78rem",color:"#888"}}>
@@ -5598,6 +5720,8 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               </div>
             </div>
           )}
+
+          {bsCompare && <BSCompareModal review={bsCompare} onAccept={acceptCustomerBS} onDiscard={()=>setBsCompare(null)} />}
 
           <div className="home-section-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <span>
