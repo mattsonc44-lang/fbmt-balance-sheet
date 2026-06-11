@@ -1307,6 +1307,7 @@ function InspectionView({data,setData}){
   const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
   const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(null),[showResponseReview,setShowResponseReview]=React.useState(false);
+  const [savedInspections,setSavedInspections]=React.useState([]),[showInspSaves,setShowInspSaves]=React.useState(false),[savingInsp,setSavingInsp]=React.useState(false);
   const [showShareInsp,setShowShareInsp]=React.useState(false),[shareInspEmail,setShareInspEmail]=React.useState(''),[shareInspSending,setShareInspSending]=React.useState(false),[shareInspSent,setShareInspSent]=React.useState(false),[shareInspErr,setShareInspErr]=React.useState('');
   React.useEffect(()=>{
     if(!data.inspCrops||data.inspCrops.length===0){
@@ -1363,6 +1364,35 @@ function InspectionView({data,setData}){
     }catch(e){setShareStatus('error:'+e.message);}
   };
 
+  const INSP_PREFIX = 'fbmt_insp:';
+  const loadInspections = async () => {
+    try {
+      const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date,data&client_name=like.' + encodeURIComponent('[Insp]%') + '&order=as_of_date.desc';
+      const resp = await fetch(url, {headers: supaHeaders()});
+      if (resp.ok) { const rows = await resp.json(); setSavedInspections(rows); }
+    } catch {}
+  };
+  const saveInspection = async () => {
+    if (!data.clientName) { alert('Please enter a client name before saving.'); return; }
+    setSavingInsp(true);
+    try {
+      const key = `[Insp] ${data.clientName}`;
+      const date = data.inspDate || new Date().toISOString().slice(0,10);
+      const body = { client_name: key, as_of_date: date, data: {...data, _savedAt: new Date().toISOString()}, saved_at: new Date().toISOString(), user_id: currentSession?.user?.id || null };
+      const checkUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.' + encodeURIComponent(key) + '&as_of_date=eq.' + date;
+      const check = await fetch(checkUrl, {headers: supaHeaders()});
+      const existing = await check.json();
+      if (existing.length > 0) {
+        await fetch(window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.' + encodeURIComponent(key) + '&as_of_date=eq.' + date, {method:'PATCH', headers: supaHeaders(), body: JSON.stringify({data: body.data})});
+      } else {
+        await fetch(window.SUPABASE_URL + '/rest/v1/balance_sheets', {method:'POST', headers: supaHeaders(), body: JSON.stringify(body)});
+      }
+      alert('✅ Inspection saved for ' + data.clientName + ' on ' + date);
+      loadInspections();
+    } catch(e) { alert('Save failed: ' + e.message); }
+    setSavingInsp(false);
+  };
+  React.useEffect(() => { loadInspections(); }, []);
   const checkCustomerResponse=async()=>{
     setCheckingResponse(true);
     try{
@@ -1399,6 +1429,18 @@ function InspectionView({data,setData}){
         React.createElement('button',{onClick:generateShare,style:{background:'#2d5a8e',color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}},'🔗 Share with Customer'),
         (data.inspShareId||shareLink)&&React.createElement('button',{onClick:checkCustomerResponse,disabled:checkingResponse,style:{background:checkingResponse?'#e5e7eb':'#e8f5ea',color:checkingResponse?'#9ca3af':'#15803d',border:`1.5px solid ${checkingResponse?'#d1d5db':'#22c55e'}`,borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:checkingResponse?'wait':'pointer'}},checkingResponse?'⏳ Checking...':'📬 Check Response'),
         customerResponse&&React.createElement('button',{onClick:()=>setShowResponseReview(true),style:{background:'#15803d',color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}},'📊 Review Comparison'),
+        React.createElement('button',{onClick:saveInspection,disabled:savingInsp,style:{background:savingInsp?'#e5e7eb':'#2d5a8e',color:savingInsp?'#9ca3af':'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:savingInsp?'wait':'pointer'}},savingInsp?'Saving...':'💾 Save Inspection'),
+        React.createElement('div',{style:{position:'relative'}},
+          React.createElement('button',{onClick:()=>{loadInspections();setShowInspSaves(v=>!v);},style:{background:'#f0f6ff',color:'#2d5a8e',border:'1.5px solid #2d5a8e',borderRadius:5,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer'}},'📂 Load Saved'),
+          showInspSaves&&React.createElement('div',{style:{position:'absolute',top:'100%',right:0,zIndex:500,background:'white',border:'1.5px solid #d1d5db',borderRadius:8,boxShadow:'0 4px 16px rgba(0,0,0,.15)',minWidth:280,maxHeight:320,overflowY:'auto',marginTop:4}},
+            React.createElement('div',{style:{padding:'8px 12px',fontWeight:700,fontSize:12,color:'#374151',borderBottom:'1px solid #f3f4f6',background:'#f9fafb'}},'Saved Inspections'),
+            savedInspections.length===0?React.createElement('div',{style:{padding:'12px',fontSize:12,color:'#9ca3af'}},'No saved inspections yet.'):
+            savedInspections.map((s,i)=>React.createElement('div',{key:i,style:{padding:'8px 12px',cursor:'pointer',borderBottom:'1px solid #f3f4f6',fontSize:13},
+              onMouseEnter:e=>e.currentTarget.style.background='#f0f6ff',
+              onMouseLeave:e=>e.currentTarget.style.background='white',
+              onClick:()=>{setData(s.data);setShowInspSaves(false);}},
+              React.createElement('div',{style:{fontWeight:600,color:'#1a1a1a'}},s.client_name.replace('[Insp] ','')),
+              React.createElement('div',{style:{fontSize:11,color:'#6b7280'}},s.as_of_date))))),
         React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
         React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📤 Save PDF Report'))),
     submitErr&&React.createElement('div',{style:{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}},'⚠️ '+submitErr),
@@ -1817,6 +1859,7 @@ function CustomerInspectForm({ shareId }) {
   const [lenderEmail, setLenderEmail] = React.useState('');
   const [crops, setCrops] = React.useState([]);
   const [livestock, setLivestock] = React.useState([]);
+  const [inventory, setInventory] = React.useState([]);
   const [pastureCond, setPastureCond] = React.useState('');
   const [pastureCmt, setPastureCmt] = React.useState('');
   const [waterCond, setWaterCond] = React.useState('');
@@ -1849,6 +1892,7 @@ function CustomerInspectForm({ shareId }) {
       setInspData(d);
       setCrops((d.inspCrops || []).map(r => ({...r, actualAcres: r.actualAcres||'', condition: r.condition||'', actualYield: r.actualYield||r.budgetedYield||'', location: r.location||'', deviationReason: r.deviationReason||''})));
       setLivestock((d.inspLivestock || []).map(r => ({...r, actualHead: r.actualHead||'', condition: r.condition||'', estWeight: r.estWeight||'', deviationReason: r.deviationReason||''})));
+      setInventory((d.inspInventory || []).map(r => ({...r, quantity: r.quantity||'', condition: r.condition||'', valuePerUnit: r.valuePerUnit||''})));
       setPastureCond(d.inspPastureCond||'');
       setPastureCmt(d.inspPastureCmt||'');
       setWaterCond(d.inspWaterCond||'');
@@ -1876,8 +1920,9 @@ function CustomerInspectForm({ shareId }) {
     setSubmitting(true); setErrMsg('');
     try {
       const response = {
-        crops: crops.map(r => ({ actualAcres: r.actualAcres, condition: r.condition, actualYield: r.actualYield, location: r.location, deviationReason: r.deviationReason })),
-        livestock: livestock.map(r => ({ actualHead: r.actualHead, condition: r.condition, estWeight: r.estWeight, deviationReason: r.deviationReason })),
+        crops: crops.map(r => ({ actualAcres: r.actualAcres, condition: r.condition, actualYield: r.actualYield, location: r.location, deviationReason: r.deviationReason, valuePerUnit: r.valuePerUnit })),
+        livestock: livestock.map(r => ({ actualHead: r.actualHead, condition: r.condition, estWeight: r.estWeight, deviationReason: r.deviationReason, valuePerUnit: r.valuePerUnit })),
+        inventory: inventory.map(r => ({ id: r.id, quantity: r.quantity, condition: r.condition, valuePerUnit: r.valuePerUnit })),
         pastureCond, pastureCmt, waterCond, waterCmt, equipCond, equipCmt, envCmt, addlCmt,
         submittedAt: new Date().toISOString(),
       };
@@ -2004,6 +2049,41 @@ function CustomerInspectForm({ shareId }) {
                 })),
                 React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:6,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'LIVESTOCK TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(lsTot)),React.createElement('td',null)))))),
           // Additional Comments
+          // Inventory on hand
+          inventory.length > 0 && React.createElement(ICard,{title:'🏚  INVENTORY ON HAND'},
+            React.createElement('div',{style:{overflowX:'auto'}},
+              React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
+                React.createElement('thead',null,React.createElement('tr',null,
+                  ['Description','Location','Condition','✏️ Quantity','Unit','✏️ Value/Unit','Total'].map((h,i)=>
+                    React.createElement('th',{key:i,style:{...ITHS,textAlign:i===0?'left':'center',background:i===3||i===5?ITH:'#374151'}},h)))),
+                React.createElement('tbody',null,inventory.map((r,i)=>{
+                  const uI=(id,f,v)=>setInventory(inv=>inv.map(x=>x.id===id?{...x,[f]:v}:x));
+                  const tot=(parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
+                  return React.createElement('tr',{key:r.id||i,style:{background:i%2===0?'white':'#f9fafb',borderBottom:'1px solid #f0fdf4'}},
+                    React.createElement('td',{style:{...ITDS,fontWeight:600}},r.description||'—'),
+                    React.createElement('td',{style:{...ITDS,textAlign:'center'}},r.location||'—'),
+                    React.createElement('td',{style:ITDS},React.createElement(ICP,{value:r.condition,onChange:v=>uI(r.id||i,'condition',v)})),
+                    React.createElement('td',{style:ITDS},iInp(r.quantity,v=>uI(r.id||i,'quantity',v),'0','number')),
+                    React.createElement('td',{style:{...ITDS,textAlign:'center',color:'#6b7280'}},r.unitType||'bu'),
+                    React.createElement('td',{style:ITDS},iInp(r.valuePerUnit,v=>uI(r.id||i,'valuePerUnit',v),r.valuePerUnit||'$0','number')),
+                    React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d'}},tot>0?iFmt$(tot):'—'));
+                }))))),
+          // Pasture, Water, Equipment conditions
+          ...[
+            ['🟤  PASTURE CONDITIONS','inspPastureCond',pastureCond,setPastureCond,'inspPastureCmt',pastureCmt,setPastureCmt,'Pasture conditions…',INSP_CONDITIONS],
+            ['💧  WATER / IRRIGATION SOURCE','inspWaterCond',waterCond,setWaterCond,'inspWaterCmt',waterCmt,setWaterCmt,'Water / irrigation notes…',INSP_WATER_COND],
+            ['🚜  EQUIPMENT','inspEquipCond',equipCond,setEquipCond,'inspEquipCmt',equipCmt,setEquipCmt,'Equipment condition notes…',INSP_CONDITIONS],
+          ].map(([title,,cval,cset,,tval,tset,ph,opts])=>
+            React.createElement(ICard,{key:title,title},
+              React.createElement('div',{style:{display:'grid',gridTemplateColumns:'auto 1fr',gap:'0 24px',alignItems:'start'}},
+                React.createElement('div',{style:{minWidth:260}},
+                  React.createElement('label',{style:ILBL},'Overall Condition'),
+                  React.createElement(ICP,{value:cval,onChange:v=>cset(v),options:opts})),
+                React.createElement('div',null,
+                  React.createElement('label',{style:ILBL},'Comments'),
+                  iTa(tval,v=>tset(v),ph,2))))),
+          React.createElement(ICard,{title:'🌿  ENVIRONMENTAL OBSERVATIONS'},
+            iTa(envCmt,v=>setEnvCmt(v),'Soil erosion, drainage, weed pressure…',4)),
           React.createElement(ICard,{title:'📋  Additional Comments'},
             React.createElement('textarea',{value:addlCmt,onChange:e=>setAddlCmt(e.target.value),placeholder:'Any other information your lender should know...',rows:4,style:{border:'1px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',resize:'vertical',boxSizing:'border-box'}})));
       })(),
