@@ -1306,7 +1306,7 @@ function InspectionView({data,setData}){
   const isPostHarvest = data.inspMode === 'post';
   const fileRef=React.useRef(null),camRef=React.useRef(null),printRef=React.useRef(null);
   const [submitting,setSubmitting]=React.useState(false),[submitted,setSubmitted]=React.useState(false),[submitErr,setSubmitErr]=React.useState('');
-  const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(null),[showResponseReview,setShowResponseReview]=React.useState(false);
+  const [showShareModal,setShowShareModal]=React.useState(false),[shareLink,setShareLink]=React.useState(''),[sharePin,setSharePin]=React.useState(''),[shareStatus,setShareStatus]=React.useState(''),[checkingResponse,setCheckingResponse]=React.useState(false),[customerResponse,setCustomerResponse]=React.useState(data._customerResponse||null),[showResponseReview,setShowResponseReview]=React.useState(false);
   const [savedInspections,setSavedInspections]=React.useState([]),[showInspSaves,setShowInspSaves]=React.useState(false),[savingInsp,setSavingInsp]=React.useState(false);
   const [showShareInsp,setShowShareInsp]=React.useState(false),[shareInspEmail,setShareInspEmail]=React.useState(''),[shareInspSending,setShareInspSending]=React.useState(false),[shareInspSent,setShareInspSent]=React.useState(false),[shareInspErr,setShareInspErr]=React.useState('');
   React.useEffect(()=>{
@@ -1481,8 +1481,9 @@ function InspectionView({data,setData}){
                   inspPastureCond:cr.pastureCond||d.inspPastureCond,inspPastureCmt:cr.pastureCmt||d.inspPastureCmt,
                   inspWaterCond:cr.waterCond||d.inspWaterCond,inspWaterCmt:cr.waterCmt||d.inspWaterCmt,
                   inspEquipCond:cr.equipCond||d.inspEquipCond,inspEquipCmt:cr.equipCmt||d.inspEquipCmt,
-                  inspEnvCmt:cr.envCmt||d.inspEnvCmt,inspAddlCmt:cr.addlCmt||d.inspAddlCmt}));
-                setShowResponseReview(false);
+                  inspEnvCmt:cr.envCmt||d.inspEnvCmt,inspAddlCmt:cr.addlCmt||d.inspAddlCmt,
+                  _customerResponse:cr}));
+                // Don't close — keep comparison visible
               },style:{background:'#374151',color:'white',border:'none',borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'⬆️ Load into Form'),
               React.createElement('button',{onClick:()=>{
                 if(window.html2pdf){
