@@ -3840,7 +3840,7 @@ export default function BalanceSheet() {
 
           // ── MACHINERY: check Machinery Schedule sheet first ───────────────
           const machinery=[];
-          const machSheetName = wb ? wb.SheetNames.find(s=>/machinery/i.test(s)&&s!==wb.SheetNames[0]) : null;
+          const machSheetName = wb ? wb.SheetNames.find(s=>/machinery/i.test(s)&&!/balance sheet/i.test(s)) : null;
           if (machSheetName) {
             const machWs=wb.Sheets[machSheetName];
             const machRows=window.XLSX.utils.sheet_to_json(machWs,{header:1,defval:''});
@@ -3973,7 +3973,8 @@ export default function BalanceSheet() {
         reader.onload = (e) => {
           try {
             const wb = window.XLSX.read(e.target.result, {type:"array"});
-            const ws = wb.Sheets[wb.SheetNames[0]];
+            const bsName = wb.SheetNames.find(s=>/balance sheet/i.test(s)) || wb.SheetNames[0];
+            const ws = wb.Sheets[bsName];
             const rows = window.XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
             processRows(rows, wb);
           } catch(err) {
