@@ -3415,6 +3415,8 @@ export default function BalanceSheet() {
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [importData, setImportData] = useState(null);
+  const [importBudget, setImportBudget] = useState(null);
+  const [importBudgetInclude, setImportBudgetInclude] = useState(true);
   const [importError, setImportError] = useState("");
   const [importDate, setImportDate] = useState(new Date().toISOString().slice(0,10));
   const [importDragging, setImportDragging] = useState(false);
@@ -3532,6 +3534,46 @@ export default function BalanceSheet() {
     setImportError("");
     setImportData(null);
     const ext = file.name.split(".").pop().toLowerCase();
+
+    function parseBudgetSheet(rows) {
+      const R = i => rows[i]||[];
+      const col = (row,i) => { const v=row[i]; return v==null?'':String(v).trim(); };
+      const num = (row,i) => { const v=row[i]; return (typeof v==='number'&&v>0)?String(v):''; };
+      const budgetCrops=[], budgetLivestock=[], budgetMisc=[], budgetExpenses=[];
+      let inCrops=false, inLivestock=false, inMisc=false, inExpenses=false;
+      for (let i=0; i<rows.length; i++) {
+        const r=R(i);
+        const a0=col(r,0).toLowerCase();
+        // Section detection
+        if (a0.includes('crops')||a0==='acres') { inCrops=true; inLivestock=false; inMisc=false; continue; }
+        if (a0.includes('livestock')||a0==='number') { if(a0!=='total livestock'){inLivestock=true;inCrops=false;} continue; }
+        if (a0.includes('miscellaneous')||a0==='total grain') { if(!a0.includes('total')){inMisc=true;inCrops=false;inLivestock=false;} continue; }
+        if (a0.includes('total livestock')||a0.includes('total income')||a0.includes('less :')) { inCrops=false;inLivestock=false;inMisc=false; }
+        // Expenses (right side, col 6)
+        const expDesc=col(r,6), expAmt=num(r,7)||num(r,8);
+        if (expDesc && expAmt && !expDesc.toLowerCase().includes('total') && !expDesc.toLowerCase().includes('interest') && !expDesc.toLowerCase().includes('debt service') && !expDesc.toLowerCase().includes('real-estate') && !expDesc.toLowerCase().includes('chattel') && !expDesc.toLowerCase().includes('ann.')) {
+          budgetExpenses.push({description:expDesc.trim(),amount:expAmt});
+        }
+        // Crop rows: col 0=acres(num), col 1=variety, col 2=yield, col 3=price, col 4=value
+        if (inCrops && typeof r[0]==='number' && r[0]>0 && col(r,1)) {
+          budgetCrops.push({acres:String(r[0]),crop:col(r,1).trim(),yieldPerAcre:num(r,2)||'',unit:'bu',price:num(r,3)||'',share:'100',contracted:false});
+        }
+        // Livestock rows: col 0=number, col 1=type, col 2=lbs, col 3=price
+        if (inLivestock && typeof r[0]==='number' && r[0]>0 && col(r,1)) {
+          budgetLivestock.push({head:String(r[0]),type:col(r,1).trim(),lbs:num(r,2)||'',price:num(r,3)||''});
+        }
+        // Misc income: col 0=description, col 4=value
+        if (inMisc && col(r,0) && num(r,4) && !a0.includes('total')) {
+          budgetMisc.push({description:col(r,0).trim(),amount:num(r,4)});
+        }
+      }
+      return {
+        budgetCrops:     budgetCrops.length ? budgetCrops : emptyData().budgetCrops,
+        budgetLivestock: budgetLivestock.length ? budgetLivestock : emptyData().budgetLivestock,
+        budgetMisc:      budgetMisc.length ? budgetMisc : emptyData().budgetMisc,
+        budgetExpenses:  budgetExpenses.length ? budgetExpenses : emptyData().budgetExpenses,
+      };
+    }
 
     function processRows(rows, wb) {
       try {
@@ -3977,6 +4019,16 @@ export default function BalanceSheet() {
             const ws = wb.Sheets[bsName];
             const rows = window.XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
             processRows(rows, wb);
+            // Parse Annual Budget sheet if present
+            const budgName = wb.SheetNames.find(s=>/annual budget/i.test(s)||(/budget/i.test(s)&&!/monthly/i.test(s)));
+            if (budgName) {
+              const bws = wb.Sheets[budgName];
+              const brows = window.XLSX.utils.sheet_to_json(bws, {header:1, defval:""});
+              setImportBudget(parseBudgetSheet(brows));
+              setImportBudgetInclude(true);
+            } else {
+              setImportBudget(null);
+            }
           } catch(err) {
             setImportError("Excel parse error: " + err.message);
           }
@@ -3998,11 +4050,15 @@ export default function BalanceSheet() {
   function applyImport() {
     if (!importData) return;
     const d = { ...importData, asOfDate: importDate };
+    if (importBudget && importBudgetInclude) {
+      Object.assign(d, importBudget);
+    }
     setData(d);
     setStep(0);
     setScreen("wizard");
     setShowImport(false);
     setImportData(null);
+    setImportBudget(null);
   }
   const deleteSheet = async (key, e) => {
     e.stopPropagation();
@@ -4047,7 +4103,11 @@ export default function BalanceSheet() {
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
   // Budget calcs
-  const budgetCropTotal = data.budgetCrops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||"100")/100),0);
+  const budgetCropTotal = data.budgetCrops.reduce((s,r)=>{
+    const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+    const effectivePrice = (cp ? cp.price : null) || r.price;
+    return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
+  },0);
   const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
@@ -5678,6 +5738,26 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                         <span>RE Mortgages: <strong>{importData.reMortgages.filter(r=>r.lienHolder).length} mortgages</strong></span>
                       </div>
                     </div>
+
+                    {importBudget && (
+                      <div style={{background:"#f0fdf4",border:"1.5px solid #22c55e",borderRadius:8,padding:"14px 16px",marginBottom:16}}>
+                        <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                          <input type="checkbox" checked={importBudgetInclude}
+                            onChange={e=>setImportBudgetInclude(e.target.checked)}
+                            style={{marginTop:3,width:16,height:16,accentColor:"#15803d",flexShrink:0}} />
+                          <div>
+                            <div style={{fontWeight:700,fontSize:".9rem",color:"#15803d"}}>
+                              📊 Also import Annual Budget
+                            </div>
+                            <div style={{fontSize:".78rem",color:"#374151",marginTop:3}}>
+                              {importBudget.budgetCrops.filter(r=>r.crop).length} crop rows &nbsp;·&nbsp;
+                              {importBudget.budgetExpenses.filter(r=>r.description).length} expense lines
+                              {importBudget.budgetMisc.filter(r=>r.description).length>0 && ` · ${importBudget.budgetMisc.filter(r=>r.description).length} misc income items`}
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    )}
 
                     <div style={{marginBottom:20}}>
                       <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
