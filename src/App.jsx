@@ -4735,7 +4735,16 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
 
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
-  const next = () => setStep(s => Math.min(s+1, STEPS.length-1));
+  const next = () => {
+    const cur = STEPS[step];
+    if (cur === 'vehicles') {
+      if (!window.confirm("Are you sure you didn't buy or sell any cars, pickups, trucks, or trailers since your last update?")) return;
+    }
+    if (cur === 'machinery') {
+      if (!window.confirm("Are you sure you didn't buy or sell any tractors, augers, grain carts, sprayers, or other equipment since your last update?")) return;
+    }
+    setStep(s => Math.min(s+1, STEPS.length-1));
+  };
   const prev = () => setStep(s => Math.max(s-1, 0));
   const nextBtnRef = useRef(null);
   const cardContentRef = useRef(null);
