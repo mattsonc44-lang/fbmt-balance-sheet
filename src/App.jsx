@@ -3129,6 +3129,93 @@ const storage = {
 };
 
 // ─── Main BalanceSheet Component ──────────────────────────────────────────────
+function BSSplitter({data, setData, splitSelected, setSplitSelected, splitName, setSplitName, onClose, storage, makeKey, emptyData, loadSavedList, numVal}) {
+  const toggle = (key, id) => setSplitSelected(s => ({...s, [key+':'+id]: !s[key+':'+id]}));
+  const sel = (key, id) => !!splitSelected[key+':'+id];
+  const fmtAmt = v => numVal(v) ? '$'+Number(numVal(v)).toLocaleString() : '';
+  const sections = [
+    {label:'🌱 Farm Products',   key:'farmProducts',   items:(data.farmProducts||[]).map((r,i)=>({id:i,label:`${r.kind||'Farm Product '+(i+1)} — qty ${r.quantity||'?'} @ $${r.pricePerUnit||'?'}`}))},
+    {label:'🐄 Livestock (Market)', key:'livestockMarket', items:(data.livestockMarket||[]).map((r,i)=>({id:i,label:`${r.number||'?'} ${r.kind||'Livestock '+(i+1)}`}))},
+    {label:'🐂 Breeding Stock',  key:'breedingStock',  items:(data.breedingStock||[]).map((r,i)=>({id:i,label:`${r.number||'?'} ${r.kind||'Breeding '+(i+1)}`}))},
+    {label:'🏡 Real Estate',     key:'realEstate',     items:(data.realEstate||[]).map((r,i)=>({id:i,label:`${r.acres||'?'} ac ${r.description||'RE '+(i+1)}`}))},
+    {label:'🚗 Vehicles',        key:'vehicles',       items:(data.vehicles||[]).map((r,i)=>({id:i,label:`${r.year||''} ${r.make||'Vehicle '+(i+1)} — ${fmtAmt(r.value)}`}))},
+    {label:'⚙️ Machinery',      key:'machinery',      items:(data.machinery||[]).map((r,i)=>({id:i,label:`${r.year||''} ${r.make||'Equipment '+(i+1)} — ${fmtAmt(r.value)}`}))},
+    {label:'💼 Other Assets',    key:'otherAssets',    items:(data.otherAssets||[]).map((r,i)=>({id:i,label:`${r.description||'Other '+(i+1)} — ${fmtAmt(r.amount)}`}))},
+    {label:'🏦 Operating Notes', key:'operatingNotes', items:(data.operatingNotes||[]).map((r,i)=>({id:i,label:`${r.creditor||'Note '+(i+1)} — ${fmtAmt(r.balance)}`}))},
+    {label:'📋 Intermediate Debt',key:'intermediatDebt',items:(data.intermediatDebt||[]).map((r,i)=>({id:i,label:`${r.creditor||'Loan '+(i+1)} ${r.security?'('+r.security+')':''} — ${fmtAmt(r.principal)}`}))},
+    {label:'🏠 RE Mortgages',    key:'reMortgages',    items:(data.reMortgages||[]).map((r,i)=>({id:i,label:`${r.lienHolder||'Mortgage '+(i+1)} ${r.terms?'('+r.terms+')':''} — ${fmtAmt(r.principal)}`}))},
+  ].filter(s=>s.items.length>0);
+
+  const selectedCount = Object.values(splitSelected).filter(Boolean).length;
+
+  const executeSplit = async () => {
+    if (!splitName.trim()) { alert('Please enter a name for the new balance sheet.'); return; }
+    if (selectedCount === 0) { alert('Please select at least one item to move.'); return; }
+    const newBS = {...emptyData(), clientName: splitName.trim(), asOfDate: data.asOfDate};
+    const removeFrom = {};
+    sections.forEach(({key, items}) => {
+      const ids = items.filter(it=>sel(key,it.id)).map(it=>it.id);
+      if (ids.length > 0) {
+        newBS[key] = ids.map(id=>(data[key]||[])[id]).filter(Boolean);
+        removeFrom[key] = (data[key]||[]).filter((_,i)=>!ids.includes(i));
+      }
+    });
+    try {
+      await storage.set(makeKey(newBS.clientName, newBS.asOfDate), JSON.stringify(newBS));
+      setData(d=>({...d,...removeFrom}));
+      await loadSavedList();
+      onClose();
+      alert(`✅ "${splitName.trim()}" created with ${selectedCount} items removed from this balance sheet.`);
+    } catch(e) { alert('Save failed: '+e.message); }
+  };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:5000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:16}}>
+      <div style={{background:'white',borderRadius:10,width:'100%',maxWidth:720,margin:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+        <div style={{background:'#1a1a1a',borderRadius:'10px 10px 0 0',padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{color:'white',fontWeight:700,fontSize:15}}>✂️ Split Balance Sheet — {data.clientName}</div>
+          <button onClick={onClose} style={{background:'rgba(255,255,255,.15)',color:'white',border:'none',borderRadius:5,padding:'6px 12px',cursor:'pointer',fontSize:13}}>✕ Close</button>
+        </div>
+        <div style={{padding:'20px 24px'}}>
+          <div style={{background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'12px 16px',fontSize:12.5,color:'#1e40af',marginBottom:16}}>
+            Check the items to move to the new balance sheet. The original keeps everything unchecked.
+          </div>
+          <div style={{marginBottom:16}}>
+            <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:6}}>NEW BALANCE SHEET NAME</label>
+            <input value={splitName} onChange={e=>setSplitName(e.target.value)}
+              placeholder={`e.g. ${data.clientName||'Client'} — Lincoln Ranch LLC`}
+              style={{width:'100%',border:'1.5px solid #d1d5db',borderRadius:6,padding:'8px 12px',fontSize:13,fontFamily:'inherit',outline:'none'}} />
+          </div>
+          <div style={{maxHeight:420,overflowY:'auto',border:'1px solid #e5e7eb',borderRadius:8}}>
+            {sections.map(({label,key,items})=>(
+              <div key={key}>
+                <div style={{background:'#f9fafb',padding:'8px 14px',fontWeight:700,fontSize:12,color:'#374151',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0}}>
+                  <span>{label}</span>
+                  <button onClick={()=>items.forEach(it=>{ if(!sel(key,it.id)) toggle(key,it.id); })}
+                    style={{fontSize:10,color:'#6b7280',background:'none',border:'1px solid #d1d5db',borderRadius:4,padding:'1px 7px',cursor:'pointer'}}>All</button>
+                </div>
+                {items.map(it=>(
+                  <label key={it.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 14px',cursor:'pointer',borderBottom:'1px solid #f3f4f6',background:sel(key,it.id)?'#fef3c7':'white'}}>
+                    <input type="checkbox" checked={sel(key,it.id)} onChange={()=>toggle(key,it.id)} style={{width:15,height:15,accentColor:'#6B0E1E',flexShrink:0}} />
+                    <span style={{fontSize:12.5,color:sel(key,it.id)?'#92400e':'#374151'}}>{it.label}</span>
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div style={{marginTop:16,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontSize:12,color:'#6b7280'}}>{selectedCount} item{selectedCount!==1?'s':''} selected</span>
+            <button onClick={executeSplit}
+              style={{background:selectedCount>0&&splitName.trim()?'#6B0E1E':'#d1d5db',color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,fontSize:13,cursor:selectedCount>0&&splitName.trim()?'pointer':'not-allowed'}}>
+              ✂️ Create Split Balance Sheet
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BSCompareModal({review, onAccept, onDiscard}) {
   const {orig={}, draft={}} = review;
   const nm = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
@@ -3449,6 +3536,10 @@ export default function BalanceSheet() {
 
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [showLenderPkg, setShowLenderPkg] = useState(false);
+  const [showSplitter, setShowSplitter] = useState(false);
+  const [splitSelected, setSplitSelected] = useState({});
+  const [splitName, setSplitName] = useState('');
   const [importData, setImportData] = useState(null);
   const [importBudget, setImportBudget] = useState(null);
   const [importBudgetInclude, setImportBudgetInclude] = useState(true);
@@ -4595,6 +4686,211 @@ export default function BalanceSheet() {
       }
       setCorpPersonalDebt(corpDebts);
     } catch { setCorpPersonalDebt([]); }
+  };
+
+  const generateLenderPackage = () => {
+    const m = numVal;
+    const pFmt = v => v && m(v) ? "$"+Number(m(v)).toLocaleString("en-US",{maximumFractionDigits:0}) : "—";
+    const n2 = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
+
+    // ── Section totals ─────────────────────────────────────────────────
+    const cash     = n2(data.cashGlacier)+(data.cashOther||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const farmProd = (data.farmProducts||[]).reduce((s,r)=>s+n2(r.quantity)*n2(r.pricePerUnit)*(n2(r.share||'100')/100),0);
+    const supplies = (data.supplies||[]).reduce((s,r)=>s+n2(r.value),0);
+    const otherCur = (data.otherCurrent||[]).reduce((s,r)=>s+n2(r.amount),0)+(data.federalPayments||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const lsMkt    = (data.livestockMarket||[]).reduce((s,r)=>s+n2(r.value),0);
+    const breeding = (data.breedingStock||[]).reduce((s,r)=>s+n2(r.value),0);
+    const re       = (data.realEstate||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.valuePerAcre),0);
+    const vehicles = (data.vehicles||[]).reduce((s,r)=>s+n2(r.value),0);
+    const machinery= (data.machinery||[]).reduce((s,r)=>s+n2(r.value),0);
+    const otherAssets=(data.otherAssets||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const totalCurAssets = cash+farmProd+supplies+otherCur+lsMkt;
+    const totalLTAssets  = breeding+re+vehicles+machinery+otherAssets;
+    const totalAssets    = totalCurAssets+totalLTAssets;
+    const opNotes  = (data.operatingNotes||[]).reduce((s,r)=>s+n2(r.balance),0);
+    const acctsDue = (data.accountsDue||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const intermed = (data.intermediatDebt||[]).reduce((s,r)=>s+n2(r.principal),0);
+    const reCur    = (data.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
+    const reMort   = (data.reMortgages||[]).reduce((s,r)=>s+n2(r.principal),0);
+    const otherLiab= (data.otherLiabilities||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const totalLiab= opNotes+acctsDue+intermed+reCur+reMort+otherLiab;
+    const netWorth = totalAssets-totalLiab;
+
+    // ── Budget totals ──────────────────────────────────────────────────
+    const bCrop  = (data.budgetCrops||[]).reduce((s,r)=>{
+      const cp = commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
+      return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
+    },0);
+    const bLS    = (data.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
+    const bMisc  = (data.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const bInc   = bCrop+bLS+bMisc;
+    const bExp   = (data.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
+    const bDebt  = (data.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
+                 + (data.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
+                 + (data.budgetProposedDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
+    const bNet   = bInc-bExp-bDebt;
+    const dscr   = bDebt > 0 ? ((bNet+bDebt)/bDebt).toFixed(2) : '—';
+
+    const row = (l,v,bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1pt solid #000;':''}"><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
+    const brow = (l,v) => `<tr><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
+
+    const W = window.open("","_blank","width=900,height=1100");
+    if (!W) { alert("Please allow popups to generate the lender package."); return; }
+    W.document.write(`<!DOCTYPE html><html><head><title>Lender Package - ${data.clientName||''}</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:Arial,sans-serif;font-size:8.5pt;color:#000;margin:0;padding:0}
+  .page{page-break-after:always;padding:.5in .55in;min-height:10.5in;display:flex;flex-direction:column}
+  .cover{justify-content:center;align-items:center;text-align:center}
+  h2{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6B0E1E;margin:18pt 0 6pt;border-bottom:1.5pt solid #6B0E1E;padding-bottom:3pt}
+  table{width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:8pt}
+  td{padding:2.5pt 4pt;border-bottom:.5pt dotted #ccc}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18pt}
+  .metric{background:#f5f5f5;border-left:3pt solid #6B0E1E;padding:8pt 10pt;margin-bottom:8pt;display:flex;justify-content:space-between;align-items:center}
+  .metric .label{font-size:8pt;color:#555}
+  .metric .value{font-size:12pt;font-weight:700;color:#1a1a1a}
+  .metric.pos .value{color:#15803d} .metric.neg .value{color:#dc2626}
+  .sig{border-top:1pt solid #000;width:280pt;margin-top:4pt;padding-top:4pt;font-size:7.5pt;color:#555;display:inline-block}
+  @media print{.no-print{display:none!important}}
+</style>
+</head><body>
+
+<!-- COVER PAGE -->
+<div class="page cover">
+  <img src="${FBMT_LOGO}" style="height:80px;margin-bottom:36pt"/>
+  <div style="font-size:20pt;font-weight:900;color:#6B0E1E">Agricultural Loan Package</div>
+  <div style="font-size:14pt;font-weight:700;margin-top:12pt">${data.clientName||''}</div>
+  <div style="font-size:10pt;color:#555;margin-top:6pt">As of ${data.asOfDate||''}</div>
+  <div style="margin-top:48pt;font-size:8.5pt;color:#777">
+    Prepared by First Bank of Montana — Division of Glacier Bank<br/>
+    ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}
+  </div>
+  <div style="margin-top:32pt;border:1pt solid #ccc;padding:12pt 24pt;font-size:8pt;color:#555">
+    Contents: Balance Sheet Summary &nbsp;·&nbsp; Budget Summary &nbsp;·&nbsp; Key Metrics
+  </div>
+</div>
+
+<!-- BALANCE SHEET SUMMARY PAGE -->
+<div class="page">
+  <img src="${FBMT_LOGO}" style="height:48px;margin-bottom:8pt"/>
+  <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
+    Balance Sheet — ${data.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${data.asOfDate||''}</span>
+  </div>
+  <div class="two-col">
+    <div>
+      <h2>Assets</h2>
+      <table>
+        ${row('Cash &amp; Bank Accounts',cash)}
+        ${row('Farm Products on Hand',farmProd)}
+        ${row('Supplies &amp; Prepaid',supplies)}
+        ${row('Other Current Assets',otherCur)}
+        ${row('Livestock (Market)',lsMkt)}
+        ${row('Total Current Assets',totalCurAssets,true)}
+        ${row('Breeding Stock',breeding)}
+        ${row('Real Estate',re)}
+        ${row('Vehicles',vehicles)}
+        ${row('Machinery &amp; Equipment',machinery)}
+        ${row('Other Assets',otherAssets)}
+        ${row('Total Long-Term Assets',totalLTAssets,true)}
+        ${row('TOTAL ASSETS',totalAssets,true)}
+      </table>
+      ${(data.realEstate||[]).filter(r=>r.acres&&r.description).map(r=>
+        `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.acres} ac ${r.description} @ ${pFmt(r.valuePerAcre)}/ac</div>`
+      ).join('')}
+    </div>
+    <div>
+      <h2>Liabilities</h2>
+      <table>
+        ${row('Operating Notes',opNotes)}
+        ${row('Accounts Due',acctsDue)}
+        ${row('Total Current Liabilities',opNotes+acctsDue,true)}
+        ${row('Intermediate Term Debt',intermed)}
+        ${row('RE Current Portion',reCur)}
+        ${row('RE Mortgages LT',reMort)}
+        ${row('Other Liabilities',otherLiab)}
+        ${row('Total LT Liabilities',intermed+reCur+reMort+otherLiab,true)}
+        ${row('TOTAL LIABILITIES',totalLiab,true)}
+      </table>
+      <h2>Net Worth</h2>
+      <table>
+        <tr style="font-weight:700;font-size:11pt;background:#f0f0f0">
+          <td>NET WORTH</td>
+          <td style="text-align:right;color:${netWorth>=0?'#15803d':'#dc2626'}">${pFmt(netWorth)}</td>
+        </tr>
+      </table>
+      ${(data.intermediatDebt||[]).filter(r=>r.creditor).map(r=>
+        `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.creditor} ${r.security?'('+r.security+')':''} — ${pFmt(r.principal)} @ ${r.annualPmt?'$'+Number(numVal(r.annualPmt)).toLocaleString()+'/yr':''}</div>`
+      ).join('')}
+      ${(data.reMortgages||[]).filter(r=>r.lienHolder).map(r=>
+        `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.lienHolder} ${r.terms?'('+r.terms+')':''} — ${pFmt(r.principal)}</div>`
+      ).join('')}
+    </div>
+  </div>
+</div>
+
+<!-- BUDGET & KEY METRICS PAGE -->
+<div class="page">
+  <img src="${FBMT_LOGO}" style="height:48px;margin-bottom:8pt"/>
+  <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
+    Budget Summary — ${data.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">Production Year ${data.asOfDate?data.asOfDate.slice(0,4):new Date().getFullYear()}</span>
+  </div>
+  <div class="two-col">
+    <div>
+      <h2>Income</h2>
+      <table>
+        ${(data.budgetCrops||[]).filter(r=>r.crop).map(r=>{
+          const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
+          const pr=n2(cp?cp.price:null)||n2(r.price);
+          const tot=n2(r.acres)*n2(r.yieldPerAcre)*pr*(n2(r.share||'100')/100);
+          return brow(`${r.acres||'?'} ac ${r.crop} @ ${r.yieldPerAcre||'?'}/ac × $${pr}`, tot);
+        }).join('')}
+        ${(data.budgetLivestock||[]).filter(r=>r.type).map(r=>brow(`${r.head||'?'} ${r.type}`,n2(r.head)*n2(r.lbs)*n2(r.price))).join('')}
+        ${(data.budgetMisc||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
+        <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Income</td><td style="text-align:right">${pFmt(bInc)}</td></tr>
+      </table>
+      <h2>Operating Expenses</h2>
+      <table>
+        ${(data.budgetExpenses||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
+        <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Operating</td><td style="text-align:right">${pFmt(bExp)}</td></tr>
+      </table>
+    </div>
+    <div>
+      <h2>Debt Service</h2>
+      <table>
+        ${(data.intermediatDebt||[]).filter(r=>r.creditor&&!r.corpPaid&&n2(r.annualPmt)).map(r=>brow(r.creditor+(r.security?' ('+r.security+')':''),n2(r.annualPmt))).join('')}
+        ${(data.reCurrent||[]).filter(r=>r.creditor&&!r.corpPaid&&n2(r.annualPmt)).map(r=>brow(r.creditor,n2(r.annualPmt))).join('')}
+        ${(data.budgetProposedDebt||[]).filter(r=>r.description&&n2(r.annualPmt)).map(r=>`<tr style="color:#6B0E1E"><td>${r.description} <em>(proposed)</em></td><td style="text-align:right">${pFmt(n2(r.annualPmt))}</td></tr>`).join('')}
+        <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Debt Service</td><td style="text-align:right">${pFmt(bDebt)}</td></tr>
+      </table>
+      <h2>Key Metrics</h2>
+      <div class="metric ${bNet>=0?'pos':'neg'}">
+        <div><div class="label">Net Farm Income</div></div>
+        <div class="value">${pFmt(bNet)}</div>
+      </div>
+      <div class="metric ${parseFloat(dscr)>=1.25?'pos':parseFloat(dscr)>=1?'':'neg'}">
+        <div><div class="label">Debt Service Coverage Ratio</div><div style="font-size:7pt;color:#999">Target: ≥ 1.25</div></div>
+        <div class="value">${dscr}x</div>
+      </div>
+      <div class="metric ${(totalCurAssets-(opNotes+acctsDue))>=0?'pos':'neg'}">
+        <div><div class="label">Working Capital</div></div>
+        <div class="value">${pFmt(totalCurAssets-(opNotes+acctsDue))}</div>
+      </div>
+      <div class="metric ${netWorth>=0?'pos':'neg'}">
+        <div><div class="label">Net Worth</div></div>
+        <div class="value">${pFmt(netWorth)}</div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:auto;padding-top:24pt;display:flex;gap:40pt">
+    <div><div class="sig">Borrower Signature &amp; Date</div></div>
+    <div><div class="sig">Loan Officer &amp; Date</div></div>
+    <div><div class="sig">Branch Manager &amp; Date</div></div>
+  </div>
+</div>
+
+<button class="no-print" onclick="window.print()" style="position:fixed;top:12px;right:12px;background:#6B0E1E;color:white;border:none;padding:10px 22px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">🖨 Print / Save PDF</button>
+</body></html>`);
+    W.document.close();
   };
 
   const handlePrint = () => {
@@ -6103,6 +6399,15 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   return (
     <div className="app">
 
+      {/* ── Balance Sheet Splitter Modal ── */}
+      {showSplitter && <BSSplitter
+        data={data} setData={setData}
+        splitSelected={splitSelected} setSplitSelected={setSplitSelected}
+        splitName={splitName} setSplitName={setSplitName}
+        onClose={()=>{setShowSplitter(false);setSplitSelected({});setSplitName('');}}
+        storage={storage} makeKey={makeKey} emptyData={emptyData} loadSavedList={loadSavedList} numVal={numVal}
+      />}
+
       {/* ── Save Folder Picker Modal ── */}
       {showSaveFolderPicker && (
         <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -6315,7 +6620,11 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
                   <span className="step-info">{step+1} / {STEPS.length}</span>
                   {step < STEPS.length - 1
                     ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next}>Next</button>
-                    : <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint}>Print Balance Sheet</button>
+                    : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                        <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}}>✂️ Split</button>
+                        <button className="btn btn-secondary" onClick={generateLenderPackage} style={{background:'#2d5a8e',color:'white'}}>📦 Lender Package</button>
+                        <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint}>🖨 Print Balance Sheet</button>
+                      </div>
                   }
                 </div>
               </div>
