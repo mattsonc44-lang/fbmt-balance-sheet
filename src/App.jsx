@@ -929,7 +929,7 @@ function BudgetView({
             <div className="debt-category-label" style={{color:"#6B0E1E",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span>📋 Proposed New Debt</span>
               <button className="add-btn" style={{fontSize:".72rem",padding:"2px 10px",marginBottom:0}}
-                onClick={()=>setData(d=>({...d,budgetProposedDebt:[...(d.budgetProposedDebt||[]),{description:"",annualPmt:""}]}))}>
+                onClick={()=>addRow("budgetProposedDebt",{description:"",annualPmt:""})}>
                 + Add
               </button>
             </div>
@@ -941,17 +941,16 @@ function BudgetView({
             {(data.budgetProposedDebt||[]).map((r,i)=>(
               <div key={i} className="debt-row" style={{borderLeftColor:"#6B0E1E",display:"flex",alignItems:"center",gap:8,padding:"6px 8px"}}>
                 <input type="text" value={r.description} placeholder="Creditor / description…"
-                  onChange={e=>setData(d=>({...d,budgetProposedDebt:d.budgetProposedDebt.map((x,j)=>j===i?{...x,description:e.target.value}:x)}))}
+                  onChange={e=>setArr("budgetProposedDebt",i,"description",e.target.value)}
                   style={{flex:1,border:"1px solid #e0c5c7",borderRadius:5,padding:"4px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}} />
                 <div style={{display:"flex",alignItems:"center",background:"white",border:"1px solid #e0c5c7",borderRadius:5,overflow:"hidden"}}>
                   <span style={{padding:"4px 6px",fontSize:".82rem",color:"#888",borderRight:"1px solid #e0c5c7"}}>$</span>
                   <input type="text" value={r.annualPmt} placeholder="0"
-                    onChange={e=>setData(d=>({...d,budgetProposedDebt:d.budgetProposedDebt.map((x,j)=>j===i?{...x,annualPmt:e.target.value.replace(/[^0-9.]/g,"")}:x)}))}
+                    onChange={e=>setArr("budgetProposedDebt",i,"annualPmt",e.target.value.replace(/[^0-9.]/g,""))}
                     style={{width:100,border:"none",padding:"4px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}} />
                 </div>
                 <span style={{fontSize:".7rem",color:"#aaa",whiteSpace:"nowrap"}}>/yr</span>
-                <button className="remove-btn"
-                  onClick={()=>setData(d=>({...d,budgetProposedDebt:d.budgetProposedDebt.filter((_,j)=>j!==i)}))}>×</button>
+                <button className="remove-btn" onClick={()=>removeRow("budgetProposedDebt",i)}>×</button>
               </div>
             ))}
             {budgetProposedDebtTotal > 0 && (
