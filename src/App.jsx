@@ -517,6 +517,7 @@ function emptyData() {
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
+    budgetProposedDebt:[],
     inspDate: new Date().toISOString().split('T')[0],
     inspInspector:"", inspLoans:["","",""],
     inspCrops:[], inspLivestock:[], inspInventory:[],
@@ -924,6 +925,41 @@ function BudgetView({
               </div>
             </div>
           )}
+          <div style={{marginTop:10}}>
+            <div className="debt-category-label" style={{color:"#6B0E1E",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span>📋 Proposed New Debt</span>
+              <button className="add-btn" style={{fontSize:".72rem",padding:"2px 10px",marginBottom:0}}
+                onClick={()=>setData(d=>({...d,budgetProposedDebt:[...(d.budgetProposedDebt||[]),{description:"",annualPmt:""}]}))}>
+                + Add
+              </button>
+            </div>
+            {(data.budgetProposedDebt||[]).length===0 && (
+              <div style={{fontSize:".78rem",color:"#aaa",padding:"6px 8px",fontStyle:"italic"}}>
+                No proposed debt — click + Add to include a new loan payment
+              </div>
+            )}
+            {(data.budgetProposedDebt||[]).map((r,i)=>(
+              <div key={i} className="debt-row" style={{borderLeftColor:"#6B0E1E",display:"flex",alignItems:"center",gap:8,padding:"6px 8px"}}>
+                <input type="text" value={r.description} placeholder="Creditor / description…"
+                  onChange={e=>setData(d=>({...d,budgetProposedDebt:d.budgetProposedDebt.map((x,j)=>j===i?{...x,description:e.target.value}:x)}))}
+                  style={{flex:1,border:"1px solid #e0c5c7",borderRadius:5,padding:"4px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}} />
+                <div style={{display:"flex",alignItems:"center",background:"white",border:"1px solid #e0c5c7",borderRadius:5,overflow:"hidden"}}>
+                  <span style={{padding:"4px 6px",fontSize:".82rem",color:"#888",borderRight:"1px solid #e0c5c7"}}>$</span>
+                  <input type="text" value={r.annualPmt} placeholder="0"
+                    onChange={e=>setData(d=>({...d,budgetProposedDebt:d.budgetProposedDebt.map((x,j)=>j===i?{...x,annualPmt:e.target.value.replace(/[^0-9.]/g,"")}:x)}))}
+                    style={{width:100,border:"none",padding:"4px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}} />
+                </div>
+                <span style={{fontSize:".7rem",color:"#aaa",whiteSpace:"nowrap"}}>/yr</span>
+                <button className="remove-btn"
+                  onClick={()=>setData(d=>({...d,budgetProposedDebt:d.budgetProposedDebt.filter((_,j)=>j!==i)}))}>×</button>
+              </div>
+            ))}
+            {budgetProposedDebtTotal > 0 && (
+              <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".8rem",color:"#6B0E1E",background:"#fdf2f3",borderRadius:5,marginTop:4,fontWeight:700}}>
+                <span>Proposed Debt Subtotal</span><span>{fmt(budgetProposedDebtTotal)}</span>
+              </div>
+            )}
+          </div>
           <div className="budget-subtotal">
             <span>Total Debt Service{budgetCorpDebtTotal > 0 ? " (personal + corp)" : ""}</span>
             <strong>{fmt(budgetTotalDebtService)}</strong>
@@ -4120,7 +4156,8 @@ export default function BalanceSheet() {
   const debtServiceRECorp = debtServiceRE.filter(r=>r.corpPaid);
   const budgetTermDebtTotal = debtServiceTermsPersonal.reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetREDebtTotal = debtServiceREPersonal.reduce((s,r)=>s+n(r.annualPmt),0);
-  const budgetTotalDebtService = budgetTermDebtTotal + budgetREDebtTotal;
+  const budgetProposedDebtTotal = (data.budgetProposedDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+  const budgetTotalDebtService = budgetTermDebtTotal + budgetREDebtTotal + budgetProposedDebtTotal;
   const budgetCorpDebtTotal = [...debtServiceTermsCorp,...debtServiceRECorp].reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetPersonalDebtTotal = budgetTotalDebtService;
   const budgetTotalExpenses = budgetOperatingExpenses + budgetTotalDebtService;
