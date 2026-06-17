@@ -599,7 +599,7 @@ function BudgetView({
   debtServiceTerms, debtServiceRE,
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
-  budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal,
+  budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal, budgetProposedDebtTotal,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
   setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
@@ -6387,6 +6387,7 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
               budgetTotalDebtService={budgetTotalDebtService}
               budgetPersonalDebtTotal={budgetPersonalDebtTotal}
               budgetCorpDebtTotal={budgetCorpDebtTotal}
+              budgetProposedDebtTotal={budgetProposedDebtTotal}
               corpPersonalDebt={corpPersonalDebt}
               corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
               budgetTotalExpenses={budgetTotalExpenses}
