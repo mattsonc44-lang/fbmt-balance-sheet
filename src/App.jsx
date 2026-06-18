@@ -623,32 +623,33 @@ function BudgetView({
               🛡 {data.budgetInsuranceEnabled ? "Insurance ON" : "Include Insurance"}
             </button>
           </div>
-          <div className="bg-header-row">
-            <span style={{width:20}}></span>
-            <span className="bg-col-label" style={{width:75}}>Acres</span>
+          <div className="bg-header-row" style={{alignItems:"flex-end"}}>
+            <span style={{width:20,flexShrink:0}}></span>
+            <span className="bg-col-label" style={{width:62,flexShrink:0}}>Acres</span>
             <span className="bg-col-label" style={{flex:1}}>Crop</span>
-            <span className="bg-col-label" style={{width:90}}>Yield/Acre</span>
-            <span className="bg-col-label" style={{width:65}}>Unit</span>
-            <span className="bg-col-label" style={{width:100}}>Price</span>
-            <span className="bg-col-label" style={{width:70}}>Share %</span>
-            <span className="bg-col-label" style={{width:85,textAlign:"center"}}>Contracted</span>
+            <span className="bg-col-label" style={{width:72,flexShrink:0}}>Yield/Ac</span>
+            <span className="bg-col-label" style={{width:50,flexShrink:0}}>Unit</span>
+            <span className="bg-col-label" style={{width:82,flexShrink:0}}>Price</span>
+            <span className="bg-col-label" style={{width:60,flexShrink:0}}>Share%</span>
+            <span className="bg-col-label" style={{width:78,flexShrink:0,textAlign:"center"}}>Contract</span>
+            <span className="bg-col-label" style={{width:100,flexShrink:0}}>Your Value</span>
             {data.budgetInsuranceEnabled && <>
-              <span className="bg-col-label" style={{width:90,color:"#15803d"}}>Guar. Yield</span>
-              <span className="bg-col-label" style={{width:90,color:"#15803d"}}>Guar. Price</span>
-              <span className="bg-col-label" style={{width:115,color:"#15803d"}}>Ins. Total $</span>
+              <span className="bg-col-label" style={{width:78,flexShrink:0,color:"#15803d"}}>Guar.Yield</span>
+              <span className="bg-col-label" style={{width:78,flexShrink:0,color:"#15803d"}}>Guar.Price</span>
+              <span className="bg-col-label" style={{width:100,flexShrink:0,color:"#15803d"}}>Ins.Total $</span>
             </>}
-            <span className="bg-col-label" style={{width:115}}>Your Value</span>
-            <span style={{width:32}}></span>
+            <span style={{width:28,flexShrink:0}}></span>
           </div>
           {data.budgetCrops.map((r, i) => {
             const share = numVal(r.share || "100");
             const defaultPrice = !r.contracted ? lookupPrice(r.crop) : null;
             const effectivePrice = r.contracted ? r.price : (defaultPrice || r.price);
             const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(effectivePrice) * (share / 100);
+            const insTotal = numVal(r.acres) * numVal(r.insYield) * numVal(r.insPrice) * (share / 100);
             return (
               <div key={i} className="bg-row" data-rowkey={`budgetCrops-${i}`}>
                 <span className="row-num">{i+1}</span>
-                <div className="input-group" style={{width:75,flexShrink:0}}>
+                <div className="input-group" style={{width:62,flexShrink:0}}>
                   <div className="input-wrap">
                     <input type="text" value={r.acres} placeholder="0"
                       onChange={e => setArr("budgetCrops",i,"acres",e.target.value.replace(/[^0-9.]/g,""))} />
@@ -663,78 +664,71 @@ function BudgetView({
                     placeholder="Type or select crop..."
                   />
                 </div>
-                <div className="input-group" style={{width:90,flexShrink:0}}>
+                <div className="input-group" style={{width:72,flexShrink:0}}>
                   <div className="input-wrap">
                     <input type="text" value={r.yieldPerAcre} placeholder="0"
                       onChange={e => setArr("budgetCrops",i,"yieldPerAcre",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
-                <div className="input-group" style={{width:65,flexShrink:0}}>
+                <div className="input-group" style={{width:50,flexShrink:0}}>
                   <select className="unit-select" value={r.unit}
                     onChange={e => setArr("budgetCrops",i,"unit",e.target.value)}>
                     <option>bu</option><option>lbs</option>
                     <option>ton</option><option>cwt</option><option>bale</option>
                   </select>
                 </div>
-                {/* Contracted checkbox BEFORE price */}
-                <div style={{width:90,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
-                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
-                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
-                    style={{width:15,height:15,accentColor:"#6B0E1E",cursor:"pointer"}} />
-                  <label htmlFor={"bc-con-"+i} style={{fontSize:".72rem",color:"#6B0E1E",cursor:"pointer",fontWeight:r.contracted?700:400}}>
-                    {r.contracted ? "Contracted" : "Contract?"}
-                  </label>
-                </div>
-                {/* Price — locked to commodity list unless contracted */}
-                <div className="input-group" style={{width:105,flexShrink:0}}>
-                  <div className="input-wrap" title={!r.contracted&&defaultPrice ? "Price from commodity list. Check 'Contracted' to override." : ""}>
+                <div className="input-group" style={{width:82,flexShrink:0}}>
+                  <div className="input-wrap" title={!r.contracted&&defaultPrice?"Price from commodity list":""}>
                     <span className="prefix">$</span>
                     {r.contracted ? (
                       <input type="text" value={r.price} placeholder="0.00"
                         onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                     ) : (
-                      <input type="text" value={defaultPrice || r.price} placeholder="0.00"
+                      <input type="text" value={defaultPrice||r.price} placeholder="0.00"
                         readOnly={!!defaultPrice}
                         style={{background:defaultPrice?"#f5f5f5":undefined,color:defaultPrice?"#555":undefined,cursor:defaultPrice?"not-allowed":"text"}}
                         onChange={e => !defaultPrice && setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                     )}
                   </div>
                   {!r.contracted && defaultPrice && (
-                    <div style={{fontSize:".65rem",color:"#888",textAlign:"center",marginTop:1}}>list price</div>
+                    <div style={{fontSize:".62rem",color:"#888",textAlign:"center",marginTop:1}}>list</div>
                   )}
                 </div>
-                <div className="input-group" style={{width:70,flexShrink:0}}>
+                <div className="input-group" style={{width:60,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.share ?? "100"} placeholder="100"
+                    <input type="text" value={r.share??"100"} placeholder="100"
                       onChange={e => setArr("budgetCrops",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
-                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:".72rem"}}>%</span>
                   </div>
                 </div>
-                {data.budgetInsuranceEnabled && (() => {
-                  const insTotal = numVal(r.acres) * numVal(r.insYield) * numVal(r.insPrice) * (numVal(r.share||"100")/100);
-                  return (
-                    <>
-                      <div className="input-group" style={{width:90,flexShrink:0}}>
-                        <div className="input-wrap" title="Insurance guarantee yield (bu/ac)">
-                          <input type="text" value={r.insYield||""} placeholder="0"
-                            style={{background:"#f0fdf4"}}
-                            onChange={e => setArr("budgetCrops",i,"insYield",e.target.value.replace(/[^0-9.]/g,""))} />
-                        </div>
-                      </div>
-                      <div className="input-group" style={{width:90,flexShrink:0}}>
-                        <div className="input-wrap" title="Insurance guarantee price ($/unit)">
-                          <span className="prefix">$</span>
-                          <input type="text" value={r.insPrice||""} placeholder="0"
-                            style={{background:"#f0fdf4"}}
-                            onChange={e => setArr("budgetCrops",i,"insPrice",e.target.value.replace(/[^0-9.]/g,""))} />
-                        </div>
-                      </div>
-                      <CalcRow value={insTotal} style={{width:115,background:insTotal>0?"#f0fdf4":undefined,color:insTotal>0?"#15803d":undefined}} />
-                    </>
-                  );
-                })()}
-                <CalcRow value={rv} style={{width:115}} />
-                <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
+                <div style={{width:78,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
+                  <input type="checkbox" id={"bc-con-"+i} checked={!!r.contracted}
+                    onChange={e => setArr("budgetCrops",i,"contracted",e.target.checked)}
+                    style={{width:14,height:14,accentColor:"#6B0E1E",cursor:"pointer"}} />
+                  <label htmlFor={"bc-con-"+i} style={{fontSize:".68rem",color:"#6B0E1E",cursor:"pointer",fontWeight:r.contracted?700:400}}>
+                    {r.contracted?"Yes":"No"}
+                  </label>
+                </div>
+                <CalcRow value={rv} style={{width:100,flexShrink:0}} />
+                {data.budgetInsuranceEnabled && <>
+                  <div className="input-group" style={{width:78,flexShrink:0}}>
+                    <div className="input-wrap">
+                      <input type="text" value={r.insYield||""} placeholder="0"
+                        style={{background:"#f0fdf4"}}
+                        onChange={e => setArr("budgetCrops",i,"insYield",e.target.value.replace(/[^0-9.]/g,""))} />
+                    </div>
+                  </div>
+                  <div className="input-group" style={{width:78,flexShrink:0}}>
+                    <div className="input-wrap">
+                      <span className="prefix">$</span>
+                      <input type="text" value={r.insPrice||""} placeholder="0"
+                        style={{background:"#f0fdf4"}}
+                        onChange={e => setArr("budgetCrops",i,"insPrice",e.target.value.replace(/[^0-9.]/g,""))} />
+                    </div>
+                  </div>
+                  <CalcRow value={insTotal} style={{width:100,flexShrink:0,background:insTotal>0?"#f0fdf4":undefined,color:insTotal>0?"#15803d":undefined}} />
+                </>}
+                <button className="remove-btn" style={{width:28,flexShrink:0}} onClick={() => removeRow("budgetCrops",i)}>×</button>
               </div>
             );
           })}
@@ -851,6 +845,12 @@ function BudgetView({
         <div className="budget-subsection">
           <div className="budget-sub-label">Operating Expenses</div>
           {/* Quick-add from expense list */}
+          <div className="bg-header-row">
+            <span style={{width:20}}></span>
+            <span className="bg-col-label" style={{flex:1}}>Description</span>
+            <span className="bg-col-label" style={{width:120}}>Amount</span>
+            <span style={{width:28}}></span>
+          </div>
           {data.budgetExpenses.map((r, i) => (
             <div key={i} className="bg-row" data-rowkey={`budgetExpenses-${i}`}>
               <span className="row-num">{i+1}</span>
@@ -862,14 +862,14 @@ function BudgetView({
                   placeholder="Type or select expense..."
                 />
               </div>
-              <div className="input-group" style={{width:150,flexShrink:0}}>
+              <div className="input-group" style={{width:900,flexShrink:0}}>
                 <div className="input-wrap">
                   <span className="prefix">$</span>
                   <input type="text" value={r.amount} placeholder="0"
                     onChange={e => setArr("budgetExpenses",i,"amount",e.target.value.replace(/[^0-9.]/g,""))} />
                 </div>
               </div>
-              <button className="remove-btn" onClick={() => removeRow("budgetExpenses",i)}>x</button>
+              <button className="remove-btn" style={{width:28,flexShrink:0}} onClick={() => removeRow("budgetExpenses",i)}>x</button>
             </div>
           ))}
           <button className="add-btn"
