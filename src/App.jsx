@@ -4735,6 +4735,23 @@ export default function BalanceSheet() {
     const buildEntityPage = (d) => {
       const s = calcSummary(d);
       const row = (l,v,bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1pt solid #000;':''}"><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
+      const brow = (l,v) => `<tr><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
+      // Check if entity has meaningful budget data
+      const hasBudget = (d.budgetCrops||[]).some(r=>r.crop) || 
+                        (d.budgetLivestock||[]).some(r=>r.type) ||
+                        (d.budgetExpenses||[]).some(r=>r.description&&n2(r.amount));
+      const eBCrop = (d.budgetCrops||[]).reduce((s,r)=>{
+        const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
+        return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
+      },0);
+      const eBLS   = (d.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
+      const eBMisc = (d.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const eBInc  = eBCrop+eBLS+eBMisc;
+      const eBExp  = (d.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const eBDebt = (d.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
+                   + (d.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0);
+      const eBNet  = eBInc-eBExp-eBDebt;
+      const eDSCR  = eBDebt > 0 ? ((eBNet+eBDebt)/eBDebt).toFixed(2) : '—';
       return `
       <div class="page">
         <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>
@@ -4781,8 +4798,37 @@ export default function BalanceSheet() {
                 <td style="text-align:right;color:${s.netWorth>=0?'#15803d':'#dc2626'}">${pFmt(s.netWorth)}</td>
               </tr>
             </table>
+            ${hasBudget ? `<h2>Key Metrics</h2>
+            <div class="metric ${eBNet>=0?'pos':'neg'}"><div><div class="label">Net Farm Income</div></div><div class="value">${pFmt(eBNet)}</div></div>
+            <div class="metric ${parseFloat(eDSCR)>=1.25?'pos':parseFloat(eDSCR)>=1?'':'neg'}"><div><div class="label">DSCR</div><div style="font-size:7pt;color:#999">Target ≥ 1.25</div></div><div class="value">${eDSCR}x</div></div>
+            <div class="metric ${(s.totalCurAssets-(s.opNotes+s.acctsDue))>=0?'pos':'neg'}"><div><div class="label">Working Capital</div></div><div class="value">${pFmt(s.totalCurAssets-(s.opNotes+s.acctsDue))}</div></div>` : ''}
           </div>
         </div>
+        ${hasBudget ? `
+        <div style="margin-top:12pt">
+          <h2>Budget Summary</h2>
+          <div class="two-col">
+            <div>
+              <table>
+                ${(d.budgetCrops||[]).filter(r=>r.crop).map(r=>{
+                  const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
+                  const pr=n2(cp?cp.price:null)||n2(r.price);
+                  return brow(r.crop+' ('+r.acres+' ac)',n2(r.acres)*n2(r.yieldPerAcre)*pr*(n2(r.share||'100')/100));
+                }).join('')}
+                ${(d.budgetLivestock||[]).filter(r=>r.type).map(r=>brow(r.head+' '+r.type,n2(r.head)*n2(r.lbs)*n2(r.price))).join('')}
+                ${(d.budgetMisc||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
+                <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Income</td><td style="text-align:right">${pFmt(eBInc)}</td></tr>
+              </table>
+            </div>
+            <div>
+              <table>
+                ${(d.budgetExpenses||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
+                <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Expenses</td><td style="text-align:right">${pFmt(eBExp)}</td></tr>
+                <tr style="font-weight:700;font-size:10pt;background:#f0f0f0;border-top:1.5pt solid #000"><td>Net Income</td><td style="text-align:right;color:${eBNet>=0?'#15803d':'#dc2626'}">${pFmt(eBNet)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>` : ''}
       </div>`;
     };
 
@@ -4911,6 +4957,19 @@ export default function BalanceSheet() {
           <td style="text-align:right;color:${netWorth>=0?'#15803d':'#dc2626'}">${pFmt(netWorth)}</td>
         </tr>
       </table>
+      <h2>Key Metrics</h2>
+      <div class="metric ${bNet>=0?'pos':'neg'}">
+        <div><div class="label">Net Farm Income</div></div>
+        <div class="value">${pFmt(bNet)}</div>
+      </div>
+      <div class="metric ${parseFloat(dscr)>=1.25?'pos':parseFloat(dscr)>=1?'':'neg'}">
+        <div><div class="label">Debt Service Coverage Ratio</div><div style="font-size:7pt;color:#999">Target: ≥ 1.25</div></div>
+        <div class="value">${dscr}x</div>
+      </div>
+      <div class="metric ${(totalCurAssets-(opNotes+acctsDue))>=0?'pos':'neg'}">
+        <div><div class="label">Working Capital</div></div>
+        <div class="value">${pFmt(totalCurAssets-(opNotes+acctsDue))}</div>
+      </div>
       ${(data.intermediatDebt||[]).filter(r=>r.creditor).map(r=>
         `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.creditor} ${r.security?'('+r.security+')':''} — ${pFmt(r.principal)} @ ${r.annualPmt?'$'+Number(numVal(r.annualPmt)).toLocaleString()+'/yr':''}</div>`
       ).join('')}
@@ -4955,23 +5014,6 @@ export default function BalanceSheet() {
         ${(data.budgetProposedDebt||[]).filter(r=>r.description&&n2(r.annualPmt)).map(r=>`<tr style="color:#6B0E1E"><td>${r.description} <em>(proposed)</em></td><td style="text-align:right">${pFmt(n2(r.annualPmt))}</td></tr>`).join('')}
         <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Debt Service</td><td style="text-align:right">${pFmt(bDebt)}</td></tr>
       </table>
-      <h2>Key Metrics</h2>
-      <div class="metric ${bNet>=0?'pos':'neg'}">
-        <div><div class="label">Net Farm Income</div></div>
-        <div class="value">${pFmt(bNet)}</div>
-      </div>
-      <div class="metric ${parseFloat(dscr)>=1.25?'pos':parseFloat(dscr)>=1?'':'neg'}">
-        <div><div class="label">Debt Service Coverage Ratio</div><div style="font-size:7pt;color:#999">Target: ≥ 1.25</div></div>
-        <div class="value">${dscr}x</div>
-      </div>
-      <div class="metric ${(totalCurAssets-(opNotes+acctsDue))>=0?'pos':'neg'}">
-        <div><div class="label">Working Capital</div></div>
-        <div class="value">${pFmt(totalCurAssets-(opNotes+acctsDue))}</div>
-      </div>
-      <div class="metric ${netWorth>=0?'pos':'neg'}">
-        <div><div class="label">Net Worth</div></div>
-        <div class="value">${pFmt(netWorth)}</div>
-      </div>
     </div>
   </div>
   <div style="margin-top:auto;padding-top:24pt;display:flex;gap:40pt">
