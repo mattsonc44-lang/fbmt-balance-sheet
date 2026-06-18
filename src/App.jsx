@@ -4688,10 +4688,103 @@ export default function BalanceSheet() {
     } catch { setCorpPersonalDebt([]); }
   };
 
-  const generateLenderPackage = () => {
+  const generateLenderPackage = async () => {
     const m = numVal;
     const pFmt = v => v && m(v) ? "$"+Number(m(v)).toLocaleString("en-US",{maximumFractionDigits:0}) : "—";
     const n2 = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
+
+    // ── Linked entities — fetch full data ─────────────────────────────
+    const linkedNames = data.linkedEntities || [];
+    const linkedData = (await Promise.all(
+      linkedNames.map(async name => {
+        const sheet = savedSheets.find(s => s.clientName === name);
+        if (!sheet) return null;
+        try {
+          const item = await storage.get(sheet.key);
+          return item ? JSON.parse(item.value) : null;
+        } catch { return null; }
+      })
+    )).filter(Boolean);
+
+    const calcSummary = d => {
+      const cash     = n2(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const farmProd = (d.farmProducts||[]).reduce((s,r)=>s+n2(r.quantity)*n2(r.pricePerUnit)*(n2(r.share||'100')/100),0);
+      const supplies = (d.supplies||[]).reduce((s,r)=>s+n2(r.value),0);
+      const otherCur = (d.otherCurrent||[]).reduce((s,r)=>s+n2(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const lsMkt    = (d.livestockMarket||[]).reduce((s,r)=>s+n2(r.value),0);
+      const breeding = (d.breedingStock||[]).reduce((s,r)=>s+n2(r.value),0);
+      const re       = (d.realEstate||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.valuePerAcre),0);
+      const vehicles = (d.vehicles||[]).reduce((s,r)=>s+n2(r.value),0);
+      const machinery= (d.machinery||[]).reduce((s,r)=>s+n2(r.value),0);
+      const otherAssets=(d.otherAssets||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const totalCurAssets = cash+farmProd+supplies+otherCur+lsMkt;
+      const totalLTAssets  = breeding+re+vehicles+machinery+otherAssets;
+      const totalAssets    = totalCurAssets+totalLTAssets;
+      const opNotes  = (d.operatingNotes||[]).reduce((s,r)=>s+n2(r.balance),0);
+      const acctsDue = (d.accountsDue||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const intermed = (d.intermediatDebt||[]).reduce((s,r)=>s+n2(r.principal),0);
+      const reCur    = (d.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
+      const reMort   = (d.reMortgages||[]).reduce((s,r)=>s+n2(r.principal),0);
+      const otherLiab= (d.otherLiabilities||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const totalLiab= opNotes+acctsDue+intermed+reCur+reMort+otherLiab;
+      return {cash,farmProd,supplies,otherCur,lsMkt,breeding,re,vehicles,machinery,otherAssets,
+              totalCurAssets,totalLTAssets,totalAssets,opNotes,acctsDue,intermed,reCur,reMort,otherLiab,totalLiab,
+              netWorth:totalAssets-totalLiab};
+    };
+
+    const buildEntityPage = (d) => {
+      const s = calcSummary(d);
+      const row = (l,v,bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1pt solid #000;':''}"><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
+      return `
+      <div class="page">
+        <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>
+        <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
+          Balance Sheet — ${d.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${d.asOfDate||''}</span>
+          <span style="font-size:8pt;font-weight:400;color:#6B0E1E;margin-left:12pt">(Related Entity)</span>
+        </div>
+        <div class="two-col">
+          <div>
+            <h2>Assets</h2>
+            <table>
+              ${row('Cash & Bank Accounts',s.cash)}
+              ${row('Farm Products',s.farmProd)}
+              ${row('Supplies & Prepaid',s.supplies)}
+              ${row('Other Current',s.otherCur)}
+              ${row('Livestock (Market)',s.lsMkt)}
+              ${row('Total Current Assets',s.totalCurAssets,true)}
+              ${row('Breeding Stock',s.breeding)}
+              ${row('Real Estate',s.re)}
+              ${row('Vehicles',s.vehicles)}
+              ${row('Machinery',s.machinery)}
+              ${row('Other Assets',s.otherAssets)}
+              ${row('Total LT Assets',s.totalLTAssets,true)}
+              ${row('TOTAL ASSETS',s.totalAssets,true)}
+            </table>
+          </div>
+          <div>
+            <h2>Liabilities</h2>
+            <table>
+              ${row('Operating Notes',s.opNotes)}
+              ${row('Accounts Due',s.acctsDue)}
+              ${row('Total Current Liab.',s.opNotes+s.acctsDue,true)}
+              ${row('Intermediate Debt',s.intermed)}
+              ${row('RE Current Portion',s.reCur)}
+              ${row('RE Mortgages LT',s.reMort)}
+              ${row('Other Liabilities',s.otherLiab)}
+              ${row('Total LT Liab.',s.intermed+s.reCur+s.reMort+s.otherLiab,true)}
+              ${row('TOTAL LIABILITIES',s.totalLiab,true)}
+            </table>
+            <h2>Net Worth</h2>
+            <table>
+              <tr style="font-weight:700;font-size:11pt;background:#f0f0f0">
+                <td>NET WORTH</td>
+                <td style="text-align:right;color:${s.netWorth>=0?'#15803d':'#dc2626'}">${pFmt(s.netWorth)}</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    };
 
     // ── Section totals ─────────────────────────────────────────────────
     const cash     = n2(data.cashGlacier)+(data.cashOther||[]).reduce((s,r)=>s+n2(r.amount),0);
@@ -4766,7 +4859,7 @@ export default function BalanceSheet() {
     ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}
   </div>
   <div style="margin-top:32pt;border:1pt solid #ccc;padding:12pt 24pt;font-size:8pt;color:#555">
-    Contents: Balance Sheet Summary &nbsp;·&nbsp; Budget Summary &nbsp;·&nbsp; Key Metrics
+    Contents: Balance Sheet Summary &nbsp;·&nbsp; Budget Summary &nbsp;·&nbsp; Key Metrics${linkedData.length>0?' &nbsp;·&nbsp; Related Entities ('+linkedData.length+')':''}
   </div>
 </div>
 
@@ -4889,6 +4982,7 @@ export default function BalanceSheet() {
 </div>
 
 <button class="no-print" onclick="window.print()" style="position:fixed;top:12px;right:12px;background:#6B0E1E;color:white;border:none;padding:10px 22px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">🖨 Print / Save PDF</button>
+${linkedData.map(d=>buildEntityPage(d)).join('\n')}
 </body></html>`);
     W.document.close();
   };
