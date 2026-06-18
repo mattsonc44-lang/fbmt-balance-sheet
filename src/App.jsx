@@ -513,7 +513,8 @@ function emptyData() {
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
     reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
     otherLiabilities:[{description:"",balance:""}],
-    budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false}],
+    budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""}],
+    budgetInsuranceEnabled:false,
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
     budgetExpenses:[{description:"",amount:""}],
@@ -600,6 +601,8 @@ function BudgetView({
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal, budgetProposedDebtTotal,
+  budgetInsuranceIndemnity,
+  toggleInsurance,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
   setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
@@ -612,7 +615,14 @@ function BudgetView({
           <span className="bsh-total">{fmt(budgetTotalIncome)}</span>
         </div>
         <div className="budget-subsection">
-          <div className="budget-sub-label">Crop Income</div>
+          <div className="budget-sub-label" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>Crop Income</span>
+            <button
+              onClick={()=>toggleInsurance()}
+              style={{fontSize:".72rem",padding:"3px 10px",borderRadius:12,border:`1.5px solid ${data.budgetInsuranceEnabled?"#15803d":"#9ca3af"}`,background:data.budgetInsuranceEnabled?"#dcfce7":"white",color:data.budgetInsuranceEnabled?"#15803d":"#6b7280",cursor:"pointer",fontWeight:600}}>
+              🛡 {data.budgetInsuranceEnabled ? "Insurance ON" : "Include Insurance"}
+            </button>
+          </div>
           <div className="bg-header-row">
             <span style={{width:20}}></span>
             <span className="bg-col-label" style={{width:75}}>Acres</span>
@@ -622,6 +632,10 @@ function BudgetView({
             <span className="bg-col-label" style={{width:100}}>Price</span>
             <span className="bg-col-label" style={{width:70}}>Share %</span>
             <span className="bg-col-label" style={{width:85,textAlign:"center"}}>Contracted</span>
+            {data.budgetInsuranceEnabled && <>
+              <span className="bg-col-label" style={{width:90,color:"#15803d"}}>Guar. Yield</span>
+              <span className="bg-col-label" style={{width:90,color:"#15803d"}}>Guar. Price</span>
+            </>}
             <span className="bg-col-label" style={{width:115}}>Your Value</span>
             <span style={{width:32}}></span>
           </div>
@@ -695,18 +709,42 @@ function BudgetView({
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
                 </div>
+                {data.budgetInsuranceEnabled && (
+                  <>
+                    <div className="input-group" style={{width:90,flexShrink:0}}>
+                      <div className="input-wrap" title="Insurance guarantee yield (bu/ac)">
+                        <input type="text" value={r.insYield||""} placeholder="0"
+                          style={{background:"#f0fdf4"}}
+                          onChange={e => setArr("budgetCrops",i,"insYield",e.target.value.replace(/[^0-9.]/g,""))} />
+                      </div>
+                    </div>
+                    <div className="input-group" style={{width:90,flexShrink:0}}>
+                      <div className="input-wrap" title="Insurance guarantee price ($/unit)">
+                        <span className="prefix">$</span>
+                        <input type="text" value={r.insPrice||""} placeholder="0"
+                          style={{background:"#f0fdf4"}}
+                          onChange={e => setArr("budgetCrops",i,"insPrice",e.target.value.replace(/[^0-9.]/g,""))} />
+                      </div>
+                    </div>
+                  </>
+                )}
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
               </div>
             );
           })}
           <button className="add-btn"
-            onClick={() => addRow("budgetCrops",{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false})}>
+            onClick={() => addRow("budgetCrops",{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""})}>
             + Add Crop
           </button>
           <div className="budget-subtotal">
             <span>Crop Income Subtotal</span><strong>{fmt(budgetCropTotal)}</strong>
           </div>
+          {data.budgetInsuranceEnabled && budgetInsuranceIndemnity > 0 && (
+            <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".82rem",fontWeight:700,background:"#dcfce7",borderRadius:6,marginBottom:4,color:"#15803d",border:"1px solid #bbf7d0"}}>
+              <span>🛡 Crop Insurance Indemnity</span><span>{fmt(budgetInsuranceIndemnity)}</span>
+            </div>
+          )}
         </div>
         <div className="budget-subsection">
           <div className="budget-sub-label">Livestock Income</div>
@@ -4234,9 +4272,18 @@ export default function BalanceSheet() {
     const effectivePrice = (cp ? cp.price : null) || r.price;
     return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
   },0);
+  const budgetInsuranceIndemnity = data.budgetInsuranceEnabled ? data.budgetCrops.reduce((s,r)=>{
+    if (!r.insYield||!r.insPrice) return s;
+    const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+    const effectivePrice = (cp ? cp.price : null) || r.price;
+    const projectedPerAcre = n(r.yieldPerAcre)*n(effectivePrice);
+    const guaranteePerAcre = n(r.insYield)*n(r.insPrice);
+    const indemnityPerAcre = Math.max(0, guaranteePerAcre - projectedPerAcre);
+    return s + indemnityPerAcre * n(r.acres) * (n(r.share||"100")/100);
+  },0) : 0;
   const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
-  const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
+  const budgetTotalIncome = budgetCropTotal + budgetInsuranceIndemnity + budgetLivestockTotal + budgetMiscTotal;
   const budgetOperatingExpenses = data.budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
@@ -6600,7 +6647,7 @@ ${extraPages}
             <BudgetView
               data={data}
               budgetCropTotal={budgetCropTotal}
-              budgetLivestockTotal={budgetLivestockTotal}
+              budgetInsuranceIndemnity={budgetInsuranceIndemnity}
               budgetMiscTotal={budgetMiscTotal}
               budgetTotalIncome={budgetTotalIncome}
               budgetOperatingExpenses={budgetOperatingExpenses}
@@ -6844,6 +6891,8 @@ ${extraPages}
           budgetTotalIncome={budgetTotalIncome}
           budgetTotalExpenses={budgetTotalExpenses}
           budgetCropTotal={budgetCropTotal}
+          budgetInsuranceIndemnity={budgetInsuranceIndemnity}
+          toggleInsurance={()=>setData(d=>({...d,budgetInsuranceEnabled:!d.budgetInsuranceEnabled}))}
           budgetLivestockTotal={budgetLivestockTotal}
           budgetMiscTotal={budgetMiscTotal}
           budgetOperatingExpenses={budgetOperatingExpenses}
