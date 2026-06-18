@@ -671,6 +671,7 @@ function BudgetView({
   debtServiceREPersonal, debtServiceRECorp,
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal, budgetProposedDebtTotal,
   budgetInsuranceIndemnity,
+  budgetInsuranceTotal, budgetTotalIncomeInsured, budgetNetIncomeInsured,
   toggleInsurance,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
@@ -806,8 +807,13 @@ function BudgetView({
             + Add Crop
           </button>
           <div className="budget-subtotal">
-            <span>Crop Income Subtotal</span><strong>{fmt(budgetCropTotal)}</strong>
+            <span>Total Your Value</span><strong>{fmt(budgetCropTotal)}</strong>
           </div>
+          {data.budgetInsuranceEnabled && (
+            <div className="budget-subtotal" style={{background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0"}}>
+              <span>Total Insurance Value</span><strong>{fmt(budgetInsuranceTotal)}</strong>
+            </div>
+          )}
           {data.budgetInsuranceEnabled && budgetInsuranceIndemnity > 0 && (
             <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".82rem",fontWeight:700,background:"#dcfce7",borderRadius:6,marginBottom:4,color:"#15803d",border:"1px solid #bbf7d0"}}>
               <span>🛡 Crop Insurance Indemnity</span><span>{fmt(budgetInsuranceIndemnity)}</span>
@@ -931,7 +937,7 @@ function BudgetView({
                   placeholder="Type or select expense..."
                 />
               </div>
-              <div className="input-group" style={{width:900,flexShrink:0}}>
+              <div className="input-group" style={{width:90,flexShrink:0}}>
                 <div className="input-wrap">
                   <span className="prefix">$</span>
                   <input type="text" value={r.amount} placeholder="0"
@@ -1083,7 +1089,7 @@ function BudgetView({
         <div className={"budget-net " + ((budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)) >= 0 ? "net-positive" : "net-negative")}>
           <div className="margin-detail">
             <div className="margin-label">
-              {(budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)) >= 0 ? "MARGIN (Net Income)" : "MARGIN (Net Loss)"}
+              {(budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)) >= 0 ? "BORROWER MARGIN (Net Income)" : "BORROWER MARGIN (Net Loss)"}
             </div>
             <div className="margin-calc">
               {fmt(budgetTotalIncome)} income minus {fmt(budgetTotalExpenses + (corpPersonalDebtTotal||0))} expenses
@@ -1091,6 +1097,20 @@ function BudgetView({
           </div>
           <span className="margin-value">{fmt(Math.abs(budgetTotalIncome - budgetTotalExpenses - (corpPersonalDebtTotal||0)))}</span>
         </div>
+        {data.budgetInsuranceEnabled && (
+          <div className={"budget-net " + (budgetNetIncomeInsured >= 0 ? "net-positive" : "net-negative")}
+            style={{background:budgetNetIncomeInsured>=0?"#f0fdf4":undefined,border:"1.5px solid #15803d",marginTop:6}}>
+            <div className="margin-detail">
+              <div className="margin-label" style={{color:"#15803d"}}>
+                🛡 {budgetNetIncomeInsured >= 0 ? "INSURANCE MARGIN (Net Income)" : "INSURANCE MARGIN (Net Loss)"}
+              </div>
+              <div className="margin-calc">
+                {fmt(budgetTotalIncomeInsured)} income (at guarantee floor) minus {fmt(budgetTotalExpenses + (corpPersonalDebtTotal||0))} expenses
+              </div>
+            </div>
+            <span className="margin-value" style={{color:"#15803d"}}>{fmt(Math.abs(budgetNetIncomeInsured))}</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4346,6 +4366,10 @@ export default function BalanceSheet() {
     const effectivePrice = (cp ? cp.price : null) || r.price;
     return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
   },0);
+  // Total guaranteed insurance value across all crop rows (acres × guar.yield × guar.price × share%)
+  const budgetInsuranceTotal = data.budgetInsuranceEnabled ? data.budgetCrops.reduce((s,r)=>{
+    return s + n(r.acres)*n(r.insYield)*n(r.insPrice)*(n(r.share||"100")/100);
+  },0) : 0;
   const budgetInsuranceIndemnity = data.budgetInsuranceEnabled ? data.budgetCrops.reduce((s,r)=>{
     if (!r.insYield||!r.insPrice) return s;
     const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
@@ -4357,7 +4381,18 @@ export default function BalanceSheet() {
   },0) : 0;
   const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
+  // Borrower scenario: crop value at projected price + indemnity if it triggers
   const budgetTotalIncome = budgetCropTotal + budgetInsuranceIndemnity + budgetLivestockTotal + budgetMiscTotal;
+  // Insurance scenario: crop value at the insurance guarantee floor (whichever is higher per row)
+  const budgetTotalIncomeInsured = data.budgetInsuranceEnabled
+    ? data.budgetCrops.reduce((s,r)=>{
+        const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+        const effectivePrice = (cp ? cp.price : null) || r.price;
+        const projected = n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
+        const guaranteed = n(r.acres)*n(r.insYield)*n(r.insPrice)*(n(r.share||"100")/100);
+        return s + Math.max(projected, guaranteed);
+      },0) + budgetLivestockTotal + budgetMiscTotal
+    : budgetTotalIncome;
   const budgetOperatingExpenses = data.budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
@@ -4373,6 +4408,7 @@ export default function BalanceSheet() {
   const budgetPersonalDebtTotal = budgetTotalDebtService;
   const budgetTotalExpenses = budgetOperatingExpenses + budgetTotalDebtService;
   const budgetNetIncome = budgetTotalIncome - budgetTotalExpenses;
+  const budgetNetIncomeInsured = budgetTotalIncomeInsured - budgetTotalExpenses;
 
   // Comparison helpers
   const SECTION_BREAKS = new Set(["Total Current Assets","TOTAL ASSETS","Total Current Liab","TOTAL LIABILITIES","NET WORTH"]);
@@ -5087,6 +5123,7 @@ ${extraPages}
     const corpPDTotal = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0);
     const totalExp = budgetTotalExpenses + corpPDTotal;
     const netInc = budgetTotalIncome - totalExp;
+    const netIncInsured = budgetTotalIncomeInsured - totalExp;
     const W = window.open("","_blank","width=900,height=1100");
     if (!W) return;
     const insEnabled = data.budgetInsuranceEnabled;
@@ -5156,7 +5193,8 @@ ${extraPages}
       +"<div>"
       +"<div class='col-head'>INCOME</div>"
       +(cropRows?"<div class='sec'>Crop Income</div><table><tr><th>Crop</th><th class='r'>Acres</th><th class='r'>Yield</th><th class='r'>Price</th><th class='r'>Share</th><th class='r'>Your Value</th>"+insCols+"</tr>"+cropRows+"</table>"
-        +"<div class='subtot'><span>Crop Income</span><span>$"+Math.round(budgetCropTotal).toLocaleString()+"</span></div>"
+        +"<div class='subtot'><span>Total Your Value</span><span>$"+Math.round(budgetCropTotal).toLocaleString()+"</span></div>"
+        +(insEnabled?"<div class='subtot' style='color:#15803d'><span>Total Insurance Value</span><span>$"+Math.round(budgetInsuranceTotal).toLocaleString()+"</span></div>":"")
         +(insEnabled&&budgetInsuranceIndemnity>0?"<div class='indemnity'><span>🛡 Crop Insurance Indemnity</span><span>$"+Math.round(budgetInsuranceIndemnity).toLocaleString()+"</span></div>":"")
         :"")
       +(lsRows?"<div class='sec'>Livestock Income</div><table><tr><th>Type</th><th class='r'>Head</th><th class='r'>Wt</th><th class='r'>Price</th><th class='r'></th><th class='r'>Value</th>"+(insEnabled?"<th></th><th></th><th></th>":"")+"</tr>"+lsRows+"</table><div class='subtot'><span>Livestock Income</span><span>$"+Math.round(budgetLivestockTotal).toLocaleString()+"</span></div>":"")
@@ -5174,8 +5212,11 @@ ${extraPages}
       +(personalDebtRows?"<div class='sec' style='color:#7a4f00'>Personal Debt</div><table>"+personalDebtRows+"</table><div class='subtot' style='color:#7a4f00'><span>Personal Subtotal</span><span>$"+Math.round(corpPDTotal).toLocaleString()+"</span></div>":"")
       +"<div class='tot'><span>TOTAL EXPENSES</span><span>$"+Math.round(totalExp).toLocaleString()+"</span></div>"
       +"<div class='net' style='"+(netInc>=0?"background:#e8f5ea;":"background:#fce8e8;")+"'>"
-      +"<span>"+(netInc>=0?"MARGIN (Net Income)":"MARGIN (Net Loss)")+"</span>"
+      +"<span>"+(netInc>=0?"BORROWER MARGIN (Net Income)":"BORROWER MARGIN (Net Loss)")+"</span>"
       +"<span>$"+Math.round(Math.abs(netInc)).toLocaleString()+"</span></div>"
+      +(insEnabled?"<div class='net' style='border-color:#15803d;color:#15803d;"+(netIncInsured>=0?"background:#e8f5ea;":"background:#fce8e8;")+"'>"
+        +"<span>🛡 "+(netIncInsured>=0?"INSURANCE MARGIN (Net Income)":"INSURANCE MARGIN (Net Loss)")+"</span>"
+        +"<span>$"+Math.round(Math.abs(netIncInsured)).toLocaleString()+"</span></div>":"")
       +"</div>"
       +"</div>"
       +"</body></html>";
@@ -6741,6 +6782,9 @@ ${extraPages}
               data={data}
               budgetCropTotal={budgetCropTotal}
               budgetInsuranceIndemnity={budgetInsuranceIndemnity}
+              budgetInsuranceTotal={budgetInsuranceTotal}
+              budgetTotalIncomeInsured={budgetTotalIncomeInsured}
+              budgetNetIncomeInsured={budgetNetIncomeInsured}
               toggleInsurance={()=>setData(d=>({...d,budgetInsuranceEnabled:!d.budgetInsuranceEnabled}))}
               budgetMiscTotal={budgetMiscTotal}
               budgetTotalIncome={budgetTotalIncome}
@@ -6986,6 +7030,9 @@ ${extraPages}
           budgetTotalExpenses={budgetTotalExpenses}
           budgetCropTotal={budgetCropTotal}
           budgetInsuranceIndemnity={budgetInsuranceIndemnity}
+          budgetInsuranceTotal={budgetInsuranceTotal}
+          budgetTotalIncomeInsured={budgetTotalIncomeInsured}
+          budgetNetIncomeInsured={budgetNetIncomeInsured}
           toggleInsurance={()=>setData(d=>({...d,budgetInsuranceEnabled:!d.budgetInsuranceEnabled}))}
           budgetLivestockTotal={budgetLivestockTotal}
           budgetMiscTotal={budgetMiscTotal}
