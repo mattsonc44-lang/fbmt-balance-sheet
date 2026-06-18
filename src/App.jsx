@@ -4981,6 +4981,108 @@ export default function BalanceSheet() {
   </div>
 </div>
 
+<!-- DETAIL PAGES -->
+${(() => {
+  const pF = v => v && numVal(v) ? '$'+Number(numVal(v)).toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
+  const tRow = (cells, bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000;':''}">${cells.map(([w,v,r])=>`<td style="width:${w||'auto'};text-align:${r?'right':'left'};padding:3pt 5pt;border-bottom:.5pt dotted #ccc">${v||'—'}</td>`).join('')}</tr>`;
+  const secHead = title => `<div style="background:#6B0E1E;color:white;font-weight:700;font-size:10pt;padding:6pt 10pt;margin:0 0 4pt;border-radius:2pt">${title}</div>`;
+  const logo = `<img src="${FBMT_LOGO}" alt="FBMT" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>`;
+  const hdr = `${logo}<div style="font-size:11pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">${data.clientName||''} — Balance Sheet Detail &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${data.asOfDate||''}</span></div>`;
+
+  // Real Estate detail
+  const reRows = (data.realEstate||[]).filter(r=>r.description||r.acres);
+  const reDetail = reRows.length ? `
+    <div class="page">
+      ${hdr}
+      ${secHead('🏡 Real Estate Schedule')}
+      <table style="width:100%;border-collapse:collapse;font-size:8pt">
+        <thead><tr style="background:#333;color:white">
+          <th style="padding:3pt 5pt;text-align:left">Description</th>
+          <th style="padding:3pt 5pt;text-align:right">Acres</th>
+          <th style="padding:3pt 5pt;text-align:right">Value/Ac</th>
+          <th style="padding:3pt 5pt;text-align:right">Total Value</th>
+          <th style="padding:3pt 5pt;text-align:left">Type</th>
+        </tr></thead>
+        <tbody>
+          ${reRows.map(r=>`<tr style="border-bottom:.5pt dotted #ccc">
+            <td style="padding:3pt 5pt">${r.description||''}</td>
+            <td style="padding:3pt 5pt;text-align:right">${r.acres||''}</td>
+            <td style="padding:3pt 5pt;text-align:right">${pF(r.valuePerAcre)}</td>
+            <td style="padding:3pt 5pt;text-align:right;font-weight:600">${r.acres&&r.valuePerAcre?pF(numVal(r.acres)*numVal(r.valuePerAcre)):''}</td>
+            <td style="padding:3pt 5pt;color:#555">${r.reType||''}</td>
+          </tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000">
+            <td colspan="3" style="padding:4pt 5pt;text-align:right">TOTAL REAL ESTATE</td>
+            <td style="padding:4pt 5pt;text-align:right">${pF(reRows.reduce((s,r)=>s+numVal(r.acres)*numVal(r.valuePerAcre),0))}</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>` : '';
+
+  // Debt detail
+  const opN = (data.operatingNotes||[]).filter(r=>r.creditor);
+  const intD = (data.intermediatDebt||[]).filter(r=>r.creditor);
+  const reC = (data.reCurrent||[]).filter(r=>r.creditor);
+  const reM = (data.reMortgages||[]).filter(r=>r.lienHolder);
+  const debtDetail = (opN.length+intD.length+reC.length+reM.length)>0 ? `
+    <div class="page">
+      ${hdr}
+      ${opN.length?`${secHead('🏦 Operating Notes')}
+        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
+          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Creditor</th><th style="padding:3pt 5pt;text-align:left">Due Date</th><th style="padding:3pt 5pt;text-align:right">Balance</th></tr></thead>
+          <tbody>${opN.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.creditor||''}</td><td style="padding:3pt 5pt">${r.dueDate||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.balance)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="2" style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(opN.reduce((s,r)=>s+numVal(r.balance),0))}</td></tr>
+          </tbody>
+        </table>`:''}
+      ${intD.length?`${secHead('📋 Intermediate Term Debt')}
+        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
+          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Creditor</th><th style="padding:3pt 5pt;text-align:left">Security</th><th style="padding:3pt 5pt;text-align:left">Due</th><th style="padding:3pt 5pt;text-align:right">Annual Pmt</th><th style="padding:3pt 5pt;text-align:right">Principal</th></tr></thead>
+          <tbody>${intD.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.creditor||''}</td><td style="padding:3pt 5pt">${r.security||''}</td><td style="padding:3pt 5pt">${r.dueDate||''}</td><td style="padding:3pt 5pt;text-align:right">${pF(r.annualPmt)}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.principal)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="3" style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(intD.reduce((s,r)=>s+numVal(r.annualPmt),0))}</td><td style="padding:3pt 5pt;text-align:right">${pF(intD.reduce((s,r)=>s+numVal(r.principal),0))}</td></tr>
+          </tbody>
+        </table>`:''}
+      ${reC.length?`${secHead('🏠 RE Current Portion')}
+        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
+          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Creditor</th><th style="padding:3pt 5pt;text-align:right">Annual Payment</th></tr></thead>
+          <tbody>${reC.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.creditor||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.annualPmt)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(reC.reduce((s,r)=>s+numVal(r.annualPmt),0))}</td></tr>
+          </tbody>
+        </table>`:''}
+      ${reM.length?`${secHead('🏦 RE Mortgages (Long-Term)')}
+        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
+          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Lien Holder</th><th style="padding:3pt 5pt;text-align:left">Terms</th><th style="padding:3pt 5pt;text-align:right">Principal</th></tr></thead>
+          <tbody>${reM.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.lienHolder||''}</td><td style="padding:3pt 5pt">${r.terms||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.principal)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="2" style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(reM.reduce((s,r)=>s+numVal(r.principal),0))}</td></tr>
+          </tbody>
+        </table>`:''}
+    </div>` : '';
+
+  // Vehicles & Machinery
+  const vehs = (data.vehicles||[]).filter(r=>r.year||r.make);
+  const machs = (data.machinery||[]).filter(r=>r.year||r.make);
+  const schedDetail = (vehs.length+machs.length)>0 ? `
+    <div class="page">
+      ${hdr}
+      ${vehs.length?`${secHead('🚗 Titled Vehicles Schedule')}
+        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
+          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt">Year</th><th style="padding:3pt 5pt">Make / Description</th><th style="padding:3pt 5pt">VIN</th><th style="padding:3pt 5pt;text-align:right">Value</th></tr></thead>
+          <tbody>${vehs.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.year||''}</td><td style="padding:3pt 5pt">${r.make||''}</td><td style="padding:3pt 5pt;color:#555;font-size:7pt">${r.vin||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.value)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="3" style="padding:3pt 5pt;text-align:right">TOTAL VEHICLES</td><td style="padding:3pt 5pt;text-align:right">${pF(vehs.reduce((s,r)=>s+numVal(r.value),0))}</td></tr>
+          </tbody>
+        </table>`:''}
+      ${machs.length?`${secHead('⚙️ Machinery & Equipment Schedule')}
+        <table style="width:100%;border-collapse:collapse;font-size:8pt">
+          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt">Year</th><th style="padding:3pt 5pt">Description / Make</th><th style="padding:3pt 5pt">Size/Serial</th><th style="padding:3pt 5pt;text-align:right">Value</th></tr></thead>
+          <tbody>${machs.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.year||''}</td><td style="padding:3pt 5pt">${r.make||''}</td><td style="padding:3pt 5pt;color:#555;font-size:7pt">${r.size||r.serial||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.value)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="3" style="padding:3pt 5pt;text-align:right">TOTAL MACHINERY</td><td style="padding:3pt 5pt;text-align:right">${pF(machs.reduce((s,r)=>s+numVal(r.value),0))}</td></tr>
+          </tbody>
+        </table>`:''}
+    </div>` : '';
+
+  return reDetail + debtDetail + schedDetail;
+})()}
+
 <button class="no-print" onclick="window.print()" style="position:fixed;top:12px;right:12px;background:#6B0E1E;color:white;border:none;padding:10px 22px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">🖨 Print / Save PDF</button>
 ${linkedData.map(d=>buildEntityPage(d)).join('\n')}
 </body></html>`);
@@ -5129,16 +5231,14 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   </tbody>
 </table>
 <div class="sched-foot"><div class="sched-total">TOTAL MACHINERY AND EQUIPMENT: ${pFmt(machVal)||"$0"}</div></div>
-</div>
-
-</body></html>`;
+</div`;
     W.document.write(html);
     W.document.close();
     W.focus();
     setTimeout(() => W.print(), 400);
   };
 
-  const handlePrintBudget = () => {
+    const handlePrintBudget = () => {
     const corpPDTotal = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0);
     const totalExp = budgetTotalExpenses + corpPDTotal;
     const netInc = budgetTotalIncome - totalExp;
