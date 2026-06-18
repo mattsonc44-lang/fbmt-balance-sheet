@@ -635,6 +635,7 @@ function BudgetView({
             {data.budgetInsuranceEnabled && <>
               <span className="bg-col-label" style={{width:90,color:"#15803d"}}>Guar. Yield</span>
               <span className="bg-col-label" style={{width:90,color:"#15803d"}}>Guar. Price</span>
+              <span className="bg-col-label" style={{width:115,color:"#15803d"}}>Ins. Total $</span>
             </>}
             <span className="bg-col-label" style={{width:115}}>Your Value</span>
             <span style={{width:32}}></span>
@@ -709,25 +710,29 @@ function BudgetView({
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
                 </div>
-                {data.budgetInsuranceEnabled && (
-                  <>
-                    <div className="input-group" style={{width:90,flexShrink:0}}>
-                      <div className="input-wrap" title="Insurance guarantee yield (bu/ac)">
-                        <input type="text" value={r.insYield||""} placeholder="0"
-                          style={{background:"#f0fdf4"}}
-                          onChange={e => setArr("budgetCrops",i,"insYield",e.target.value.replace(/[^0-9.]/g,""))} />
+                {data.budgetInsuranceEnabled && (() => {
+                  const insTotal = numVal(r.acres) * numVal(r.insYield) * numVal(r.insPrice) * (numVal(r.share||"100")/100);
+                  return (
+                    <>
+                      <div className="input-group" style={{width:90,flexShrink:0}}>
+                        <div className="input-wrap" title="Insurance guarantee yield (bu/ac)">
+                          <input type="text" value={r.insYield||""} placeholder="0"
+                            style={{background:"#f0fdf4"}}
+                            onChange={e => setArr("budgetCrops",i,"insYield",e.target.value.replace(/[^0-9.]/g,""))} />
+                        </div>
                       </div>
-                    </div>
-                    <div className="input-group" style={{width:90,flexShrink:0}}>
-                      <div className="input-wrap" title="Insurance guarantee price ($/unit)">
-                        <span className="prefix">$</span>
-                        <input type="text" value={r.insPrice||""} placeholder="0"
-                          style={{background:"#f0fdf4"}}
-                          onChange={e => setArr("budgetCrops",i,"insPrice",e.target.value.replace(/[^0-9.]/g,""))} />
+                      <div className="input-group" style={{width:90,flexShrink:0}}>
+                        <div className="input-wrap" title="Insurance guarantee price ($/unit)">
+                          <span className="prefix">$</span>
+                          <input type="text" value={r.insPrice||""} placeholder="0"
+                            style={{background:"#f0fdf4"}}
+                            onChange={e => setArr("budgetCrops",i,"insPrice",e.target.value.replace(/[^0-9.]/g,""))} />
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
+                      <CalcRow value={insTotal} style={{width:115,background:insTotal>0?"#f0fdf4":undefined,color:insTotal>0?"#15803d":undefined}} />
+                    </>
+                  );
+                })()}
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetCrops",i)}>x</button>
               </div>
