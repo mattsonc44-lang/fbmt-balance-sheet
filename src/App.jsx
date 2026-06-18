@@ -4757,7 +4757,7 @@ export default function BalanceSheet() {
 
 <!-- COVER PAGE -->
 <div class="page cover">
-  <img src="${FBMT_LOGO}" style="height:80px;margin-bottom:36pt"/>
+  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:auto;width:auto;max-height:72px;max-width:280px;display:block;margin:0 auto 24pt;"/>
   <div style="font-size:20pt;font-weight:900;color:#6B0E1E">Agricultural Loan Package</div>
   <div style="font-size:14pt;font-weight:700;margin-top:12pt">${data.clientName||''}</div>
   <div style="font-size:10pt;color:#555;margin-top:6pt">As of ${data.asOfDate||''}</div>
@@ -4772,7 +4772,7 @@ export default function BalanceSheet() {
 
 <!-- BALANCE SHEET SUMMARY PAGE -->
 <div class="page">
-  <img src="${FBMT_LOGO}" style="height:48px;margin-bottom:8pt"/>
+  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:auto;width:auto;max-height:48px;max-width:200px;display:block;margin-bottom:8pt;"/>
   <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
     Balance Sheet — ${data.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${data.asOfDate||''}</span>
   </div>
@@ -4830,7 +4830,7 @@ export default function BalanceSheet() {
 
 <!-- BUDGET & KEY METRICS PAGE -->
 <div class="page">
-  <img src="${FBMT_LOGO}" style="height:48px;margin-bottom:8pt"/>
+  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:auto;width:auto;max-height:48px;max-width:200px;display:block;margin-bottom:8pt;"/>
   <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
     Budget Summary — ${data.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">Production Year ${data.asOfDate?data.asOfDate.slice(0,4):new Date().getFullYear()}</span>
   </div>
