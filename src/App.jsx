@@ -4689,449 +4689,95 @@ export default function BalanceSheet() {
   };
 
   const generateLenderPackage = async () => {
-    const m = numVal;
-    const pFmt = v => v && m(v) ? "$"+Number(m(v)).toLocaleString("en-US",{maximumFractionDigits:0}) : "—";
-    const n2 = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
-
-    // ── Linked entities — fetch full data ─────────────────────────────
+    // Fetch linked entity full data
     const linkedNames = data.linkedEntities || [];
     const linkedData = (await Promise.all(
       linkedNames.map(async name => {
         const sheet = savedSheets.find(s => s.clientName === name);
         if (!sheet) return null;
-        try {
-          const item = await storage.get(sheet.key);
-          return item ? JSON.parse(item.value) : null;
-        } catch { return null; }
+        try { const item = await storage.get(sheet.key); return item ? JSON.parse(item.value) : null; }
+        catch { return null; }
       })
     )).filter(Boolean);
 
-    const calcSummary = d => {
-      const cash     = n2(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const farmProd = (d.farmProducts||[]).reduce((s,r)=>s+n2(r.quantity)*n2(r.pricePerUnit)*(n2(r.share||'100')/100),0);
-      const supplies = (d.supplies||[]).reduce((s,r)=>s+n2(r.value),0);
-      const otherCur = (d.otherCurrent||[]).reduce((s,r)=>s+n2(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const lsMkt    = (d.livestockMarket||[]).reduce((s,r)=>s+n2(r.value),0);
-      const breeding = (d.breedingStock||[]).reduce((s,r)=>s+n2(r.value),0);
-      const re       = (d.realEstate||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.valuePerAcre),0);
-      const vehicles = (d.vehicles||[]).reduce((s,r)=>s+n2(r.value),0);
-      const machinery= (d.machinery||[]).reduce((s,r)=>s+n2(r.value),0);
-      const otherAssets=(d.otherAssets||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const totalCurAssets = cash+farmProd+supplies+otherCur+lsMkt;
-      const totalLTAssets  = breeding+re+vehicles+machinery+otherAssets;
-      const totalAssets    = totalCurAssets+totalLTAssets;
-      const opNotes  = (d.operatingNotes||[]).reduce((s,r)=>s+n2(r.balance),0);
-      const acctsDue = (d.accountsDue||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const intermed = (d.intermediatDebt||[]).reduce((s,r)=>s+n2(r.principal),0);
-      const reCur    = (d.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
-      const reMort   = (d.reMortgages||[]).reduce((s,r)=>s+n2(r.principal),0);
-      const otherLiab= (d.otherLiabilities||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const totalLiab= opNotes+acctsDue+intermed+reCur+reMort+otherLiab;
-      return {cash,farmProd,supplies,otherCur,lsMkt,breeding,re,vehicles,machinery,otherAssets,
-              totalCurAssets,totalLTAssets,totalAssets,opNotes,acctsDue,intermed,reCur,reMort,otherLiab,totalLiab,
-              netWorth:totalAssets-totalLiab};
-    };
-
-    const buildEntityPage = (d) => {
-      const s = calcSummary(d);
-      const row = (l,v,bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1pt solid #000;':''}"><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
-      const brow = (l,v) => `<tr><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
-      // Check if entity has meaningful budget data
-      const hasBudget = (d.budgetCrops||[]).some(r=>r.crop) || 
-                        (d.budgetLivestock||[]).some(r=>r.type) ||
-                        (d.budgetExpenses||[]).some(r=>r.description&&n2(r.amount));
-      const eBCrop = (d.budgetCrops||[]).reduce((s,r)=>{
+    // Build entity pages as extra HTML pages using inline styles
+    const n2 = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
+    const pF = v => v&&n2(v) ? '$'+Number(n2(v)).toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
+    const entityPages = linkedData.map(d => {
+      const cash=n2(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const farmProd=(d.farmProducts||[]).reduce((s,r)=>s+n2(r.quantity)*n2(r.pricePerUnit)*(n2(r.share||'100')/100),0);
+      const supplies=(d.supplies||[]).reduce((s,r)=>s+n2(r.value),0);
+      const otherCur=(d.otherCurrent||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const lsMkt=(d.livestockMarket||[]).reduce((s,r)=>s+n2(r.value),0);
+      const breed=(d.breedingStock||[]).reduce((s,r)=>s+n2(r.value),0);
+      const re=(d.realEstate||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.valuePerAcre),0);
+      const veh=(d.vehicles||[]).reduce((s,r)=>s+n2(r.value),0);
+      const mach=(d.machinery||[]).reduce((s,r)=>s+n2(r.value),0);
+      const oth=(d.otherAssets||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const tCA=cash+farmProd+supplies+otherCur+lsMkt;
+      const tLA=breed+re+veh+mach+oth;
+      const tA=tCA+tLA;
+      const opN=(d.operatingNotes||[]).reduce((s,r)=>s+n2(r.balance),0);
+      const acc=(d.accountsDue||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const int=(d.intermediatDebt||[]).reduce((s,r)=>s+n2(r.principal),0);
+      const reC=(d.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
+      const reM=(d.reMortgages||[]).reduce((s,r)=>s+n2(r.principal),0);
+      const oL=(d.otherLiabilities||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const tL=opN+acc+int+reC+reM+oL; const nW=tA-tL;
+      const bCrop=(d.budgetCrops||[]).reduce((s,r)=>{
         const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
         return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
       },0);
-      const eBLS   = (d.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
-      const eBMisc = (d.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const eBInc  = eBCrop+eBLS+eBMisc;
-      const eBExp  = (d.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const eBDebt = (d.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
-                   + (d.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0);
-      const eBNet  = eBInc-eBExp-eBDebt;
-      const eDSCR  = eBDebt > 0 ? ((eBNet+eBDebt)/eBDebt).toFixed(2) : '—';
-      return `
-      <div class="page">
-        <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>
-        <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
-          Balance Sheet — ${d.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${d.asOfDate||''}</span>
-          <span style="font-size:8pt;font-weight:400;color:#6B0E1E;margin-left:12pt">(Related Entity)</span>
-        </div>
-        <div class="two-col">
-          <div>
-            <h2>Assets</h2>
-            <table>
-              ${row('Cash & Bank Accounts',s.cash)}
-              ${row('Farm Products',s.farmProd)}
-              ${row('Supplies & Prepaid',s.supplies)}
-              ${row('Other Current',s.otherCur)}
-              ${row('Livestock (Market)',s.lsMkt)}
-              ${row('Total Current Assets',s.totalCurAssets,true)}
-              ${row('Breeding Stock',s.breeding)}
-              ${row('Real Estate',s.re)}
-              ${row('Vehicles',s.vehicles)}
-              ${row('Machinery',s.machinery)}
-              ${row('Other Assets',s.otherAssets)}
-              ${row('Total LT Assets',s.totalLTAssets,true)}
-              ${row('TOTAL ASSETS',s.totalAssets,true)}
-            </table>
-          </div>
-          <div>
-            <h2>Liabilities</h2>
-            <table>
-              ${row('Operating Notes',s.opNotes)}
-              ${row('Accounts Due',s.acctsDue)}
-              ${row('Total Current Liab.',s.opNotes+s.acctsDue,true)}
-              ${row('Intermediate Debt',s.intermed)}
-              ${row('RE Current Portion',s.reCur)}
-              ${row('RE Mortgages LT',s.reMort)}
-              ${row('Other Liabilities',s.otherLiab)}
-              ${row('Total LT Liab.',s.intermed+s.reCur+s.reMort+s.otherLiab,true)}
-              ${row('TOTAL LIABILITIES',s.totalLiab,true)}
-            </table>
-            <h2>Net Worth</h2>
-            <table>
-              <tr style="font-weight:700;font-size:11pt;background:#f0f0f0">
-                <td>NET WORTH</td>
-                <td style="text-align:right;color:${s.netWorth>=0?'#15803d':'#dc2626'}">${pFmt(s.netWorth)}</td>
-              </tr>
-            </table>
-            ${hasBudget ? `<h2>Key Metrics</h2>
-            <div class="metric ${eBNet>=0?'pos':'neg'}"><div><div class="label">Net Farm Income</div></div><div class="value">${pFmt(eBNet)}</div></div>
-            <div class="metric ${parseFloat(eDSCR)>=1.25?'pos':parseFloat(eDSCR)>=1?'':'neg'}"><div><div class="label">DSCR</div><div style="font-size:7pt;color:#999">Target ≥ 1.25</div></div><div class="value">${eDSCR}x</div></div>
-            <div class="metric ${(s.totalCurAssets-(s.opNotes+s.acctsDue))>=0?'pos':'neg'}"><div><div class="label">Working Capital</div></div><div class="value">${pFmt(s.totalCurAssets-(s.opNotes+s.acctsDue))}</div></div>` : ''}
+      const bLS=(d.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
+      const bMisc=(d.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const bInc=bCrop+bLS+bMisc;
+      const bExp=(d.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
+      const bDebt=(d.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
+               +(d.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0);
+      const bNet=bInc-bExp-bDebt;
+      const hasBudget=bInc>1||bExp>1;
+      const R=(l,v,b)=>`<div class="row"><span${b?' style="font-weight:700"':''}>${l}</span><span${b?' style="font-weight:700"':''}>${pF(v)}</span></div>`;
+      return `<div style="page-break-before:always">
+        <div class="hdr">
+          <div class="logo-box"><img src="${FBMT_LOGO}" alt="FBMT" style="width:82px;height:48px;"/></div>
+          <div style="flex:1;padding-left:16pt">
+            <div style="font-size:11pt;font-weight:700;text-decoration:underline">${d.clientName||''} — Related Entity</div>
+            <div style="font-size:8pt;margin-top:3pt">As of: ${d.asOfDate||''}</div>
           </div>
         </div>
-        ${hasBudget ? `
-        <div style="margin-top:12pt">
-          <h2>Budget Summary</h2>
-          <div class="two-col">
-            <div>
-              <table>
-                ${(d.budgetCrops||[]).filter(r=>r.crop).map(r=>{
-                  const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
-                  const pr=n2(cp?cp.price:null)||n2(r.price);
-                  return brow(r.crop+' ('+r.acres+' ac)',n2(r.acres)*n2(r.yieldPerAcre)*pr*(n2(r.share||'100')/100));
-                }).join('')}
-                ${(d.budgetLivestock||[]).filter(r=>r.type).map(r=>brow(r.head+' '+r.type,n2(r.head)*n2(r.lbs)*n2(r.price))).join('')}
-                ${(d.budgetMisc||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
-                <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Income</td><td style="text-align:right">${pFmt(eBInc)}</td></tr>
-              </table>
-            </div>
-            <div>
-              <table>
-                ${(d.budgetExpenses||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
-                <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Expenses</td><td style="text-align:right">${pFmt(eBExp)}</td></tr>
-                <tr style="font-weight:700;font-size:10pt;background:#f0f0f0;border-top:1.5pt solid #000"><td>Net Income</td><td style="text-align:right;color:${eBNet>=0?'#15803d':'#dc2626'}">${pFmt(eBNet)}</td></tr>
-              </table>
-            </div>
+        <div class="body">
+          <div class="col">
+            <div class="col-head"><span>ASSETS</span></div>
+            ${R('Cash & Bank',cash)}${R('Farm Products',farmProd)}${R('Supplies',supplies)}
+            ${R('Other Current',otherCur)}${R('Livestock (Market)',lsMkt)}
+            ${R('TOTAL CURRENT ASSETS',tCA,true)}
+            ${R('Breeding Stock',breed)}${R('Real Estate',re)}${R('Vehicles',veh)}
+            ${R('Machinery',mach)}${R('Other Assets',oth)}
+            ${R('TOTAL ASSETS',tA,true)}
           </div>
-        </div>` : ''}
+          <div class="col">
+            <div class="col-head"><span>LIABILITIES</span></div>
+            ${R('Operating Notes',opN)}${R('Accounts Due',acc)}
+            ${R('TOTAL CURRENT LIAB.',opN+acc,true)}
+            ${R('Intermediate Debt',int)}${R('RE Current',reC)}
+            ${R('RE Mortgages LT',reM)}${R('Other Liabilities',oL)}
+            ${R('TOTAL LIABILITIES',tL,true)}
+            <div class="row" style="font-weight:700;font-size:9pt;border-top:1.5pt solid #000;margin-top:4pt">
+              <span>NET WORTH</span><span style="color:${nW>=0?'#15803d':'#dc2626'}">${pF(nW)}</span>
+            </div>
+            ${hasBudget?`<br/><div class="col-head"><span>BUDGET SUMMARY</span></div>
+            ${R('Total Income',bInc)}${R('Total Expenses',bExp)}${R('Debt Service',bDebt)}
+            ${R('NET FARM INCOME',bNet,true)}`:''}
+          </div>
+        </div>
       </div>`;
-    };
+    }).join('');
 
-    // ── Section totals ─────────────────────────────────────────────────
-    const cash     = n2(data.cashGlacier)+(data.cashOther||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const farmProd = (data.farmProducts||[]).reduce((s,r)=>s+n2(r.quantity)*n2(r.pricePerUnit)*(n2(r.share||'100')/100),0);
-    const supplies = (data.supplies||[]).reduce((s,r)=>s+n2(r.value),0);
-    const otherCur = (data.otherCurrent||[]).reduce((s,r)=>s+n2(r.amount),0)+(data.federalPayments||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const lsMkt    = (data.livestockMarket||[]).reduce((s,r)=>s+n2(r.value),0);
-    const breeding = (data.breedingStock||[]).reduce((s,r)=>s+n2(r.value),0);
-    const re       = (data.realEstate||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.valuePerAcre),0);
-    const vehicles = (data.vehicles||[]).reduce((s,r)=>s+n2(r.value),0);
-    const machinery= (data.machinery||[]).reduce((s,r)=>s+n2(r.value),0);
-    const otherAssets=(data.otherAssets||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const totalCurAssets = cash+farmProd+supplies+otherCur+lsMkt;
-    const totalLTAssets  = breeding+re+vehicles+machinery+otherAssets;
-    const totalAssets    = totalCurAssets+totalLTAssets;
-    const opNotes  = (data.operatingNotes||[]).reduce((s,r)=>s+n2(r.balance),0);
-    const acctsDue = (data.accountsDue||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const intermed = (data.intermediatDebt||[]).reduce((s,r)=>s+n2(r.principal),0);
-    const reCur    = (data.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
-    const reMort   = (data.reMortgages||[]).reduce((s,r)=>s+n2(r.principal),0);
-    const otherLiab= (data.otherLiabilities||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const totalLiab= opNotes+acctsDue+intermed+reCur+reMort+otherLiab;
-    const netWorth = totalAssets-totalLiab;
-
-    // ── Budget totals ──────────────────────────────────────────────────
-    const bCrop  = (data.budgetCrops||[]).reduce((s,r)=>{
-      const cp = commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
-      return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
-    },0);
-    const bLS    = (data.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
-    const bMisc  = (data.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const bInc   = bCrop+bLS+bMisc;
-    const bExp   = (data.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
-    const bDebt  = (data.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
-                 + (data.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
-                 + (data.budgetProposedDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
-    const bNet   = bInc-bExp-bDebt;
-    const dscr   = bDebt > 0 ? ((bNet+bDebt)/bDebt).toFixed(2) : '—';
-
-    const row = (l,v,bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1pt solid #000;':''}"><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
-    const brow = (l,v) => `<tr><td>${l}</td><td style="text-align:right">${pFmt(v)}</td></tr>`;
-
-    const W = window.open("","_blank","width=900,height=1100");
-    if (!W) { alert("Please allow popups to generate the lender package."); return; }
-    W.document.write(`<!DOCTYPE html><html><head><title>Lender Package - ${data.clientName||''}</title>
-<style>
-  *{box-sizing:border-box}
-  body{font-family:Arial,sans-serif;font-size:8.5pt;color:#000;margin:0;padding:0}
-  .page{page-break-after:always;padding:.5in .55in;min-height:10.5in;display:flex;flex-direction:column}
-  .cover{justify-content:center;align-items:center;text-align:center}
-  h2{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6B0E1E;margin:18pt 0 6pt;border-bottom:1.5pt solid #6B0E1E;padding-bottom:3pt}
-  table{width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:8pt}
-  td{padding:2.5pt 4pt;border-bottom:.5pt dotted #ccc}
-  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18pt}
-  .metric{background:#f5f5f5;border-left:3pt solid #6B0E1E;padding:8pt 10pt;margin-bottom:8pt;display:flex;justify-content:space-between;align-items:center}
-  .metric .label{font-size:8pt;color:#555}
-  .metric .value{font-size:12pt;font-weight:700;color:#1a1a1a}
-  .metric.pos .value{color:#15803d} .metric.neg .value{color:#dc2626}
-  .sig{border-top:1pt solid #000;width:280pt;margin-top:4pt;padding-top:4pt;font-size:7.5pt;color:#555;display:inline-block}
-  @media print{.no-print{display:none!important}}
-</style>
-</head><body>
-
-<!-- COVER PAGE -->
-<div class="page cover">
-  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:124px;height:72px;display:block;margin:0 auto 24pt;"/>
-  <div style="font-size:20pt;font-weight:900;color:#6B0E1E">Agricultural Loan Package</div>
-  <div style="font-size:14pt;font-weight:700;margin-top:12pt">${data.clientName||''}</div>
-  <div style="font-size:10pt;color:#555;margin-top:6pt">As of ${data.asOfDate||''}</div>
-  <div style="margin-top:48pt;font-size:8.5pt;color:#777">
-    Prepared by First Bank of Montana — Division of Glacier Bank<br/>
-    ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}
-  </div>
-  <div style="margin-top:32pt;border:1pt solid #ccc;padding:12pt 24pt;font-size:8pt;color:#555">
-    Contents: Balance Sheet Summary &nbsp;·&nbsp; Budget Summary &nbsp;·&nbsp; Key Metrics${linkedData.length>0?' &nbsp;·&nbsp; Related Entities ('+linkedData.length+')':''}
-  </div>
-</div>
-
-<!-- BALANCE SHEET SUMMARY PAGE -->
-<div class="page">
-  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>
-  <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
-    Balance Sheet — ${data.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${data.asOfDate||''}</span>
-  </div>
-  <div class="two-col">
-    <div>
-      <h2>Assets</h2>
-      <table>
-        ${row('Cash &amp; Bank Accounts',cash)}
-        ${row('Farm Products on Hand',farmProd)}
-        ${row('Supplies &amp; Prepaid',supplies)}
-        ${row('Other Current Assets',otherCur)}
-        ${row('Livestock (Market)',lsMkt)}
-        ${row('Total Current Assets',totalCurAssets,true)}
-        ${row('Breeding Stock',breeding)}
-        ${row('Real Estate',re)}
-        ${row('Vehicles',vehicles)}
-        ${row('Machinery &amp; Equipment',machinery)}
-        ${row('Other Assets',otherAssets)}
-        ${row('Total Long-Term Assets',totalLTAssets,true)}
-        ${row('TOTAL ASSETS',totalAssets,true)}
-      </table>
-      ${(data.realEstate||[]).filter(r=>r.acres&&r.description).map(r=>
-        `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.acres} ac ${r.description} @ ${pFmt(r.valuePerAcre)}/ac</div>`
-      ).join('')}
-    </div>
-    <div>
-      <h2>Liabilities</h2>
-      <table>
-        ${row('Operating Notes',opNotes)}
-        ${row('Accounts Due',acctsDue)}
-        ${row('Total Current Liabilities',opNotes+acctsDue,true)}
-        ${row('Intermediate Term Debt',intermed)}
-        ${row('RE Current Portion',reCur)}
-        ${row('RE Mortgages LT',reMort)}
-        ${row('Other Liabilities',otherLiab)}
-        ${row('Total LT Liabilities',intermed+reCur+reMort+otherLiab,true)}
-        ${row('TOTAL LIABILITIES',totalLiab,true)}
-      </table>
-      <h2>Net Worth</h2>
-      <table>
-        <tr style="font-weight:700;font-size:11pt;background:#f0f0f0">
-          <td>NET WORTH</td>
-          <td style="text-align:right;color:${netWorth>=0?'#15803d':'#dc2626'}">${pFmt(netWorth)}</td>
-        </tr>
-      </table>
-      <h2>Key Metrics</h2>
-      <div class="metric ${bNet>=0?'pos':'neg'}">
-        <div><div class="label">Net Farm Income</div></div>
-        <div class="value">${pFmt(bNet)}</div>
-      </div>
-      <div class="metric ${parseFloat(dscr)>=1.25?'pos':parseFloat(dscr)>=1?'':'neg'}">
-        <div><div class="label">Debt Service Coverage Ratio</div><div style="font-size:7pt;color:#999">Target: ≥ 1.25</div></div>
-        <div class="value">${dscr}x</div>
-      </div>
-      <div class="metric ${(totalCurAssets-(opNotes+acctsDue))>=0?'pos':'neg'}">
-        <div><div class="label">Working Capital</div></div>
-        <div class="value">${pFmt(totalCurAssets-(opNotes+acctsDue))}</div>
-      </div>
-      ${(data.intermediatDebt||[]).filter(r=>r.creditor).map(r=>
-        `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.creditor} ${r.security?'('+r.security+')':''} — ${pFmt(r.principal)} @ ${r.annualPmt?'$'+Number(numVal(r.annualPmt)).toLocaleString()+'/yr':''}</div>`
-      ).join('')}
-      ${(data.reMortgages||[]).filter(r=>r.lienHolder).map(r=>
-        `<div style="font-size:7pt;color:#555;padding:1pt 4pt">• ${r.lienHolder} ${r.terms?'('+r.terms+')':''} — ${pFmt(r.principal)}</div>`
-      ).join('')}
-    </div>
-  </div>
-</div>
-
-<!-- BUDGET & KEY METRICS PAGE -->
-<div class="page">
-  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>
-  <div style="font-size:12pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">
-    Budget Summary — ${data.clientName||''} &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">Production Year ${data.asOfDate?data.asOfDate.slice(0,4):new Date().getFullYear()}</span>
-  </div>
-  <div class="two-col">
-    <div>
-      <h2>Income</h2>
-      <table>
-        ${(data.budgetCrops||[]).filter(r=>r.crop).map(r=>{
-          const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
-          const pr=n2(cp?cp.price:null)||n2(r.price);
-          const tot=n2(r.acres)*n2(r.yieldPerAcre)*pr*(n2(r.share||'100')/100);
-          return brow(`${r.acres||'?'} ac ${r.crop} @ ${r.yieldPerAcre||'?'}/ac × $${pr}`, tot);
-        }).join('')}
-        ${(data.budgetLivestock||[]).filter(r=>r.type).map(r=>brow(`${r.head||'?'} ${r.type}`,n2(r.head)*n2(r.lbs)*n2(r.price))).join('')}
-        ${(data.budgetMisc||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
-        <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Income</td><td style="text-align:right">${pFmt(bInc)}</td></tr>
-      </table>
-      <h2>Operating Expenses</h2>
-      <table>
-        ${(data.budgetExpenses||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
-        <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Operating</td><td style="text-align:right">${pFmt(bExp)}</td></tr>
-      </table>
-    </div>
-    <div>
-      <h2>Debt Service</h2>
-      <table>
-        ${(data.intermediatDebt||[]).filter(r=>r.creditor&&!r.corpPaid&&n2(r.annualPmt)).map(r=>brow(r.creditor+(r.security?' ('+r.security+')':''),n2(r.annualPmt))).join('')}
-        ${(data.reCurrent||[]).filter(r=>r.creditor&&!r.corpPaid&&n2(r.annualPmt)).map(r=>brow(r.creditor,n2(r.annualPmt))).join('')}
-        ${(data.budgetProposedDebt||[]).filter(r=>r.description&&n2(r.annualPmt)).map(r=>`<tr style="color:#6B0E1E"><td>${r.description} <em>(proposed)</em></td><td style="text-align:right">${pFmt(n2(r.annualPmt))}</td></tr>`).join('')}
-        <tr style="font-weight:700;background:#f0f0f0;border-top:1pt solid #000"><td>Total Debt Service</td><td style="text-align:right">${pFmt(bDebt)}</td></tr>
-      </table>
-    </div>
-  </div>
-  <div style="margin-top:auto;padding-top:24pt;display:flex;gap:40pt">
-    <div><div class="sig">Borrower Signature &amp; Date</div></div>
-    <div><div class="sig">Loan Officer &amp; Date</div></div>
-    <div><div class="sig">Branch Manager &amp; Date</div></div>
-  </div>
-</div>
-
-<!-- DETAIL PAGES -->
-${(() => {
-  const pF = v => v && numVal(v) ? '$'+Number(numVal(v)).toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
-  const tRow = (cells, bold) => `<tr style="${bold?'font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000;':''}">${cells.map(([w,v,r])=>`<td style="width:${w||'auto'};text-align:${r?'right':'left'};padding:3pt 5pt;border-bottom:.5pt dotted #ccc">${v||'—'}</td>`).join('')}</tr>`;
-  const secHead = title => `<div style="background:#6B0E1E;color:white;font-weight:700;font-size:10pt;padding:6pt 10pt;margin:0 0 4pt;border-radius:2pt">${title}</div>`;
-  const logo = `<img src="${FBMT_LOGO}" alt="FBMT" style="width:82px;height:48px;display:block;margin-bottom:8pt;"/>`;
-  const hdr = `${logo}<div style="font-size:11pt;font-weight:700;border-bottom:2pt solid #6B0E1E;padding-bottom:4pt;margin-bottom:12pt">${data.clientName||''} — Balance Sheet Detail &nbsp;<span style="font-size:9pt;font-weight:400;color:#555">As of ${data.asOfDate||''}</span></div>`;
-
-  // Real Estate detail
-  const reRows = (data.realEstate||[]).filter(r=>r.description||r.acres);
-  const reDetail = reRows.length ? `
-    <div class="page">
-      ${hdr}
-      ${secHead('🏡 Real Estate Schedule')}
-      <table style="width:100%;border-collapse:collapse;font-size:8pt">
-        <thead><tr style="background:#333;color:white">
-          <th style="padding:3pt 5pt;text-align:left">Description</th>
-          <th style="padding:3pt 5pt;text-align:right">Acres</th>
-          <th style="padding:3pt 5pt;text-align:right">Value/Ac</th>
-          <th style="padding:3pt 5pt;text-align:right">Total Value</th>
-          <th style="padding:3pt 5pt;text-align:left">Type</th>
-        </tr></thead>
-        <tbody>
-          ${reRows.map(r=>`<tr style="border-bottom:.5pt dotted #ccc">
-            <td style="padding:3pt 5pt">${r.description||''}</td>
-            <td style="padding:3pt 5pt;text-align:right">${r.acres||''}</td>
-            <td style="padding:3pt 5pt;text-align:right">${pF(r.valuePerAcre)}</td>
-            <td style="padding:3pt 5pt;text-align:right;font-weight:600">${r.acres&&r.valuePerAcre?pF(numVal(r.acres)*numVal(r.valuePerAcre)):''}</td>
-            <td style="padding:3pt 5pt;color:#555">${r.reType||''}</td>
-          </tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000">
-            <td colspan="3" style="padding:4pt 5pt;text-align:right">TOTAL REAL ESTATE</td>
-            <td style="padding:4pt 5pt;text-align:right">${pF(reRows.reduce((s,r)=>s+numVal(r.acres)*numVal(r.valuePerAcre),0))}</td>
-            <td></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>` : '';
-
-  // Debt detail
-  const opN = (data.operatingNotes||[]).filter(r=>r.creditor);
-  const intD = (data.intermediatDebt||[]).filter(r=>r.creditor);
-  const reC = (data.reCurrent||[]).filter(r=>r.creditor);
-  const reM = (data.reMortgages||[]).filter(r=>r.lienHolder);
-  const debtDetail = (opN.length+intD.length+reC.length+reM.length)>0 ? `
-    <div class="page">
-      ${hdr}
-      ${opN.length?`${secHead('🏦 Operating Notes')}
-        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
-          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Creditor</th><th style="padding:3pt 5pt;text-align:left">Due Date</th><th style="padding:3pt 5pt;text-align:right">Balance</th></tr></thead>
-          <tbody>${opN.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.creditor||''}</td><td style="padding:3pt 5pt">${r.dueDate||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.balance)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="2" style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(opN.reduce((s,r)=>s+numVal(r.balance),0))}</td></tr>
-          </tbody>
-        </table>`:''}
-      ${intD.length?`${secHead('📋 Intermediate Term Debt')}
-        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
-          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Creditor</th><th style="padding:3pt 5pt;text-align:left">Security</th><th style="padding:3pt 5pt;text-align:left">Due</th><th style="padding:3pt 5pt;text-align:right">Annual Pmt</th><th style="padding:3pt 5pt;text-align:right">Principal</th></tr></thead>
-          <tbody>${intD.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.creditor||''}</td><td style="padding:3pt 5pt">${r.security||''}</td><td style="padding:3pt 5pt">${r.dueDate||''}</td><td style="padding:3pt 5pt;text-align:right">${pF(r.annualPmt)}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.principal)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="3" style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(intD.reduce((s,r)=>s+numVal(r.annualPmt),0))}</td><td style="padding:3pt 5pt;text-align:right">${pF(intD.reduce((s,r)=>s+numVal(r.principal),0))}</td></tr>
-          </tbody>
-        </table>`:''}
-      ${reC.length?`${secHead('🏠 RE Current Portion')}
-        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
-          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Creditor</th><th style="padding:3pt 5pt;text-align:right">Annual Payment</th></tr></thead>
-          <tbody>${reC.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.creditor||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.annualPmt)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(reC.reduce((s,r)=>s+numVal(r.annualPmt),0))}</td></tr>
-          </tbody>
-        </table>`:''}
-      ${reM.length?`${secHead('🏦 RE Mortgages (Long-Term)')}
-        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
-          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Lien Holder</th><th style="padding:3pt 5pt;text-align:left">Terms</th><th style="padding:3pt 5pt;text-align:right">Principal</th></tr></thead>
-          <tbody>${reM.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.lienHolder||''}</td><td style="padding:3pt 5pt">${r.terms||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.principal)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="2" style="padding:3pt 5pt;text-align:right">TOTAL</td><td style="padding:3pt 5pt;text-align:right">${pF(reM.reduce((s,r)=>s+numVal(r.principal),0))}</td></tr>
-          </tbody>
-        </table>`:''}
-    </div>` : '';
-
-  // Vehicles & Machinery
-  const vehs = (data.vehicles||[]).filter(r=>r.year||r.make);
-  const machs = (data.machinery||[]).filter(r=>r.year||r.make);
-  const schedDetail = (vehs.length+machs.length)>0 ? `
-    <div class="page">
-      ${hdr}
-      ${vehs.length?`${secHead('🚗 Titled Vehicles Schedule')}
-        <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt">
-          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt">Year</th><th style="padding:3pt 5pt">Make / Description</th><th style="padding:3pt 5pt">VIN</th><th style="padding:3pt 5pt;text-align:right">Value</th></tr></thead>
-          <tbody>${vehs.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.year||''}</td><td style="padding:3pt 5pt">${r.make||''}</td><td style="padding:3pt 5pt;color:#555;font-size:7pt">${r.vin||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.value)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="3" style="padding:3pt 5pt;text-align:right">TOTAL VEHICLES</td><td style="padding:3pt 5pt;text-align:right">${pF(vehs.reduce((s,r)=>s+numVal(r.value),0))}</td></tr>
-          </tbody>
-        </table>`:''}
-      ${machs.length?`${secHead('⚙️ Machinery & Equipment Schedule')}
-        <table style="width:100%;border-collapse:collapse;font-size:8pt">
-          <thead><tr style="background:#333;color:white"><th style="padding:3pt 5pt">Year</th><th style="padding:3pt 5pt">Description / Make</th><th style="padding:3pt 5pt">Size/Serial</th><th style="padding:3pt 5pt;text-align:right">Value</th></tr></thead>
-          <tbody>${machs.map(r=>`<tr style="border-bottom:.5pt dotted #ccc"><td style="padding:3pt 5pt">${r.year||''}</td><td style="padding:3pt 5pt">${r.make||''}</td><td style="padding:3pt 5pt;color:#555;font-size:7pt">${r.size||r.serial||''}</td><td style="padding:3pt 5pt;text-align:right;font-weight:600">${pF(r.value)}</td></tr>`).join('')}
-          <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td colspan="3" style="padding:3pt 5pt;text-align:right">TOTAL MACHINERY</td><td style="padding:3pt 5pt;text-align:right">${pF(machs.reduce((s,r)=>s+numVal(r.value),0))}</td></tr>
-          </tbody>
-        </table>`:''}
-    </div>` : '';
-
-  return reDetail + debtDetail + schedDetail;
-})()}
-
-<button class="no-print" onclick="window.print()" style="position:fixed;top:12px;right:12px;background:#6B0E1E;color:white;border:none;padding:10px 22px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">🖨 Print / Save PDF</button>
-${linkedData.map(d=>buildEntityPage(d)).join('\n')}
-</body></html>`);
-    W.document.close();
+    handlePrint(true, entityPages);
   };
 
-  const handlePrint = () => {
+
+  const handlePrint = (withCover=false, extraPages='') => {
     const m = numVal;
     const pFmt = v => v && m(v) ? "$"+Number(m(v)).toLocaleString("en-US",{maximumFractionDigits:0}) : "";
     const blank = (arr, min) => { const r=[...arr]; while(r.length<min) r.push({}); return r; };
@@ -5172,6 +4818,14 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .sched-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4pt;}
 .sched-client{font-size:8pt;color:#555;}
 </style></head><body>
+${withCover ? `
+<div style="page-break-after:always;min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-family:Arial,sans-serif;padding:1in">
+  <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:175px;height:102px;margin-bottom:48pt"/>
+  <div style="font-size:22pt;font-weight:900;color:#6B0E1E">Agricultural Loan Package</div>
+  <div style="font-size:15pt;font-weight:700;margin-top:14pt">${data.clientName||""}</div>
+  <div style="font-size:11pt;color:#555;margin-top:8pt">As of ${data.asOfDate||""}</div>
+  <div style="margin-top:56pt;font-size:9pt;color:#777">First Bank of Montana — Division of Glacier Bank<br/>${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
+</div>` : ""}
 <div class="hdr">
   <div class="logo-box"><img src=\"data:image/jpeg;base64,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\" alt=\"First Bank of Montana\" style=\"height:54px;width:auto;\"/></div>
   <div><h1>Balance Sheet prepared for:</h1><h2>${data.clientName||""}</h2></div>
@@ -5273,7 +4927,9 @@ ${blank(data.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><s
   </tbody>
 </table>
 <div class="sched-foot"><div class="sched-total">TOTAL MACHINERY AND EQUIPMENT: ${pFmt(machVal)||"$0"}</div></div>
-</div`;
+</div>
+${extraPages}
+</body></html>`;
     W.document.write(html);
     W.document.close();
     W.focus();
