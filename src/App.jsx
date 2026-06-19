@@ -4837,8 +4837,6 @@ export default function BalanceSheet() {
       })
     )).filter(Boolean);
 
-
-    // Build one combined document: cover+main BS + entity BSes
     const n2=v=>Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
     const pF=v=>v&&n2(v)?'$'+Number(n2(v)).toLocaleString('en-US',{maximumFractionDigits:0}):'—';
     const W = window.open("","_blank","width=850,height=1100");
@@ -4848,30 +4846,52 @@ export default function BalanceSheet() {
     const mainHTML = makeBSHTML(data, true, '');
     const mainBody = mainHTML.replace('</body></html>', '');
 
+    // Main client's budget page — only if they have actual budget data, using the same format as Print Budget
+    const mainHasBudget = budgetTotalIncome > 1 || budgetOperatingExpenses > 1;
+    const mainBudgetPage = mainHasBudget ? (() => {
+      const bHTML = buildBudgetHTML();
+      const bodyStart = bHTML.indexOf('<body>') + 6;
+      const bodyEnd = bHTML.lastIndexOf('</body>');
+      return '<div style="page-break-before:always">' + bHTML.slice(bodyStart, bodyEnd) + '</div>';
+    })() : '';
+
     // Build entity pages using the same full template
     const entityBSPages = linkedData.map(d => {
       const eHTML = makeBSHTML(d, false, '');
-      // Strip doctype/head/body wrapper - get just the body content
       const bodyStart = eHTML.indexOf('<body>') + 6;
       const bodyEnd = eHTML.lastIndexOf('</body>');
       return '<div style="page-break-before:always">' + eHTML.slice(bodyStart, bodyEnd) + '</div>';
     }).join('');
 
-    // Build entity budget pages
-    const brow = (l,v) => `<tr><td style="padding:3pt 5pt;border-bottom:.5pt dotted #ccc">${l}</td><td style="padding:3pt 5pt;text-align:right;border-bottom:.5pt dotted #ccc;font-weight:600">${pF(v)}</td></tr>`;
+    // Build entity budget pages — same format as the main budget (crop insurance columns + dual margin)
     const entityBudgetPages = linkedData.map(d => {
+      const insEnabled = !!d.budgetInsuranceEnabled;
       const bCrop=(d.budgetCrops||[]).reduce((s,r)=>{
-        const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
+        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
         return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
       },0);
+      const bInsTotal = insEnabled ? (d.budgetCrops||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100),0) : 0;
       const bLS=(d.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
       const bMisc=(d.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
       const bInc=bCrop+bLS+bMisc;
+      const bIncInsured=bInsTotal+bLS+bMisc;
       const bExp=(d.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
       const bDebt=(d.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
-               +(d.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0);
+               +(d.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
+               +(d.budgetProposedDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
       const bNet=bInc-bExp-bDebt;
+      const bNetInsured=bIncInsured-bExp-bDebt;
       if (bInc<=1&&bExp<=1) return ''; // no budget data
+      const cropRows=(d.budgetCrops||[]).filter(r=>r.crop).map(r=>{
+        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
+        const ep=n2(cp?cp.price:null)||n2(r.price);
+        const rv=n2(r.acres)*n2(r.yieldPerAcre)*ep*(n2(r.share||'100')/100);
+        const it=insEnabled?n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100):0;
+        return `<tr><td>${r.crop}</td><td class="r">${r.acres}</td><td class="r">${r.yieldPerAcre} ${r.unit||'bu'}</td><td class="r">$${ep.toFixed(2)}</td><td class="r">${r.share||100}%</td><td class="r">$${Math.round(rv).toLocaleString()}</td>`
+          +(insEnabled?`<td class="r" style="color:#555">${r.insYield||''}</td><td class="r" style="color:#555">$${r.insPrice||'—'}</td><td class="r" style="color:#15803d;font-weight:700">$${Math.round(it).toLocaleString()}</td>`:'')
+          +'</tr>';
+      }).join('');
+      const insColsHdr = insEnabled?'<th class="r" style="color:#15803d">Guar.Yield</th><th class="r" style="color:#15803d">Guar.Price</th><th class="r" style="color:#15803d">Ins.Total</th>':'';
       return `<div style="page-break-before:always;padding:.45in .4in;font-family:Arial,sans-serif;font-size:8pt">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12pt;border-bottom:2pt solid #6B0E1E;padding-bottom:8pt">
           <div>
@@ -4880,13 +4900,14 @@ export default function BalanceSheet() {
             <div style="font-size:8pt;color:#555">Related Entity &nbsp;·&nbsp; As of ${d.asOfDate||''}</div>
           </div>
         </div>
+        ${cropRows?`<table style="width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:6pt">
+          <tr style="background:#333;color:white"><th style="padding:3pt 5pt;text-align:left">Crop</th><th style="padding:3pt 5pt;text-align:right">Acres</th><th style="padding:3pt 5pt;text-align:right">Yield</th><th style="padding:3pt 5pt;text-align:right">Price</th><th style="padding:3pt 5pt;text-align:right">Share</th><th style="padding:3pt 5pt;text-align:right">Your Value</th>${insColsHdr}</tr>
+          ${cropRows}
+        </table>
+        <div style="display:flex;justify-content:space-between;border-top:1pt solid #000;padding-top:3pt;margin-bottom:3pt;font-weight:700;font-size:8pt"><span>Total Your Value</span><span>${pF(bCrop)}</span></div>
+        ${insEnabled?`<div style="display:flex;justify-content:space-between;padding-top:2pt;margin-bottom:6pt;font-weight:700;font-size:8pt;color:#15803d"><span>Total Insurance Value</span><span>${pF(bInsTotal)}</span></div>`:''}`:''}
         <table style="width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:10pt">
-          <tr><th colspan="2" style="text-align:left;background:#333;color:white;padding:3pt 5pt">INCOME</th></tr>
-          ${(d.budgetCrops||[]).filter(r=>r.crop).map(r=>{
-            const cp=commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase());
-            const pr=n2(cp?cp.price:null)||n2(r.price);
-            return brow(`${r.crop} (${r.acres||'?'} ac @ ${r.yieldPerAcre||'?'}/ac × $${pr})`,n2(r.acres)*n2(r.yieldPerAcre)*pr*(n2(r.share||'100')/100));
-          }).join('')}
+          <tr><th colspan="2" style="text-align:left;background:#333;color:white;padding:3pt 5pt">OTHER INCOME</th></tr>
           ${(d.budgetLivestock||[]).filter(r=>r.type).map(r=>brow(`${r.head||'?'} ${r.type}`,n2(r.head)*n2(r.lbs)*n2(r.price))).join('')}
           ${(d.budgetMisc||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
           <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td style="padding:3pt 5pt">TOTAL INCOME</td><td style="padding:3pt 5pt;text-align:right">${pF(bInc)}</td></tr>
@@ -4896,16 +4917,20 @@ export default function BalanceSheet() {
           ${(d.budgetExpenses||[]).filter(r=>r.description&&n2(r.amount)).map(r=>brow(r.description,n2(r.amount))).join('')}
           ${bDebt>0?`<tr style="color:#6B0E1E"><td style="padding:3pt 5pt;border-bottom:.5pt dotted #ccc">Debt Service</td><td style="padding:3pt 5pt;text-align:right;border-bottom:.5pt dotted #ccc;font-weight:600">${pF(bDebt)}</td></tr>`:''}
           <tr style="font-weight:700;background:#f0f0f0;border-top:1.5pt solid #000"><td style="padding:3pt 5pt">TOTAL EXPENSES + DEBT</td><td style="padding:3pt 5pt;text-align:right">${pF(bExp+bDebt)}</td></tr>
-          <tr style="font-weight:700;font-size:10pt;border-top:2pt solid #000"><td style="padding:4pt 5pt">NET FARM INCOME</td><td style="padding:4pt 5pt;text-align:right;color:${bNet>=0?'#15803d':'#dc2626'}">${pF(bNet)}</td></tr>
+          <tr style="font-weight:700;font-size:10pt;border-top:2pt solid #000"><td style="padding:4pt 5pt">BORROWER MARGIN</td><td style="padding:4pt 5pt;text-align:right;color:${bNet>=0?'#15803d':'#dc2626'}">${pF(bNet)}</td></tr>
+          ${insEnabled?`<tr style="font-weight:700;font-size:9pt;border-top:1pt solid #15803d"><td style="padding:4pt 5pt;color:#15803d">🛡 INSURANCE MARGIN</td><td style="padding:4pt 5pt;text-align:right;color:${bNetInsured>=0?'#15803d':'#dc2626'}">${pF(bNetInsured)}</td></tr>`:''}
         </table>
       </div>`;
     }).join('');
 
-    W.document.write(mainBody + entityBSPages + entityBudgetPages + '</body></html>');
+    W.document.write(mainBody + mainBudgetPage + entityBSPages + entityBudgetPages + '</body></html>');
     W.document.close();
     W.focus();
     setTimeout(() => W.print(), 400);
   };
+
+  const brow = (l,v) => `<tr><td style="padding:3pt 5pt;border-bottom:.5pt dotted #ccc">${l}</td><td style="padding:3pt 5pt;text-align:right;border-bottom:.5pt dotted #ccc;font-weight:600">${v&&Number(String(v).replace(/[^0-9.-]/g,''))?'$'+Number(String(v).replace(/[^0-9.-]/g,'')).toLocaleString('en-US',{maximumFractionDigits:0}):'—'}</td></tr>`;
+
 
 
   const makeBSHTML = (d, withCover=false, extraPages='') => {
@@ -5099,13 +5124,11 @@ ${extraPages}
     setTimeout(() => W.print(), 400);
   };
 
-    const handlePrintBudget = () => {
+    const buildBudgetHTML = () => {
     const corpPDTotal = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0);
     const totalExp = budgetTotalExpenses + corpPDTotal;
     const netInc = budgetTotalIncome - totalExp;
     const netIncInsured = budgetTotalIncomeInsured - totalExp;
-    const W = window.open("","_blank","width=900,height=1100");
-    if (!W) return;
     const insEnabled = data.budgetInsuranceEnabled;
     const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
       const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
@@ -5160,7 +5183,6 @@ ${extraPages}
       +"th.r{text-align:right;}td{padding:2pt 4pt;border-bottom:.5pt dotted #ddd;vertical-align:middle;}"
       +"td.r{text-align:right;font-weight:600;}"
       +".subtot{display:flex;justify-content:space-between;border-top:1pt solid #000;padding-top:2pt;margin:2pt 0;font-weight:700;font-size:8pt;}"
-      +".indemnity{display:flex;justify-content:space-between;padding:2pt 4pt;margin:2pt 0;font-weight:700;font-size:7.5pt;background:#f0fdf4;color:#15803d;border-left:2pt solid #15803d;}"
       +".tot{display:flex;justify-content:space-between;background:#000;color:#fff;padding:2pt 5pt;font-weight:700;font-size:9pt;margin:3pt 0;}"
       +".net{display:flex;justify-content:space-between;padding:4pt 5pt;font-weight:700;font-size:10pt;margin-top:6pt;border:2pt solid #000;}"
       +"</style></head><body>"
@@ -5169,7 +5191,6 @@ ${extraPages}
       +"<div style='text-align:right;font-size:8pt'><strong>Date:</strong> "+data.asOfDate+"</div></div>"
       +"<div class='name'>Name: "+data.clientName+"</div>"
       +"<div class='cols'>"
-      // INCOME column
       +"<div>"
       +"<div class='col-head'>INCOME</div>"
       +(cropRows?"<div class='sec'>Crop Income</div><table><tr><th>Crop</th><th class='r'>Acres</th><th class='r'>Yield</th><th class='r'>Price</th><th class='r'>Share</th><th class='r'>Your Value</th>"+insCols+"</tr>"+cropRows+"</table>"
@@ -5180,7 +5201,6 @@ ${extraPages}
       +(miscRows?"<div class='sec'>Miscellaneous Income</div><table>"+miscRows+"</table><div class='subtot'><span>Misc Income</span><span>$"+Math.round(budgetMiscTotal).toLocaleString()+"</span></div>":"")
       +"<div class='tot'><span>TOTAL INCOME</span><span>$"+Math.round(budgetTotalIncome).toLocaleString()+"</span></div>"
       +"</div>"
-      // EXPENSES column
       +"<div>"
       +"<div class='col-head'>EXPENSES</div>"
       +(expRows?"<div class='sec'>Operating Expenses</div><table>"+expRows+"</table><div class='subtot'><span>Total Operating</span><span>$"+Math.round(budgetOperatingExpenses).toLocaleString()+"</span></div>":"")
@@ -5199,7 +5219,13 @@ ${extraPages}
       +"</div>"
       +"</div>"
       +"</body></html>";
-    W.document.write(html);
+    return html;
+  };
+
+  const handlePrintBudget = () => {
+    const W = window.open("","_blank","width=900,height=1100");
+    if (!W) return;
+    W.document.write(buildBudgetHTML());
     W.document.close();
     W.focus();
     setTimeout(()=>W.print(), 400);
