@@ -4741,14 +4741,23 @@ export default function BalanceSheet() {
   };
 
   const markReviewed = async (shareId, type) => {
+    setPendingReviews(p=>p.filter(r=>r.share_id!==shareId));
     const table = type==='balance_sheet'?'balance_sheet_shares':'budget_shares';
-    await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'saved'}) });
-    await loadPendingReviews();
+    try {
+      await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'saved'}) });
+    } catch (e) {
+      console.error('Failed to persist review status:', e);
+    }
   };
   const dismissReview = async (shareId, type) => {
-    const table = type==='balance_sheet'?'balance_sheet_shares':'budget_shares';
-    await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'dismissed'}) });
+    // Remove from UI immediately so it always disappears on click
     setPendingReviews(p=>p.filter(r=>r.share_id!==shareId));
+    const table = type==='balance_sheet'?'balance_sheet_shares':'budget_shares';
+    try {
+      await fetch(SUPABASE_URL+`/rest/v1/${table}?share_id=eq.`+shareId, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({status:'dismissed'}) });
+    } catch (e) {
+      console.error('Failed to persist dismissal:', e);
+    }
   };
 
   const loadBSReview = async (review, saveDate) => {
