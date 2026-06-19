@@ -4843,7 +4843,7 @@ export default function BalanceSheet() {
     if (!W) { alert("Please allow popups."); return; }
 
     // Get main client BS HTML, strip </body></html> so we can append
-    const mainHTML = makeBSHTML(data, true, '');
+    const mainHTML = makeBSHTML(data, true, '', linkedEntityNWMap);
     const mainBody = mainHTML.replace('</body></html>', '');
 
     // Main client's budget page — only if they have actual budget data, using the same format as Print Budget
@@ -4933,12 +4933,13 @@ export default function BalanceSheet() {
 
 
 
-  const makeBSHTML = (d, withCover=false, extraPages='') => {
+  const makeBSHTML = (d, withCover=false, extraPages='', linkedNW={}) => {
     const m = numVal;
     const pFmt = v => v && m(v) ? "$"+Number(m(v)).toLocaleString("en-US",{maximumFractionDigits:0}) : "";
     const blank = (arr, min) => { const r=[...arr]; while(r.length<min) r.push({}); return r; };
 
     const n = numVal;
+    const linkedEntityVal = Object.values(linkedNW||{}).reduce((s,v)=>s+(Number(v)||0),0);
     const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
     const machVal = (d.machinery||[]).reduce((s,r)=>s+n(r.value),0);
     const totalCurrentAssets = n(d.cashGlacier)
@@ -4952,7 +4953,8 @@ export default function BalanceSheet() {
       +(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
     const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
-      +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+      +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0)
+      +linkedEntityVal;
     const totalAssets = totalCurrentAssets + totalLTAssets;
     const opNotesTot = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)
       +(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
@@ -5034,6 +5036,7 @@ ${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span cla
 ${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
 <div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
+${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>`<div class="row"><span>${name}</span><span>${pFmt(nw)}</span></div>`).join("")}`:""}
 <div class="tot"><span>TOTAL ASSETS</span><span>${pFmt(totalAssets)||"$0"}</span></div>
 </div>
 <div class="col">
@@ -5118,7 +5121,7 @@ ${extraPages}
   const handlePrint = (withCover=false, extraPages='') => {
     const W = window.open("","_blank","width=850,height=1100");
     if (!W) return;
-    W.document.write(makeBSHTML(data, withCover, extraPages));
+    W.document.write(makeBSHTML(data, withCover, extraPages, linkedEntityNWMap));
     W.document.close();
     W.focus();
     setTimeout(() => W.print(), 400);
