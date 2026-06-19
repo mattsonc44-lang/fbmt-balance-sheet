@@ -4696,6 +4696,10 @@ export default function BalanceSheet() {
   const lookupPrice = (name) => {
     if (!name) return null;
     const needle = name.toLowerCase().trim();
+    // Exact match first
+    const exact = commodityPrices.find(p => p.name.toLowerCase().trim() === needle);
+    if (exact) return exact.price;
+    // Fall back to fuzzy match only if no exact match exists
     const match = commodityPrices.find(p =>
       needle.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(needle)
     );
