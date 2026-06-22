@@ -4957,7 +4957,7 @@ export default function BalanceSheet() {
       +(d.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100),0)
-      +(d.cropInvestment||[]).reduce((s,r)=>s+n(r.amount),0)
+      +(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
       +(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
     const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)
