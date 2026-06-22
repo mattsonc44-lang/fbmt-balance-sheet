@@ -5045,6 +5045,7 @@ ${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span cla
 ${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
 <div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
+${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).length>0?`<div class="sec">Other Assets:</div>${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
 ${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>`<div class="row"><span>${name}</span><span>${pFmt(nw)}</span></div>`).join("")}`:""}
 <div class="tot"><span>TOTAL ASSETS</span><span>${pFmt(totalAssets)||"$0"}</span></div>
 </div>
