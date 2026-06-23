@@ -6812,6 +6812,7 @@ ${extraPages}
               budgetTotalIncomeInsured={budgetTotalIncomeInsured}
               budgetNetIncomeInsured={budgetNetIncomeInsured}
               toggleInsurance={()=>setData(d=>({...d,budgetInsuranceEnabled:!d.budgetInsuranceEnabled}))}
+              budgetLivestockTotal={budgetLivestockTotal}
               budgetMiscTotal={budgetMiscTotal}
               budgetTotalIncome={budgetTotalIncome}
               budgetOperatingExpenses={budgetOperatingExpenses}
