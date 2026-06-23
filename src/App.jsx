@@ -586,7 +586,7 @@ function emptyData() {
     budgetInsuranceEnabled:false,
     budgetLivestock:[{head:"",type:"",lbs:"",price:""}],
     budgetMisc:[{description:"Government Payments (FSA/ARC/PLC)",amount:""}],
-    budgetExpenses:[{description:"",amount:""}],
+    budgetExpenses:[{description:"",amount:"",prepaid:false}],
     budgetProposedDebt:[],
     inspDate: new Date().toISOString().split('T')[0],
     inspInspector:"", inspLoans:["","",""],
@@ -665,7 +665,7 @@ function RunningTotal({ assets, liabilities }) {
 // ─── BudgetView ───────────────────────────────────────────────────────────────
 function BudgetView({
   data, budgetCropTotal, budgetLivestockTotal, budgetMiscTotal,
-  budgetTotalIncome, budgetOperatingExpenses,
+  budgetTotalIncome, budgetOperatingExpenses, budgetPrepaidTotal,
   debtServiceTerms, debtServiceRE,
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
@@ -917,11 +917,13 @@ function BudgetView({
           <div className="bg-header-row">
             <span style={{width:20}}></span>
             <span className="bg-col-label" style={{flex:1}}>Description</span>
-            <span className="bg-col-label" style={{width:120}}>Amount</span>
+            <span className="bg-col-label" style={{width:90}}>Amount</span>
+            <span className="bg-col-label" style={{width:70,textAlign:"center",color:"#15803d"}}>Pre-paid</span>
             <span style={{width:28}}></span>
           </div>
           {data.budgetExpenses.map((r, i) => (
-            <div key={i} className="bg-row" data-rowkey={`budgetExpenses-${i}`}>
+            <div key={i} className="bg-row" data-rowkey={`budgetExpenses-${i}`}
+              style={{background:r.prepaid?"#f0fdf4":undefined}}>
               <span className="row-num">{i+1}</span>
               <div className="input-group" style={{flex:1}}>
                 <ExpenseDropdown
@@ -932,23 +934,36 @@ function BudgetView({
                 />
               </div>
               <div className="input-group" style={{width:90,flexShrink:0}}>
-                <div className="input-wrap">
+                <div className="input-wrap" style={{opacity:r.prepaid?0.5:1}}>
                   <span className="prefix">$</span>
                   <input type="text" value={r.amount} placeholder="0"
                     onChange={e => setArr("budgetExpenses",i,"amount",e.target.value.replace(/[^0-9.]/g,""))} />
                 </div>
               </div>
+              <div style={{width:70,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
+                <input type="checkbox" id={"exp-pp-"+i} checked={!!r.prepaid}
+                  onChange={e=>setArr("budgetExpenses",i,"prepaid",e.target.checked)}
+                  style={{width:14,height:14,accentColor:"#15803d",cursor:"pointer"}}/>
+                <label htmlFor={"exp-pp-"+i} style={{fontSize:".68rem",color:"#15803d",cursor:"pointer",fontWeight:r.prepaid?700:400}}>
+                  {r.prepaid?"Yes":""}
+                </label>
+              </div>
               <button className="remove-btn" style={{width:28,flexShrink:0}} onClick={() => removeRow("budgetExpenses",i)}>x</button>
             </div>
           ))}
           <button className="add-btn"
-            onClick={() => addRow("budgetExpenses",{description:"",amount:""})}>
+            onClick={() => addRow("budgetExpenses",{description:"",amount:"",prepaid:false})}>
             + Add Custom Expense
           </button>
           <div className="budget-subtotal">
             <span>Total Operating Expenses</span>
             <strong>{fmt(budgetOperatingExpenses)}</strong>
           </div>
+          {budgetPrepaidTotal > 0 && (
+            <div style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",fontSize:".78rem",color:"#15803d",fontStyle:"italic"}}>
+              <span>Pre-paid (excluded from total): {fmt(budgetPrepaidTotal)}</span>
+            </div>
+          )}
         </div>
         <div className="budget-subsection">
           <div className="budget-sub-label">
@@ -4375,7 +4390,8 @@ export default function BalanceSheet() {
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
   // Insurance scenario: crop income replaced by the insurance guarantee total
   const budgetTotalIncomeInsured = budgetInsuranceTotal + budgetLivestockTotal + budgetMiscTotal;
-  const budgetOperatingExpenses = data.budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
+  const budgetOperatingExpenses = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!r.corpPaid);
@@ -5179,8 +5195,9 @@ ${extraPages}
       "<tr><td colspan='"+(insEnabled?9:6)+"'>"+r.description+"</td><td class='r'>$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
     ).join("");
     const expRows = data.budgetExpenses.filter(r=>r.description||r.amount).map(r=>
-      "<tr><td>"+r.description+"</td><td class='r'>$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
+      "<tr style='"+(r.prepaid?"color:#15803d;":"")+"'><td>"+r.description+(r.prepaid?" <em>(pre-paid)</em>":"")+"</td><td class='r'"+(r.prepaid?" style='text-decoration:line-through;color:#15803d;'":"")+">"+(r.prepaid?"":"")+"$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
     ).join("");
+    const prepaidTotal = data.budgetExpenses.filter(r=>r.prepaid&&numVal(r.amount)>0).reduce((s,r)=>s+numVal(r.amount),0);
     const propDebtRows = (data.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>
       "<tr><td>"+r.description+" <em style='color:#6B0E1E'>(proposed)</em></td><td class='r'>$"+Math.round(numVal(r.annualPmt)).toLocaleString()+"</td></tr>"
     ).join("");
@@ -5229,7 +5246,10 @@ ${extraPages}
       +"</div>"
       +"<div>"
       +"<div class='col-head'>EXPENSES</div>"
-      +(expRows?"<div class='sec'>Operating Expenses</div><table>"+expRows+"</table><div class='subtot'><span>Total Operating</span><span>$"+Math.round(budgetOperatingExpenses).toLocaleString()+"</span></div>":"")
+      +(expRows?"<div class='sec'>Operating Expenses</div><table>"+expRows+"</table>"
+        +"<div class='subtot'><span>Total Operating</span><span>$"+Math.round(budgetOperatingExpenses).toLocaleString()+"</span></div>"
+        +(prepaidTotal>0?"<div style='font-size:7pt;color:#15803d;font-style:italic;padding:2pt 0'>Pre-paid excluded: $"+Math.round(prepaidTotal).toLocaleString()+"</div>":"")
+        :"")
       +(debtPersonalRows?"<div class='sec'>Term Debt</div><table>"+debtPersonalRows+"</table>":"")
       +(debtCorpRows?"<div class='sec'>Corp Pays</div><table>"+debtCorpRows+"</table>":"")
       +(propDebtRows?"<div class='sec'>Proposed New Debt</div><table>"+propDebtRows+"</table>":"")
@@ -6820,6 +6840,7 @@ ${extraPages}
               budgetMiscTotal={budgetMiscTotal}
               budgetTotalIncome={budgetTotalIncome}
               budgetOperatingExpenses={budgetOperatingExpenses}
+              budgetPrepaidTotal={budgetPrepaidTotal}
               debtServiceTerms={debtServiceTerms}
               debtServiceRE={debtServiceRE}
               debtServiceTermsPersonal={debtServiceTermsPersonal}
