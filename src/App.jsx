@@ -4365,9 +4365,11 @@ export default function BalanceSheet() {
     return s + n(r.acres)*n(r.insYield)*n(r.insPrice)*(n(r.share||"100")/100);
   },0) : 0;
   const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>{
-    const cp = commodityPrices.find(p=>p.name&&r.type&&p.name.toLowerCase()===r.type.toLowerCase());
-    const effectivePrice = (cp ? cp.price : null) || r.price;
-    return s+n(r.head)*n(r.lbs)*n(effectivePrice);
+    const needle = (r.type||'').toLowerCase().trim();
+    const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
+    const fuzzy = (!exact&&needle) ? commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))) : null;
+    const ep = (exact||fuzzy) ? (exact||fuzzy).price : r.price;
+    return s+n(r.head)*n(r.lbs)*n(ep);
   },0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
@@ -4884,7 +4886,10 @@ export default function BalanceSheet() {
         return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
       },0);
       const bInsTotal = insEnabled ? (d.budgetCrops||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100),0) : 0;
-      const bLS=(d.budgetLivestock||[]).reduce((s,r)=>s+n2(r.head)*n2(r.lbs)*n2(r.price),0);
+      const bLS=(d.budgetLivestock||[]).reduce((s,r)=>{
+        const ep=numVal(lookupPrice(r.type)||r.price);
+        return s+n2(r.head)*n2(r.lbs)*ep;
+      },0);
       const bMisc=(d.budgetMisc||[]).reduce((s,r)=>s+n2(r.amount),0);
       const bInc=bCrop+bLS+bMisc;
       const bIncInsured=bInsTotal+bLS+bMisc;
@@ -5166,8 +5171,7 @@ ${extraPages}
         +"</tr>";
     }).join("");
     const lsRows = data.budgetLivestock.filter(r=>r.type||r.head).map(r=>{
-      const cp = commodityPrices.find(p=>p.name&&r.type&&p.name.toLowerCase()===r.type.toLowerCase());
-      const ep = numVal((cp ? cp.price : null) || r.price);
+      const ep = numVal(lookupPrice(r.type) || r.price);
       const rv = numVal(r.head)*numVal(r.lbs)*ep;
       return "<tr><td>"+r.type+"</td><td class='r'>"+r.head+"</td><td class='r'>"+r.lbs+" lbs</td><td class='r'>$"+ep.toFixed(2)+"/lb</td><td class='r'></td><td class='r'>$"+Math.round(rv).toLocaleString()+"</td>"+(insEnabled?"<td></td><td></td><td></td>":"")+"</tr>";
     }).join("");
