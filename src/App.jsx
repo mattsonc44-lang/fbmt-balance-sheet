@@ -4364,7 +4364,11 @@ export default function BalanceSheet() {
   const budgetInsuranceTotal = data.budgetInsuranceEnabled ? data.budgetCrops.reduce((s,r)=>{
     return s + n(r.acres)*n(r.insYield)*n(r.insPrice)*(n(r.share||"100")/100);
   },0) : 0;
-  const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+  const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>{
+    const cp = commodityPrices.find(p=>p.name&&r.type&&p.name.toLowerCase()===r.type.toLowerCase());
+    const effectivePrice = (cp ? cp.price : null) || r.price;
+    return s+n(r.head)*n(r.lbs)*n(effectivePrice);
+  },0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
   // Insurance scenario: crop income replaced by the insurance guarantee total
@@ -5162,8 +5166,10 @@ ${extraPages}
         +"</tr>";
     }).join("");
     const lsRows = data.budgetLivestock.filter(r=>r.type||r.head).map(r=>{
-      const rv = numVal(r.head)*numVal(r.lbs)*numVal(r.price);
-      return "<tr><td>"+r.type+"</td><td class='r'>"+r.head+"</td><td class='r'>"+r.lbs+" lbs</td><td class='r'>$"+numVal(r.price).toFixed(2)+"/lb</td><td class='r'></td><td class='r'>$"+Math.round(rv).toLocaleString()+"</td>"+(insEnabled?"<td></td><td></td><td></td>":"")+"</tr>";
+      const cp = commodityPrices.find(p=>p.name&&r.type&&p.name.toLowerCase()===r.type.toLowerCase());
+      const ep = numVal((cp ? cp.price : null) || r.price);
+      const rv = numVal(r.head)*numVal(r.lbs)*ep;
+      return "<tr><td>"+r.type+"</td><td class='r'>"+r.head+"</td><td class='r'>"+r.lbs+" lbs</td><td class='r'>$"+ep.toFixed(2)+"/lb</td><td class='r'></td><td class='r'>$"+Math.round(rv).toLocaleString()+"</td>"+(insEnabled?"<td></td><td></td><td></td>":"")+"</tr>";
     }).join("");
     const miscRows = data.budgetMisc.filter(r=>r.description||r.amount).map(r=>
       "<tr><td colspan='"+(insEnabled?9:6)+"'>"+r.description+"</td><td class='r'>$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
