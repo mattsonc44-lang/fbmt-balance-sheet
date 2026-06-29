@@ -3529,6 +3529,8 @@ export default function BalanceSheet() {
   const [editingFolder, setEditingFolder] = useState(null); // { path, newName }
   const [linkedEntityNWMap, setLinkedEntityNWMap] = useState({}); // { clientName: netWorth }
   const [availableEntities, setAvailableEntities] = useState([]);
+  const [pendingEntityName, setPendingEntityName] = useState('');
+  const [pendingEntityDate, setPendingEntityDate] = useState('');
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -3659,12 +3661,16 @@ export default function BalanceSheet() {
     }
   }, [screen]);
 
+  // Normalize linkedEntities: support both legacy strings and new {name,date} objects
+  const normalizeLinked = (arr) => (arr||[]).map(e => typeof e === 'string' ? {name:e, date:null} : e);
+
   // Load available entities for the link picker
   useEffect(() => {
     if (savedSheets.length > 0) {
-      const linked = data.linkedEntities || [];
+      const linked = normalizeLinked(data.linkedEntities);
+      const linkedNames = linked.map(e=>e.name);
       const names = [...new Set(savedSheets.map(s => s.clientName))]
-        .filter(n => n !== data.clientName && !linked.includes(n))
+        .filter(n => n !== data.clientName && !linkedNames.includes(n))
         .sort();
       setAvailableEntities(names);
     }
@@ -4470,16 +4476,23 @@ export default function BalanceSheet() {
   // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
   useEffect(() => {
     async function fetchAllLinkedNW() {
-      const entities = data.linkedEntities || [];
+      const entities = normalizeLinked(data.linkedEntities);
       if (!entities.length) { setLinkedEntityNWMap({}); return; }
       const newMap = {};
-      for (const name of entities) {
+      for (const {name, date} of entities) {
         try {
           const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
           const result = await storage.list(prefix);
           if (result && result.keys && result.keys.length > 0) {
-            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
-            const item = await storage.get(sorted[0]);
+            let key;
+            if (date) {
+              // Use specific date
+              key = result.keys.find(k => k.includes(date)) || result.keys.sort((a,b)=>b.localeCompare(a))[0];
+            } else {
+              // Legacy: use most recent
+              key = result.keys.sort((a,b)=>b.localeCompare(a))[0];
+            }
+            const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
               const totals = sheetTotals(p);
@@ -4858,11 +4871,14 @@ export default function BalanceSheet() {
 
   const generateLenderPackage = async () => {
     // Fetch linked entity full data
-    const linkedNames = data.linkedEntities || [];
+    const linkedEntries = (data.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,date:null}:e);
     const linkedData = (await Promise.all(
-      linkedNames.map(async name => {
-        const sheet = savedSheets.find(s => s.clientName === name);
-        if (!sheet) return null;
+      linkedEntries.map(async ({name,date}) => {
+        const sheets = savedSheets.filter(s => s.clientName === name);
+        if (!sheets.length) return null;
+        const sheet = date
+          ? (sheets.find(s=>s.asOfDate===date) || sheets.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0])
+          : sheets.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
         try { const item = await storage.get(sheet.key); return item ? JSON.parse(item.value) : null; }
         catch { return null; }
       })
@@ -5996,19 +6012,17 @@ ${extraPages}
             </div>
 
             {/* Currently linked entities */}
-            {(data.linkedEntities||[]).length > 0 && (
+            {normalizeLinked(data.linkedEntities).length > 0 && (
               <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
-                {(data.linkedEntities||[]).map((name, i) => (
+                {normalizeLinked(data.linkedEntities).map((entry, i) => (
                   <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"white",border:"1px solid #c0d8f0",borderRadius:8,padding:"8px 12px"}}>
                     <span style={{fontSize:"1rem"}}>🏢</span>
                     <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{name}</div>
-                      {linkedEntityNWMap[name] !== undefined && (
-                        <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
-                          Net Worth: {fmt(linkedEntityNWMap[name])}
-                          {" — added as Investment in " + name}
-                        </div>
-                      )}
+                      <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
+                      <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
+                        {entry.date ? `As of ${entry.date}` : "Latest available"}
+                        {linkedEntityNWMap[entry.name] !== undefined && ` — Net Worth: ${fmt(linkedEntityNWMap[entry.name])}`}
+                      </div>
                     </div>
                     <button
                       onClick={()=>set("linkedEntities",(data.linkedEntities||[]).filter((_,j)=>j!==i))}
@@ -6023,36 +6037,43 @@ ${extraPages}
               </div>
             )}
 
-            {/* Add entity dropdown */}
-            {availableEntities.length > 0 ? (
-              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <select
-                  defaultValue=""
-                  onChange={e=>{
-                    const name = e.target.value;
-                    if (!name) return;
-                    if (!(data.linkedEntities||[]).includes(name)) {
-                      set("linkedEntities",[...(data.linkedEntities||[]),name]);
-                    }
-                    e.target.value = "";
-                  }}
-                  style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
-                  <option value="">+ Add a linked entity...</option>
-                  {availableEntities.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-                <span style={{fontSize:".75rem",color:"#aaa"}}>
-                  Select from saved clients
-                </span>
-              </div>
-            ) : (data.linkedEntities||[]).length === 0 ? (
-              <div style={{fontSize:".78rem",color:"#888"}}>
-                Save other balance sheets first, then link them here to include their net worth on this statement.
-              </div>
-            ) : (
-              <div style={{fontSize:".78rem",color:"#aaa",fontStyle:"italic"}}>
-                All available entities are already linked.
+            {/* Add entity — two-step: pick name then date */}
+            {availableEntities.length > 0 && (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <select
+                    value={pendingEntityName}
+                    onChange={e=>{setPendingEntityName(e.target.value);setPendingEntityDate('');}}
+                    style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
+                    <option value="">+ Select entity to link...</option>
+                    {availableEntities.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                  {pendingEntityName && (() => {
+                    const dates = savedSheets.filter(s=>s.clientName===pendingEntityName).map(s=>s.asOfDate).filter(Boolean).sort((a,b)=>b.localeCompare(a));
+                    return dates.length > 0 ? (
+                      <select
+                        value={pendingEntityDate}
+                        onChange={e=>setPendingEntityDate(e.target.value)}
+                        style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",cursor:"pointer"}}>
+                        <option value="">Select date...</option>
+                        {dates.map(d=>(<option key={d} value={d}>{d}</option>))}
+                      </select>
+                    ) : null;
+                  })()}
+                  {pendingEntityName && pendingEntityDate && (
+                    <button
+                      onClick={()=>{
+                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate}]);
+                        setPendingEntityName('');
+                        setPendingEntityDate('');
+                      }}
+                      style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontSize:".85rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      Link
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
