@@ -1147,7 +1147,6 @@ function ComparisonView({
     </div>
   );
 
-  // Year selector — default to last 3 if more than 3 saved
   const allYears = compSheets.map(s => s.date);
   const activeYears = selectedYears || allYears.slice(-3);
   const sheets = compSheets.filter(s => activeYears.includes(s.date));
@@ -1200,6 +1199,57 @@ function ComparisonView({
     if (absPct >= 20) return { background: '#fee2e2', color: '#991b1b', fontWeight: 700 };
     if (absPct >= 10) return { background: '#fef3c7', color: '#92400e' };
     return {};
+  };
+
+  const handlePrintComparison = () => {
+    const W = window.open("","_blank","width=950,height=1100");
+    if (!W) return;
+    const labels = Object.keys(sheets[0].totals);
+    const fmtP = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+    const rows = labels.map(label => {
+      const isBold = BOLD_ROWS && BOLD_ROWS.includes(label);
+      const isBreak = SECTION_BREAKS && SECTION_BREAKS.includes(label);
+      const header = SECTION_HEADERS && SECTION_HEADERS[label];
+      const chg = (latest?.totals[label]||0) - (prior?.totals[label]||0);
+      let html = '';
+      if (header) html += `<tr><td colspan="${years.length+2}" style="background:#6B0E1E;color:white;font-weight:700;padding:4pt 8pt;font-size:8pt;letter-spacing:.5px">${header}</td></tr>`;
+      html += `<tr style="${isBold?'font-weight:700;background:#f5f0f0;':''}${isBreak?'border-top:1.5pt solid #6B0E1E;':''}">
+        <td style="padding:3pt 8pt;border-bottom:.5pt dotted #ddd;font-size:7.5pt">${label}</td>
+        ${years.map(y=>`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7.5pt;font-weight:${isBold?700:400}">${fmtP(sheets.find(s=>s.date===y)?.totals[label]||0)}</td>`).join('')}
+        ${years.length>1?`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7pt;color:${chg>0?'#15803d':chg<0?'#dc2626':'#555'}">${(chg>0?'+':'')+fmtP(chg)}</td>`:''}
+      </tr>`;
+      return html;
+    }).join('');
+    W.document.write(`<!DOCTYPE html><html><head><title>Year Comparison — ${clientName}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:8pt;margin:.45in .4in;color:#000}
+  table{width:100%;border-collapse:collapse}
+  @media print{.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8pt;border-bottom:2pt solid #6B0E1E;padding-bottom:6pt">
+  <div>
+    <div style="font-size:12pt;font-weight:700">${clientName}</div>
+    <div style="font-size:8pt;color:#555">Year-Over-Year Balance Sheet Comparison</div>
+  </div>
+  <div style="font-size:8pt;color:#555;text-align:right">First Bank of Montana<br/>Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="text-align:left;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Category</th>
+    ${years.map(y=>`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">${y}</th>`).join('')}
+    ${years.length>1?`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Change</th>`:''}
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e0c0c5;border-radius:6pt;background:#fdf8f8">
+  <div style="font-weight:700;font-size:9pt;color:#6B0E1E;margin-bottom:6pt">AI Financial Insights</div>
+  <div style="font-size:7.5pt;line-height:1.5;color:#333;white-space:pre-wrap">${compInsight}</div>
+</div>`:''}
+</body></html>`);
+    W.document.close();
+    W.focus();
+    setTimeout(()=>W.print(),400);
   };
 
   return (
@@ -1425,6 +1475,10 @@ function ComparisonView({
           <button className="btn-insight" onClick={generateInsights}
             disabled={compInsightLoading}>
             {compInsightLoading ? 'Analyzing...' : compInsight ? 'Re-analyze' : 'Generate Insights'}
+          </button>
+          <button onClick={handlePrintComparison}
+            style={{background:'#374151',color:'white',border:'none',borderRadius:8,padding:'9px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            🖨 Print
           </button>
         </div>
         {compInsightLoading && (
@@ -3807,6 +3861,97 @@ export default function BalanceSheet() {
     setImportError("");
     setImportData(null);
     const ext = file.name.split(".").pop().toLowerCase();
+
+    // ── PDF import via Claude API ──────────────────────────────────────────
+    if (ext === "pdf") {
+      setImportError("Reading PDF...");
+      try {
+        const base64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result.split(",")[1]);
+          r.onerror = () => rej(new Error("Failed to read file"));
+          r.readAsDataURL(file);
+        });
+
+        const prompt = `You are a financial data extractor. This is an agricultural balance sheet or loan package PDF from First Bank of Montana (or similar ag lender). Extract ALL financial data into a JSON object matching this exact structure. Return ONLY valid JSON, no markdown, no explanation.
+
+{
+  "clientName": "string",
+  "asOfDate": "YYYY-MM-DD",
+  "cashGlacier": "number as string",
+  "cashOther": [{"bank":"","amount":""}],
+  "receivables": [{"description":"","amount":""}],
+  "federalPayments": [{"description":"","amount":""}],
+  "livestockMarket": [{"number":"","kind":"","weight":"","pricePerHead":"","value":""}],
+  "farmProducts": [{"kind":"","quantity":"","unit":"bu","pricePerUnit":"","share":"100"}],
+  "cropInvestment": [{"cropType":"","acres":"","valuePerAcre":""}],
+  "supplies": [{"description":"","value":""}],
+  "otherCurrent": [{"description":"","amount":""}],
+  "breedingStock": [{"number":"","kind":"","value":""}],
+  "realEstate": [{"description":"","acres":"","valuePerAcre":"","reType":"","legal":""}],
+  "vehicles": [{"year":"","make":"","vin":"","condition":"","value":""}],
+  "machinery": [{"year":"","make":"","size":"","serial":"","condition":"","value":""}],
+  "otherAssets": [{"description":"","amount":""}],
+  "operatingNotes": [{"creditor":"","balance":"","dueDate":""}],
+  "accountsDue": [{"creditor":"","amount":"","dueDate":""}],
+  "intermediatDebt": [{"creditor":"","security":"","principal":"","rate":"","annualPmt":"","dueDate":""}],
+  "reCurrent": [{"creditor":"","annualPmt":""}],
+  "taxesDue": [{"description":"","amount":""}],
+  "reMortgages": [{"lienHolder":"","terms":"","principal":"","rate":""}],
+  "otherLiabilities": [{"description":"","balance":""}]
+}
+
+Rules:
+- All numeric values as strings (no $ signs or commas)
+- If a field is not found, use empty string or empty array
+- For dates, format as YYYY-MM-DD
+- Extract every item you can find, even partial data
+- For real estate, valuePerAcre = total value / acres if not stated directly
+- For vehicles and machinery, include year, make/model, and estimated or stated value`;
+
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 4000,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+                { type: "text", text: prompt }
+              ]
+            }]
+          })
+        });
+
+        if (!response.ok) throw new Error("API error: " + response.status);
+        const result = await response.json();
+        const text = result.content?.find(b=>b.type==="text")?.text || "";
+        const clean = text.replace(/```json|```/g,"").trim();
+        const parsed = JSON.parse(clean);
+
+        // Merge with emptyData so all required fields exist
+        const base = emptyData();
+        const merged = { ...base, ...parsed };
+
+        // Fix arrays — ensure they have at least one empty row where needed
+        const arrayFields = ["cashOther","receivables","federalPayments","livestockMarket","farmProducts",
+          "cropInvestment","supplies","otherCurrent","breedingStock","realEstate","vehicles","machinery",
+          "otherAssets","operatingNotes","accountsDue","intermediatDebt","reCurrent","taxesDue",
+          "reMortgages","otherLiabilities"];
+        arrayFields.forEach(f => {
+          if (!Array.isArray(merged[f]) || merged[f].length === 0) merged[f] = base[f];
+        });
+
+        setImportData(merged);
+        if (merged.asOfDate) setImportDate(merged.asOfDate);
+        setImportError("");
+      } catch(err) {
+        setImportError("PDF extraction failed: " + err.message);
+      }
+      return;
+    }
 
     function parseBudgetSheet(rows) {
       const R = i => rows[i]||[];
@@ -6213,16 +6358,24 @@ ${extraPages}
                     cursor:"pointer",fontFamily:"inherit"
                   }}>
                     Browse for File
-                    <input type="file" accept=".csv,.xlsx,.xls"
+                    <input type="file" accept=".csv,.xlsx,.xls,.pdf"
                       style={{display:"none"}}
                       onChange={e=>{if(e.target.files[0])handleImportFile(e.target.files[0]);}} />
                   </label>
-                  <div style={{fontSize:".78rem",color:"#aaa",marginTop:10}}>CSV, XLSX, or XLS</div>
+                  <div style={{fontSize:".78rem",color:"#aaa",marginTop:10}}>CSV, XLSX, XLS or PDF — PDFs are read by AI</div>
                 </div>
 
                 {importError && (
-                  <div style={{background:"#fce8e8",border:"1px solid #f0c0c0",borderRadius:8,padding:12,fontSize:".85rem",color:"#7a1a1a",marginBottom:16}}>
+                  <div style={{
+                    background: importError.startsWith("Reading PDF") ? "#f0f6ff" : "#fce8e8",
+                    border: "1px solid " + (importError.startsWith("Reading PDF") ? "#bfdbfe" : "#f0c0c0"),
+                    borderRadius:8, padding:12, fontSize:".85rem",
+                    color: importError.startsWith("Reading PDF") ? "#1e40af" : "#7a1a1a",
+                    marginBottom:16, display:"flex", alignItems:"center", gap:8
+                  }}>
+                    {importError.startsWith("Reading PDF") && <span style={{fontSize:"1.2rem"}}>🤖</span>}
                     {importError}
+                    {importError.startsWith("Reading PDF") && <span style={{marginLeft:4,fontSize:".78rem",color:"#3b82f6"}}>AI is extracting your financial data...</span>}
                   </div>
                 )}
 
