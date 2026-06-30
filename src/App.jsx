@@ -3878,7 +3878,7 @@ export default function BalanceSheet() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "claude-opus-4-6",
+            model: "claude-3-5-sonnet-20241022",
             max_tokens: 4000,
             messages: [{
               role: "user",
@@ -3919,8 +3919,8 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
         });
 
         if (!response.ok) {
-          const errBody = await response.json().catch(()=>({}));
-          throw new Error("API " + response.status + ": " + (errBody?.error?.message || JSON.stringify(errBody)));
+          const errText = await response.text();
+          throw new Error("API " + response.status + ": " + errText.slice(0, 300));
         }
         const result = await response.json();
         const text = result.content?.find(b=>b.type==="text")?.text || "";
