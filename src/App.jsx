@@ -3873,56 +3873,11 @@ export default function BalanceSheet() {
           r.readAsDataURL(file);
         });
 
-        const prompt = `You are a financial data extractor. This is an agricultural balance sheet or loan package PDF from First Bank of Montana (or similar ag lender). Extract ALL financial data into a JSON object matching this exact structure. Return ONLY valid JSON, no markdown, no explanation.
 
-{
-  "clientName": "string",
-  "asOfDate": "YYYY-MM-DD",
-  "cashGlacier": "number as string",
-  "cashOther": [{"bank":"","amount":""}],
-  "receivables": [{"description":"","amount":""}],
-  "federalPayments": [{"description":"","amount":""}],
-  "livestockMarket": [{"number":"","kind":"","weight":"","pricePerHead":"","value":""}],
-  "farmProducts": [{"kind":"","quantity":"","unit":"bu","pricePerUnit":"","share":"100"}],
-  "cropInvestment": [{"cropType":"","acres":"","valuePerAcre":""}],
-  "supplies": [{"description":"","value":""}],
-  "otherCurrent": [{"description":"","amount":""}],
-  "breedingStock": [{"number":"","kind":"","value":""}],
-  "realEstate": [{"description":"","acres":"","valuePerAcre":"","reType":"","legal":""}],
-  "vehicles": [{"year":"","make":"","vin":"","condition":"","value":""}],
-  "machinery": [{"year":"","make":"","size":"","serial":"","condition":"","value":""}],
-  "otherAssets": [{"description":"","amount":""}],
-  "operatingNotes": [{"creditor":"","balance":"","dueDate":""}],
-  "accountsDue": [{"creditor":"","amount":"","dueDate":""}],
-  "intermediatDebt": [{"creditor":"","security":"","principal":"","rate":"","annualPmt":"","dueDate":""}],
-  "reCurrent": [{"creditor":"","annualPmt":""}],
-  "taxesDue": [{"description":"","amount":""}],
-  "reMortgages": [{"lienHolder":"","terms":"","principal":"","rate":""}],
-  "otherLiabilities": [{"description":"","balance":""}]
-}
-
-Rules:
-- All numeric values as strings (no $ signs or commas)
-- If a field is not found, use empty string or empty array
-- For dates, format as YYYY-MM-DD
-- Extract every item you can find, even partial data
-- For real estate, valuePerAcre = total value / acres if not stated directly
-- For vehicles and machinery, include year, make/model, and estimated or stated value`;
-
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
+        const response = await fetch('/.netlify/functions/extract-pdf', {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-6",
-            max_tokens: 4000,
-            messages: [{
-              role: "user",
-              content: [
-                { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-                { type: "text", text: prompt }
-              ]
-            }]
-          })
+          body: JSON.stringify({ base64, mediaType: "application/pdf" })
         });
 
         if (!response.ok) throw new Error("API error: " + response.status);
