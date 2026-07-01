@@ -1131,6 +1131,8 @@ function ComparisonView({
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
+  const [sbLeft, setSbLeft] = React.useState('');
+  const [sbRight, setSbRight] = React.useState('');
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
   const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
 
@@ -1199,6 +1201,75 @@ function ComparisonView({
     if (absPct >= 20) return { background: '#fee2e2', color: '#991b1b', fontWeight: 700 };
     if (absPct >= 10) return { background: '#fef3c7', color: '#92400e' };
     return {};
+  };
+
+  const SECTION_BREAKS_LIST = [
+    'Total Current Assets','TOTAL ASSETS','Total Current Liab','TOTAL LIABILITIES','WORKING CAPITAL','NET WORTH'
+  ];
+  const SECTION_HEADS = {
+    'Cash & Bank': 'CURRENT ASSETS',
+    'Breeding Stock': 'LONG-TERM ASSETS',
+    'Operating Notes': 'CURRENT LIABILITIES',
+    'Intermediate Debt (LT)': 'LONG-TERM LIABILITIES',
+    'WORKING CAPITAL': 'SUMMARY'
+  };
+
+  const handlePrintSideBySide = (leftSheet, rightSheet) => {
+    const W = window.open("","_blank","width=1000,height=1100");
+    if (!W) return;
+    const fmtP = v => v === 0 ? '—' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+    const sbLabels = Object.keys(leftSheet.totals);
+    const rows = sbLabels.map(label => {
+      const lv = leftSheet.totals[label] || 0;
+      const rv = rightSheet.totals[label] || 0;
+      const chg = rv - lv;
+      const isBreak = SECTION_BREAKS_LIST.includes(label);
+      const isBig = ['Total Current Assets','TOTAL ASSETS','TOTAL LIABILITIES','NET WORTH'].includes(label);
+      const head = SECTION_HEADS[label];
+      let html = '';
+      if (head) html += `<tr><td colspan="4" style="background:#6B0E1E;color:white;font-weight:700;padding:5pt 10pt;font-size:8pt;letter-spacing:.8px;text-transform:uppercase">${head}</td></tr>`;
+      const rowStyle = isBig
+        ? 'font-weight:800;font-size:9pt;background:#f0f0f0;border-top:2pt solid #333;'
+        : isBreak ? 'font-weight:700;border-top:1pt solid #999;background:#fafafa;' : '';
+      const chgColor = chg > 0 ? '#15803d' : chg < 0 ? '#dc2626' : '#999';
+      html += `<tr style="${rowStyle}">
+        <td style="padding:3pt 10pt;border-bottom:.5pt dotted #ddd;font-size:8pt">${label}</td>
+        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt">${fmtP(lv)}</td>
+        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt">${fmtP(rv)}</td>
+        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt;color:${chgColor};font-weight:600">${chg !== 0 ? (chg > 0 ? '+' : '') + fmtP(chg) : '—'}</td>
+      </tr>`;
+      return html;
+    }).join('');
+
+    W.document.write(`<!DOCTYPE html><html><head><title>Comparison — ${clientName}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:8pt;margin:.4in;color:#000}
+  table{width:100%;border-collapse:collapse}
+  @media print{.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">🖨 Print</button>
+<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt">
+  <div>
+    <div style="font-size:13pt;font-weight:800">${clientName}</div>
+    <div style="font-size:8pt;color:#555;margin-top:2pt">Balance Sheet Comparison — First Bank of Montana</div>
+  </div>
+  <div style="font-size:8pt;color:#555">Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+</div>
+<table>
+  <thead>
+    <tr style="background:#1a1a1a;color:white">
+      <th style="text-align:left;padding:5pt 10pt;font-size:8pt;width:40%">Category</th>
+      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">${leftSheet.date} <span style="font-weight:400;font-size:7pt">(Prior)</span></th>
+      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">${rightSheet.date} <span style="font-weight:400;font-size:7pt">(Current)</span></th>
+      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">Change</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+</body></html>`);
+    W.document.close();
+    W.focus();
+    setTimeout(() => W.print(), 400);
   };
 
   const handlePrintComparison = () => {
@@ -1480,6 +1551,36 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
             style={{background:'#374151',color:'white',border:'none',borderRadius:8,padding:'9px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
             🖨 Print
           </button>
+          {compSheets.length >= 2 && (() => {
+            const leftSheet = compSheets.find(s=>s.date===sbLeft) || compSheets[compSheets.length-2];
+            const rightSheet = compSheets.find(s=>s.date===sbRight) || compSheets[compSheets.length-1];
+            const lDate = sbLeft || compSheets[compSheets.length-2]?.date;
+            const rDate = sbRight || compSheets[compSheets.length-1]?.date;
+            return (
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginTop:6,padding:'8px 12px',background:'#f8f4f4',borderRadius:8,border:'1px solid #e5d5d5'}}>
+                <span style={{fontSize:'.78rem',fontWeight:700,color:'#6B0E1E'}}>Side by Side:</span>
+                <select value={lDate} onChange={e=>setSbLeft(e.target.value)}
+                  style={{border:'1px solid #ccc',borderRadius:6,padding:'4px 8px',fontSize:'.8rem',fontFamily:'inherit'}}>
+                  {compSheets.map(s=><option key={s.date} value={s.date}>{s.date}</option>)}
+                </select>
+                <span style={{fontSize:'.78rem',color:'#888'}}>vs</span>
+                <select value={rDate} onChange={e=>setSbRight(e.target.value)}
+                  style={{border:'1px solid #ccc',borderRadius:6,padding:'4px 8px',fontSize:'.8rem',fontFamily:'inherit'}}>
+                  {compSheets.map(s=><option key={s.date} value={s.date}>{s.date}</option>)}
+                </select>
+                <button
+                  onClick={()=>{
+                    const ls = compSheets.find(s=>s.date===lDate);
+                    const rs = compSheets.find(s=>s.date===rDate);
+                    if(ls&&rs) handlePrintSideBySide(ls,rs);
+                  }}
+                  disabled={!lDate||!rDate||lDate===rDate}
+                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
+                  📄 Print Side by Side
+                </button>
+              </div>
+            );
+          })()}
         </div>
         {compInsightLoading && (
           <div className="insight-loading">
