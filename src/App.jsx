@@ -1214,6 +1214,124 @@ function ComparisonView({
     'WORKING CAPITAL': 'SUMMARY'
   };
 
+  const handlePrintDetailComparison = (leftSheet, rightSheet) => {
+    const W = window.open("","_blank","width=1050,height=1100");
+    if (!W) return;
+    const L = leftSheet.raw || {};
+    const R = rightSheet.raw || {};
+    const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const f = v => v ? '$'+Math.round(v).toLocaleString() : '—';
+    const fv = v => n(v) ? '$'+Math.round(n(v)).toLocaleString() : '—';
+    const merge = (la, ra, keyFn) => {
+      const all = []; const used = new Set();
+      (la||[]).forEach(li => {
+        const k = keyFn(li).toLowerCase().trim();
+        const ri = (ra||[]).find(r => keyFn(r).toLowerCase().trim() === k);
+        all.push({left: li, right: ri || null});
+        if (ri) used.add(keyFn(ri));
+      });
+      (ra||[]).forEach(ri => { if (!used.has(keyFn(ri))) all.push({left: null, right: ri}); });
+      return all.filter(p => p.left || p.right);
+    };
+    const row = (label, lv, rv, indent=0, bold=false) => {
+      const lNum = typeof lv === 'number' ? lv : n(lv);
+      const rNum = typeof rv === 'number' ? rv : n(rv);
+      const chg = rNum - lNum;
+      const chgColor = chg>0?'#15803d':chg<0?'#dc2626':'#999';
+      const bg = bold ? '#f0f0f0' : '';
+      const fw = bold ? '700' : '400';
+      const border = bold ? '1pt solid #999' : '.5pt dotted #e5e5e5';
+      return '<tr style="background:'+bg+'">'
+        +'<td style="padding:2.5pt '+(8+indent*12)+'pt 2.5pt '+(8+indent*12)+'pt;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+label+'</td>'
+        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+(lNum?'$'+Math.round(lNum).toLocaleString():'—')+'</td>'
+        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+(rNum?'$'+Math.round(rNum).toLocaleString():'—')+'</td>'
+        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';color:'+((lNum||rNum)?chgColor:'#ccc')+';border-bottom:'+border+'">'
+        +((lNum||rNum)?((chg>=0?'+':'')+( chg!==0?'$'+Math.round(Math.abs(chg)).toLocaleString():'—')):'—')+'</td></tr>';
+    };
+    const secHead = t => '<tr><td colspan="4" style="background:#6B0E1E;color:white;font-weight:700;padding:5pt 10pt;font-size:8.5pt;letter-spacing:.8px">'+t+'</td></tr>';
+    const subHead = t => '<tr><td colspan="4" style="background:#374151;color:white;font-weight:600;padding:3pt 10pt;font-size:7.5pt">'+t+'</td></tr>';
+    const totRow = (l,lv,rv) => row(l,lv,rv,0,true);
+    let body = '';
+    // CURRENT ASSETS
+    body += secHead('CURRENT ASSETS');
+    body += subHead('Cash & Deposits');
+    body += row('Glacier Bank', n(L.cashGlacier), n(R.cashGlacier), 1);
+    merge(L.cashOther,R.cashOther,r=>r.bank||r.description||'other').forEach(({left:l,right:r})=>
+      body+=row((l||r).bank||'Other Bank',n((l||{}).amount),n((r||{}).amount),1));
+    if((L.receivables||[]).length||(R.receivables||[]).length){body+=subHead('Receivables');
+      merge(L.receivables,R.receivables,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    if((L.federalPayments||[]).length||(R.federalPayments||[]).length){body+=subHead('Federal Payments');
+      merge(L.federalPayments,R.federalPayments,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    if((L.livestockMarket||[]).length||(R.livestockMarket||[]).length){body+=subHead('Market Livestock');
+      merge(L.livestockMarket,R.livestockMarket,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row((l||r).kind,n((l||{}).value),n((r||{}).value),1));}
+    if((L.farmProducts||[]).length||(R.farmProducts||[]).length){body+=subHead('Farm Products / Grain');
+      merge(L.farmProducts,R.farmProducts,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row((l||r).kind,n((l||{}).quantity)*n((l||{}).pricePerUnit)*(n((l||{}).share||100)/100),n((r||{}).quantity)*n((r||{}).pricePerUnit)*(n((r||{}).share||100)/100),1));}
+    if((L.cropInvestment||[]).length||(R.cropInvestment||[]).length){body+=subHead('Growing Crops');
+      merge(L.cropInvestment,R.cropInvestment,r=>r.cropType||'').forEach(({left:l,right:r})=>body+=row((l||r).cropType,n((l||{}).acres)*n((l||{}).valuePerAcre),n((r||{}).acres)*n((r||{}).valuePerAcre),1));}
+    if((L.supplies||[]).length||(R.supplies||[]).length){body+=subHead('Supplies & Prepaid');
+      merge(L.supplies,R.supplies,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).value),n((r||{}).value),1));}
+    if((L.otherCurrent||[]).length||(R.otherCurrent||[]).length){body+=subHead('Other Current Assets');
+      merge(L.otherCurrent,R.otherCurrent,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    const ltc=d=>n(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)+(d.receivables||[]).reduce((s,r)=>s+n(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0)+(d.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0)+(d.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0)+(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
+    body+=totRow('TOTAL CURRENT ASSETS',ltc(L),ltc(R));
+    // LONG-TERM ASSETS
+    body+=secHead('LONG-TERM ASSETS');
+    if((L.breedingStock||[]).length||(R.breedingStock||[]).length){body+=subHead('Breeding Stock');
+      merge(L.breedingStock,R.breedingStock,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row([(l||r).number,(l||r).kind].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
+    if((L.realEstate||[]).length||(R.realEstate||[]).length){body+=subHead('Real Estate');
+      merge(L.realEstate,R.realEstate,r=>r.description||r.legal||'').forEach(({left:l,right:r})=>body+=row(((l||r).description||(l||r).legal||'Parcel')+((l||r).acres?' ('+( l||r).acres+' ac)':''),n((l||{}).acres)*n((l||{}).valuePerAcre),n((r||{}).acres)*n((r||{}).valuePerAcre),1));}
+    if((L.vehicles||[]).length||(R.vehicles||[]).length){body+=subHead('Titled Vehicles');
+      merge(L.vehicles,R.vehicles,r=>((r.year||'')+' '+(r.make||'')).trim()||'vehicle').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
+    if((L.machinery||[]).length||(R.machinery||[]).length){body+=subHead('Machinery & Equipment');
+      merge(L.machinery,R.machinery,r=>((r.year||'')+' '+(r.make||'')+' '+(r.size||'')).trim()||'equip').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make,(l||r).size].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
+    if((L.otherAssets||[]).length||(R.otherAssets||[]).length){body+=subHead('Other Assets');
+      merge(L.otherAssets,R.otherAssets,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    const lta=d=>(d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)+(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.vehicles||[]).reduce((s,r)=>s+n(r.value),0)+(d.machinery||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+    body+=totRow('TOTAL LONG-TERM ASSETS',lta(L),lta(R));
+    body+=totRow('TOTAL ASSETS',ltc(L)+lta(L),ltc(R)+lta(R));
+    // CURRENT LIABILITIES
+    body+=secHead('CURRENT LIABILITIES');
+    if((L.operatingNotes||[]).length||(R.operatingNotes||[]).length){body+=subHead('Operating Notes');
+      merge(L.operatingNotes,R.operatingNotes,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).balance),n((r||{}).balance),1));}
+    if((L.accountsDue||[]).length||(R.accountsDue||[]).length){body+=subHead('Accounts Payable');
+      merge(L.accountsDue,R.accountsDue,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).amount),n((r||{}).amount),1));}
+    if((L.intermediatDebt||[]).length||(R.intermediatDebt||[]).length){body+=subHead('Intermediate Debt — Current Portion');
+      merge(L.intermediatDebt,R.intermediatDebt,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor+((l||r).security?' / '+(l||r).security:''),n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
+    if((L.reCurrent||[]).length||(R.reCurrent||[]).length){body+=subHead('RE Mortgage — Current Portion');
+      merge(L.reCurrent,R.reCurrent,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
+    if(n(L.taxesDue)||n(R.taxesDue))body+=row('Income Taxes Due',n(L.taxesDue),n(R.taxesDue),1);
+    const tcl=d=>(d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)+(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0)+(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0)+(d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0)+n(d.taxesDue);
+    body+=totRow('TOTAL CURRENT LIABILITIES',tcl(L),tcl(R));
+    // LONG-TERM LIABILITIES
+    body+=secHead('LONG-TERM LIABILITIES');
+    if((L.intermediatDebt||[]).length||(R.intermediatDebt||[]).length){body+=subHead('Intermediate Term Debt — Long-Term Portion');
+      merge(L.intermediatDebt,R.intermediatDebt,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor+((l||r).security?' / '+(l||r).security:''),Math.max(0,n((l||{}).principal)-n((l||{}).annualPmt)),Math.max(0,n((r||{}).principal)-n((r||{}).annualPmt)),1));}
+    if((L.reMortgages||[]).length||(R.reMortgages||[]).length){body+=subHead('Real Estate Mortgages');
+      merge(L.reMortgages,R.reMortgages,r=>r.lienHolder||'').forEach(({left:l,right:r})=>body+=row((l||r).lienHolder+((l||r).terms?' — '+(l||r).terms:''),n((l||{}).principal),n((r||{}).principal),1));}
+    if((L.otherLiabilities||[]).length||(R.otherLiabilities||[]).length){body+=subHead('Other Liabilities');
+      merge(L.otherLiabilities,R.otherLiabilities,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).balance),n((r||{}).balance),1));}
+    const tlt2=d=>Math.max(0,(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal)-n(r.annualPmt),0))+(d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)+(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
+    const tl=d=>tcl(d)+tlt2(d);
+    body+=totRow('TOTAL LONG-TERM LIABILITIES',tlt2(L),tlt2(R));
+    body+=totRow('TOTAL LIABILITIES',tl(L),tl(R));
+    body+=secHead('NET WORTH');
+    body+=totRow('WORKING CAPITAL',ltc(L)-tcl(L),ltc(R)-tcl(R));
+    body+=totRow('NET WORTH',ltc(L)+lta(L)-tl(L),ltc(R)+lta(R)-tl(R));
+    W.document.write('<!DOCTYPE html><html><head><title>Detail Comparison — '+clientName+'</title><style>body{font-family:Arial,sans-serif;font-size:8pt;margin:.4in;color:#000}table{width:100%;border-collapse:collapse}@media print{.no-print{display:none}}</style></head><body>'
+      +'<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt">'
+      +'<div><div style="font-size:13pt;font-weight:800">'+clientName+'</div>'
+      +'<div style="font-size:8pt;color:#555;margin-top:2pt">Detail Comparison — First Bank of Montana</div></div>'
+      +'<div style="font-size:8pt;color:#555;text-align:right">Printed '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})+'</div></div>'
+      +'<table><thead><tr style="background:#1a1a1a;color:white">'
+      +'<th style="text-align:left;padding:5pt 10pt;font-size:8pt;width:40%">Item</th>'
+      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">'+leftSheet.date+'</th>'
+      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">'+rightSheet.date+'</th>'
+      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">Change</th>'
+      +'</tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    W.document.close(); W.focus(); setTimeout(()=>W.print(),400);
+  };
+
   const handlePrintSideBySide = (leftSheet, rightSheet) => {
     const W = window.open("","_blank","width=1000,height=1100");
     if (!W) return;
@@ -1577,6 +1695,16 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
                   disabled={!lDate||!rDate||lDate===rDate}
                   style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
                   📄 Print Side by Side
+                </button>
+                <button
+                  onClick={()=>{
+                    const ls = compSheets.find(s=>s.date===lDate);
+                    const rs = compSheets.find(s=>s.date===rDate);
+                    if(ls&&rs) handlePrintDetailComparison(ls,rs);
+                  }}
+                  disabled={!lDate||!rDate||lDate===rDate}
+                  style={{background:'#374151',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
+                  🔍 Detail Comparison
                 </button>
               </div>
             );
@@ -4762,7 +4890,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ date: p.asOfDate, totals: sheetTotals(p) });
+              sheets.push({ date: p.asOfDate, totals: sheetTotals(p), raw: p });
             }
           } catch {}
         }
