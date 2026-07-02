@@ -1300,7 +1300,7 @@ function ComparisonView({
     if((L.reCurrent||[]).length||(R.reCurrent||[]).length){body+=subHead('RE Mortgage — Current Portion');
       merge(L.reCurrent,R.reCurrent,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
     if(n(L.taxesDue)||n(R.taxesDue))body+=row('Income Taxes Due',n(L.taxesDue),n(R.taxesDue),1);
-    const tcl=d=>(d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)+(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0)+(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0)+(d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0)+n(d.taxesDue);
+    const tcl=d=>(d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0)+(d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0)+(d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)+(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)+n(d.taxesDue);
     body+=totRow('TOTAL CURRENT LIABILITIES',tcl(L),tcl(R));
     // LONG-TERM LIABILITIES
     body+=secHead('LONG-TERM LIABILITIES');
@@ -1310,7 +1310,7 @@ function ComparisonView({
       merge(L.reMortgages,R.reMortgages,r=>r.lienHolder||'').forEach(({left:l,right:r})=>body+=row((l||r).lienHolder+((l||r).terms?' — '+(l||r).terms:''),n((l||{}).principal),n((r||{}).principal),1));}
     if((L.otherLiabilities||[]).length||(R.otherLiabilities||[]).length){body+=subHead('Other Liabilities');
       merge(L.otherLiabilities,R.otherLiabilities,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).balance),n((r||{}).balance),1));}
-    const tlt2=d=>Math.max(0,(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal)-n(r.annualPmt),0))+(d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)+(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
+    const tlt2=d=>Math.max(0,(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal)-n(r.annualPmt),0))+(d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0)+(d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+n(r.balance),0);
     const tl=d=>tcl(d)+tlt2(d);
     body+=totRow('TOTAL LONG-TERM LIABILITIES',tlt2(L),tlt2(R));
     body+=totRow('TOTAL LIABILITIES',tl(L),tl(R));
@@ -3657,10 +3657,10 @@ function BSCompareModal({review, onAccept, onDiscard}) {
     otherAssets:(d.otherAssets||[]).reduce((s,r)=>s+nm(r.amount),0),
     opNotes:    (d.operatingNotes||[]).reduce((s,r)=>s+nm(r.balance),0),
     acctsDue:   (d.accountsDue||[]).reduce((s,r)=>s+nm(r.amount),0),
-    intermed:   (d.intermediatDebt||[]).reduce((s,r)=>s+nm(r.principal),0),
-    reCur:      (d.reCurrent||[]).reduce((s,r)=>s+nm(r.annualPmt),0),
-    reMort:     (d.reMortgages||[]).reduce((s,r)=>s+nm(r.principal),0),
-    otherLiab:  (d.otherLiabilities||[]).reduce((s,r)=>s+nm(r.amount),0),
+    intermed:   (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+nm(r.principal),0),
+    reCur:      (d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+nm(r.annualPmt),0),
+    reMort:     (d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+nm(r.principal),0),
+    otherLiab:  (d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+nm(r.amount),0),
   });
   const O = calcBS(orig), C = calcBS(draft);
   const oTA = O.cash+O.farmProd+O.supplies+O.otherCur+O.lsMkt+O.breeding+O.re+O.vehicles+O.machinery+O.otherAssets;
@@ -4730,17 +4730,17 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
   const linkedEntityVal = Object.values(linkedEntityNWMap).reduce((s,v)=>s+v,0);
   const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
-  const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
-  const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
-  const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
-  const intermedLTPortion = data.intermediatDebt.reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
+  const opNotesTotal = data.operatingNotes.filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0);
+  const acctsDueTotal = data.accountsDue.filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
+  const intermedCurrentPortion = data.intermediatDebt.filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0);
+  const intermedLTPortion = data.intermediatDebt.filter(r=>r.creditor).reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
   const intermedTotal = intermedCurrentPortion; // alias used in summary display
-  const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0);
+  const reCurrentTotal = data.reCurrent.filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0);
   const taxesDueVal = n(data.taxesDue);
   const otherCLTotal = data.otherCurrentLiab.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
-  const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0);
-  const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
+  const reMortTotal = data.reMortgages.filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0);
+  const otherLiabTotal = data.otherLiabilities.filter(r=>r.description).reduce((s,r)=>s+n(r.balance),0);
   const totalLiabilities = totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal;
   const netWorth = totalAssets - totalLiabilities;
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
@@ -4816,15 +4816,15 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     const oa = (d.otherAssets||[]).reduce((s,r)=>s+m(r.amount),0);
     const tlt = bs+re+(d.reContracts||[]).reduce((s,r)=>s+m(r.amount),0)+veh+mach+oa;
     const ta = tc+tlt;
-    const on = (d.operatingNotes||[]).reduce((s,r)=>s+m(r.balance),0);
-    const ad = (d.accountsDue||[]).reduce((s,r)=>s+m(r.amount),0);
-    const id = (d.intermediatDebt||[]).reduce((s,r)=>s+m(r.annualPmt),0);
-    const idLT = (d.intermediatDebt||[]).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
-    const rc = (d.reCurrent||[]).reduce((s,r)=>s+m(r.annualPmt),0);
+    const on = (d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.balance),0);
+    const ad = (d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.amount),0);
+    const id = (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.annualPmt),0);
+    const idLT = (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
+    const rc = (d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.annualPmt),0);
     const ocl = (d.otherCurrentLiab||[]).reduce((s,r)=>s+m(r.amount),0);
     const tcl = on+ad+id+rc+m(d.taxesDue)+ocl;
-    const rm = (d.reMortgages||[]).reduce((s,r)=>s+m(r.principal),0);
-    const ol = (d.otherLiabilities||[]).reduce((s,r)=>s+m(r.balance),0);
+    const rm = (d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+m(r.principal),0);
+    const ol = (d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+m(r.balance),0);
     const tl = tcl+idLT+rm+ol;
     return {
       "Cash & Bank":cash, "Receivables":rec, "Federal Payments":m(d.federalPayments),
@@ -5376,12 +5376,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0)
       +linkedEntityVal;
     const totalAssets = totalCurrentAssets + totalLTAssets;
-    const opNotesTot = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)
-      +(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
+    const opNotesTot = (d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0)
+      +(d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
     const totalLiabilities = opNotesTot
       +(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0)
-      +(d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0)
-      +(d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)
+      +(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
+      +(d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0)
       +(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.taxesDue||[]).reduce((s,r)=>s+n(r.amount),0);
     const netWorth = totalAssets - totalLiabilities;
