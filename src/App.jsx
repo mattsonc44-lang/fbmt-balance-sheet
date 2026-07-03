@@ -3384,6 +3384,7 @@ function ExpenseListEditor({expenseList,setExpenseList,onClose}) {
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
+const FBMT_FUNCTION_SECRET = window.FBMT_FUNCTION_SECRET || '';
 
 // Auth session — module-level so all storage calls pick it up automatically
 let currentSession = null;
@@ -4105,7 +4106,7 @@ export default function BalanceSheet() {
 
         const response = await fetch('/.netlify/functions/analyze', {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-fbmt-secret": FBMT_FUNCTION_SECRET },
           body: JSON.stringify({
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 4000,
@@ -4936,7 +4937,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
       const resp = await fetch(apiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-fbmt-secret": FBMT_FUNCTION_SECRET },
         body: JSON.stringify(requestBody)
       });
       if (!resp.ok) {
