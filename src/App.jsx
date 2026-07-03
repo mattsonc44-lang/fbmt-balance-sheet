@@ -5389,7 +5389,8 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
-body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:.45in .4in;}
+@page{size:legal portrait;margin:.4in .45in;}
+body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:0;}
 h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:4pt;}
 h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:8pt;}
 .logo-box{border:2pt solid #6B0E1E;padding:4pt 7pt;display:inline-block;text-align:center;font-weight:900;color:#6B0E1E;}
