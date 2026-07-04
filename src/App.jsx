@@ -5806,11 +5806,13 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
   const loadPendingReviews = async () => {
     if (!isConfigured()) return;
+    if (!session?.user?.id) return;
     setLoadingReviews(true);
+    const uid = session.user.id;
     try {
       const [bsResp, budResp] = await Promise.all([
-        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?customer_draft=not.is.null&status=neq.dismissed&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/budget_shares?customer_draft=not.is.null&status=neq.dismissed&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?customer_draft=not.is.null&status=neq.dismissed&user_id=eq.'+uid+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?customer_draft=not.is.null&status=neq.dismissed&user_id=eq.'+uid+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
       ]);
       const bsRows = bsResp.ok ? await bsResp.json() : [];
       const budRows = budResp.ok ? await budResp.json() : [];
