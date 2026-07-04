@@ -4035,7 +4035,7 @@ function AdminScreen({ session, profile, onSignOut, onClose }) {
 }
 
 // ─── CAPortal ─────────────────────────────────────────────────────────────────
-function CAPortal({ session, profile, onSignOut }) {
+function CAPortal({ session, profile, onSignOut, onOpen }) {
   const [shares, setShares] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [openSheet, setOpenSheet] = React.useState(null); // {share, data}
@@ -4173,7 +4173,7 @@ function CAPortal({ session, profile, onSignOut }) {
                         {caEdits[share.id] && <span style={{marginLeft:8,background:'#fef3c7',color:'#92400e',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>Changes Pending Review</span>}
                       </div>
                     </div>
-                    <button onClick={()=>openForEdit(share)}
+                    <button onClick={()=> onOpen ? onOpen(share) : openForEdit(share)}
                       style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'7px 16px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
                       Open
                     </button>
@@ -4485,6 +4485,8 @@ export default function BalanceSheet() {
   const [showCADiff, setShowCADiff] = useState(null); // ca_edit record
   const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [caOpenShare, setCaOpenShare] = useState(null);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -4505,11 +4507,13 @@ export default function BalanceSheet() {
       setUserFolders([]);
       setSavedSheets([]);
       setPendingReviews([]);
+      setProfile(null);
+      setProfileLoading(true);
       return;
     }
     // Run everything in try/catch so nothing can silently kill it
     try {
-      supaGetProfile().then(p => setProfile(p)).catch(() => {});
+      supaGetProfile().then(p => { setProfile(p); setProfileLoading(false); }).catch(() => { setProfileLoading(false); });
     } catch(e) { console.warn('profile load error:', e); }
     try {
       const userId = session?.user?.id || 'default';
@@ -5841,10 +5845,10 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   // ── CA Functions ────────────────────────────────────────────────────────────
   const loadCAUsers = async () => {
     try {
-      const r = await fetch(SUPABASE_URL+'/rest/v1/profiles?role=eq.ca&is_active=eq.true&select=id,full_name,email', {headers:supaHeaders()});
+      const r = await fetch(SUPABASE_URL+'/rest/v1/profiles?role=eq.ca&is_active=neq.false&select=id,full_name,email', {headers:supaHeaders()});
       const d = await r.json();
       setCAUsers(Array.isArray(d)?d:[]);
-    } catch {}
+    } catch(e) { console.error('loadCAUsers error:', e); }
   };
 
   const shareWithCA = async (sheetKey, caUserId) => {
@@ -5853,6 +5857,16 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     try {
       const item = await storage.get(sheetKey);
       const sheetData = item ? JSON.parse(item.value) : {};
+      // Merge current budget data from state into the snapshot
+      const fullData = {
+        ...sheetData,
+        budgetCrops: data.budgetCrops,
+        budgetLivestock: data.budgetLivestock,
+        budgetMisc: data.budgetMisc,
+        budgetExpenses: data.budgetExpenses,
+        budgetInsuranceEnabled: data.budgetInsuranceEnabled,
+        budgetProposedDebt: data.budgetProposedDebt,
+      };
       const sheet = savedSheets.find(s=>s.key===sheetKey);
       await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
         method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
@@ -5862,7 +5876,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
           ca_user_id: caUserId,
           client_name: sheet?.clientName || sheetData.clientName || '',
           sheet_key: sheetKey,
-          sheet_data: sheetData
+          sheet_data: fullData
         })
       });
       setShowShareCA(null); setSelectedCAUser('');
@@ -7196,11 +7210,35 @@ ${extraPages}
               <input type="date" className="text-input" style={{maxWidth:160}} value={data.asOfDate}
                 onChange={e=>set("asOfDate",e.target.value)} />
             </div>
-            <button className="btn btn-save" onClick={saveSheet}
-              disabled={!data.clientName || saveStatus === "saving"}>
-              {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
-            </button>
-            <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
+            {caOpenShare ? (
+              <>
+                <button className="btn btn-save" onClick={async()=>{
+                  setSaveStatus('saving');
+                  try {
+                    const existing = caEdits[caOpenShare.id];
+                    const hdr2 = {...supaHeaders(),'Prefer':'return=minimal'};
+                    if (existing) {
+                      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {method:'PATCH',headers:hdr2,body:JSON.stringify({edited_data:data,submitted_at:new Date().toISOString(),status:'pending'})});
+                    } else {
+                      await fetch(SUPABASE_URL+'/rest/v1/ca_edits', {method:'POST',headers:hdr2,body:JSON.stringify({share_id:caOpenShare.id,ca_user_id:session?.user?.id,ca_name:profile?.full_name||session?.user?.email,client_name:caOpenShare.client_name,sheet_key:caOpenShare.sheet_key,edited_data:data,status:'pending'})});
+                    }
+                    setSaveStatus('saved');
+                    setTimeout(()=>setSaveStatus(null),2000);
+                  } catch(e) { setSaveStatus('error:'+e.message); }
+                }}>
+                  {saveStatus==='saving'?'Submitting...':saveStatus==='saved'?'Submitted!':'Submit Changes to Lender'}
+                </button>
+                <button className="btn btn-secondary" onClick={()=>{setCaOpenShare(null);setData(emptyData());}}>← Back to Portal</button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-save" onClick={saveSheet}
+                  disabled={!data.clientName || saveStatus === "saving"}>
+                  {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
+                </button>
+                <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
+              </>
+            )}
             {data.clientName && (
               <button onClick={()=>{ setSharePreType('bs'); setShowSharePre(true); }}
                 style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
@@ -7255,9 +7293,30 @@ ${extraPages}
   }
 
   // ── Role-based routing ───────────────────────────────────────────────────────
-  const handleSignOut = async () => { await supaLogout(); setSession(null); setProfile(null); };
+  const handleSignOut = async () => { await supaLogout(); setSession(null); setProfile(null); setProfileLoading(true); };
+
+  // Wait for profile to load before routing — prevents CA briefly seeing lender screen
+  if (profileLoading && session) {
+    return (
+      <div style={{minHeight:'100vh',background:'#6B0E1E',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{color:'white',fontSize:14,opacity:.8}}>Loading...</div>
+      </div>
+    );
+  }
+
   if (profile?.force_password_change) return <ForcePasswordChange session={session} onDone={()=>supaGetProfile().then(p=>setProfile(p))} />;
-  if (profile?.role === 'ca') return <CAPortal session={session} profile={profile} onSignOut={handleSignOut} />;
+  if (profile?.role === 'ca') {
+    if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
+      onOpen={(share) => {
+        const sheetData = share.sheet_data || {};
+        setData({...emptyData(), ...sheetData});
+        setCaOpenShare(share);
+        setScreen('wizard');
+        setStep(0);
+      }}
+    />;
+    // CA has opened a sheet — fall through to full app below in CA mode
+  }
   if (showAdminScreen) return <AdminScreen session={session} profile={profile} onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)} />;
 
   if (screen === "home") {
@@ -7789,8 +7848,12 @@ ${extraPages}
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
-
-      {/* ── Balance Sheet Splitter Modal ── */}
+      {caOpenShare && (
+        <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13}}>
+          <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Changes will be submitted to lender for review</span>
+          <button onClick={()=>{setCaOpenShare(null);setData(emptyData());}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'3px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>← Back to Portal</button>
+        </div>
+      )}
       {showSplitter && <BSSplitter
         data={data} setData={setData}
         splitSelected={splitSelected} setSplitSelected={setSplitSelected}
