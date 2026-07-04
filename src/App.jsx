@@ -8129,10 +8129,6 @@ ${extraPages}
               style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               🔗 Share with Customer
             </button>
-            <button className="btn btn-secondary" onClick={()=>setShowShareBudget(true)}
-              style={{fontSize:".85rem",background:"#1B4332",color:"white",border:"none"}}>
-              📧 Share with Customer
-            </button>
           </div>
           <div className="budget-body">
             <BudgetView
