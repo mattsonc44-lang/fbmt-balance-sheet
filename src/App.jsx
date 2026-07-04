@@ -7507,6 +7507,12 @@ ${extraPages}
                     <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
                   ))}
                 </select>
+                {caUsers.length === 0 && (
+                  <div style={{fontSize:12,color:"#888",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                    No CA users found.
+                    <button onClick={loadCAUsers} style={{background:"#f0f6ff",border:"1px solid #93c5fd",borderRadius:4,padding:"3px 10px",fontSize:12,cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit"}}>Refresh</button>
+                  </div>
+                )}
                 <div style={{display:"flex",gap:10}}>
                   <button onClick={()=>shareWithCA(showShareCA, selectedCAUser)} disabled={!selectedCAUser||sharingCA}
                     style={{flex:1,background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:(!selectedCAUser||sharingCA)?"not-allowed":"pointer",fontFamily:"inherit",opacity:(!selectedCAUser||sharingCA)?.7:1}}>
@@ -7754,7 +7760,13 @@ ${extraPages}
                               </button>
                               {caUsers.length > 0 && (
                                 <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
-                                  onClick={e=>{e.stopPropagation();setShowShareCA(s.key);setSelectedCAUser('');}}>
+                                  onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}>
+                                  Share CA
+                                </button>
+                              )}
+                              {caUsers.length === 0 && profile?.role==='admin' && (
+                                <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
+                                  onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}>
                                   Share CA
                                 </button>
                               )}
