@@ -1131,6 +1131,8 @@ function ComparisonView({
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
+  const [sbLeft, setSbLeft] = React.useState('');
+  const [sbRight, setSbRight] = React.useState('');
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
   const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
 
@@ -1147,7 +1149,6 @@ function ComparisonView({
     </div>
   );
 
-  // Year selector — default to last 3 if more than 3 saved
   const allYears = compSheets.map(s => s.date);
   const activeYears = selectedYears || allYears.slice(-3);
   const sheets = compSheets.filter(s => activeYears.includes(s.date));
@@ -1200,6 +1201,244 @@ function ComparisonView({
     if (absPct >= 20) return { background: '#fee2e2', color: '#991b1b', fontWeight: 700 };
     if (absPct >= 10) return { background: '#fef3c7', color: '#92400e' };
     return {};
+  };
+
+  const SECTION_BREAKS_LIST = [
+    'Total Current Assets','TOTAL ASSETS','Total Current Liab','TOTAL LIABILITIES','WORKING CAPITAL','NET WORTH'
+  ];
+  const SECTION_HEADS = {
+    'Cash & Bank': 'CURRENT ASSETS',
+    'Breeding Stock': 'LONG-TERM ASSETS',
+    'Operating Notes': 'CURRENT LIABILITIES',
+    'Intermediate Debt (LT)': 'LONG-TERM LIABILITIES',
+    'WORKING CAPITAL': 'SUMMARY'
+  };
+
+  const handlePrintDetailComparison = (leftSheet, rightSheet) => {
+    const W = window.open("","_blank","width=1050,height=1100");
+    if (!W) return;
+    const L = leftSheet.raw || {};
+    const R = rightSheet.raw || {};
+    const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const f = v => v ? '$'+Math.round(v).toLocaleString() : '—';
+    const fv = v => n(v) ? '$'+Math.round(n(v)).toLocaleString() : '—';
+    const merge = (la, ra, keyFn) => {
+      const all = []; const used = new Set();
+      (la||[]).forEach(li => {
+        const k = keyFn(li).toLowerCase().trim();
+        const ri = (ra||[]).find(r => keyFn(r).toLowerCase().trim() === k);
+        all.push({left: li, right: ri || null});
+        if (ri) used.add(keyFn(ri));
+      });
+      (ra||[]).forEach(ri => { if (!used.has(keyFn(ri))) all.push({left: null, right: ri}); });
+      return all.filter(p => p.left || p.right);
+    };
+    const row = (label, lv, rv, indent=0, bold=false) => {
+      const lNum = typeof lv === 'number' ? lv : n(lv);
+      const rNum = typeof rv === 'number' ? rv : n(rv);
+      const chg = rNum - lNum;
+      const chgColor = chg>0?'#15803d':chg<0?'#dc2626':'#999';
+      const bg = bold ? '#f0f0f0' : '';
+      const fw = bold ? '700' : '400';
+      const border = bold ? '1pt solid #999' : '.5pt dotted #e5e5e5';
+      return '<tr style="background:'+bg+'">'
+        +'<td style="padding:2.5pt '+(8+indent*12)+'pt 2.5pt '+(8+indent*12)+'pt;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+label+'</td>'
+        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+(lNum?'$'+Math.round(lNum).toLocaleString():'—')+'</td>'
+        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+(rNum?'$'+Math.round(rNum).toLocaleString():'—')+'</td>'
+        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';color:'+((lNum||rNum)?chgColor:'#ccc')+';border-bottom:'+border+'">'
+        +((lNum||rNum)?((chg>=0?'+':'')+( chg!==0?'$'+Math.round(Math.abs(chg)).toLocaleString():'—')):'—')+'</td></tr>';
+    };
+    const secHead = t => '<tr><td colspan="4" style="background:#6B0E1E;color:white;font-weight:700;padding:5pt 10pt;font-size:8.5pt;letter-spacing:.8px">'+t+'</td></tr>';
+    const subHead = t => '<tr><td colspan="4" style="background:#374151;color:white;font-weight:600;padding:3pt 10pt;font-size:7.5pt">'+t+'</td></tr>';
+    const totRow = (l,lv,rv) => row(l,lv,rv,0,true);
+    let body = '';
+    // CURRENT ASSETS
+    body += secHead('CURRENT ASSETS');
+    body += subHead('Cash & Deposits');
+    body += row('Glacier Bank', n(L.cashGlacier), n(R.cashGlacier), 1);
+    merge(L.cashOther,R.cashOther,r=>r.bank||r.description||'other').forEach(({left:l,right:r})=>
+      body+=row((l||r).bank||'Other Bank',n((l||{}).amount),n((r||{}).amount),1));
+    if((L.receivables||[]).length||(R.receivables||[]).length){body+=subHead('Receivables');
+      merge(L.receivables,R.receivables,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    if((L.federalPayments||[]).length||(R.federalPayments||[]).length){body+=subHead('Federal Payments');
+      merge(L.federalPayments,R.federalPayments,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    if((L.livestockMarket||[]).length||(R.livestockMarket||[]).length){body+=subHead('Market Livestock');
+      merge(L.livestockMarket,R.livestockMarket,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row((l||r).kind,n((l||{}).value),n((r||{}).value),1));}
+    if((L.farmProducts||[]).length||(R.farmProducts||[]).length){body+=subHead('Farm Products / Grain');
+      merge(L.farmProducts,R.farmProducts,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row((l||r).kind,n((l||{}).quantity)*n((l||{}).pricePerUnit)*(n((l||{}).share||100)/100),n((r||{}).quantity)*n((r||{}).pricePerUnit)*(n((r||{}).share||100)/100),1));}
+    if((L.cropInvestment||[]).length||(R.cropInvestment||[]).length){body+=subHead('Growing Crops');
+      merge(L.cropInvestment,R.cropInvestment,r=>r.cropType||'').forEach(({left:l,right:r})=>body+=row((l||r).cropType,n((l||{}).acres)*n((l||{}).valuePerAcre),n((r||{}).acres)*n((r||{}).valuePerAcre),1));}
+    if((L.supplies||[]).length||(R.supplies||[]).length){body+=subHead('Supplies & Prepaid');
+      merge(L.supplies,R.supplies,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).value),n((r||{}).value),1));}
+    if((L.otherCurrent||[]).length||(R.otherCurrent||[]).length){body+=subHead('Other Current Assets');
+      merge(L.otherCurrent,R.otherCurrent,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    const ltc=d=>n(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)+(d.receivables||[]).reduce((s,r)=>s+n(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0)+(d.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0)+(d.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0)+(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
+    body+=totRow('TOTAL CURRENT ASSETS',ltc(L),ltc(R));
+    // LONG-TERM ASSETS
+    body+=secHead('LONG-TERM ASSETS');
+    if((L.breedingStock||[]).length||(R.breedingStock||[]).length){body+=subHead('Breeding Stock');
+      merge(L.breedingStock,R.breedingStock,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row([(l||r).number,(l||r).kind].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
+    if((L.realEstate||[]).length||(R.realEstate||[]).length){body+=subHead('Real Estate');
+      merge(L.realEstate,R.realEstate,r=>r.description||r.legal||'').forEach(({left:l,right:r})=>body+=row(((l||r).description||(l||r).legal||'Parcel')+((l||r).acres?' ('+( l||r).acres+' ac)':''),n((l||{}).acres)*n((l||{}).valuePerAcre),n((r||{}).acres)*n((r||{}).valuePerAcre),1));}
+    if((L.vehicles||[]).length||(R.vehicles||[]).length){body+=subHead('Titled Vehicles');
+      merge(L.vehicles,R.vehicles,r=>((r.year||'')+' '+(r.make||'')).trim()||'vehicle').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
+    if((L.machinery||[]).length||(R.machinery||[]).length){body+=subHead('Machinery & Equipment');
+      merge(L.machinery,R.machinery,r=>((r.year||'')+' '+(r.make||'')+' '+(r.size||'')).trim()||'equip').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make,(l||r).size].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
+    if((L.otherAssets||[]).length||(R.otherAssets||[]).length){body+=subHead('Other Assets');
+      merge(L.otherAssets,R.otherAssets,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
+    const lta=d=>(d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)+(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.vehicles||[]).reduce((s,r)=>s+n(r.value),0)+(d.machinery||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+    body+=totRow('TOTAL LONG-TERM ASSETS',lta(L),lta(R));
+    body+=totRow('TOTAL ASSETS',ltc(L)+lta(L),ltc(R)+lta(R));
+    // CURRENT LIABILITIES
+    body+=secHead('CURRENT LIABILITIES');
+    if((L.operatingNotes||[]).length||(R.operatingNotes||[]).length){body+=subHead('Operating Notes');
+      merge(L.operatingNotes,R.operatingNotes,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).balance),n((r||{}).balance),1));}
+    if((L.accountsDue||[]).length||(R.accountsDue||[]).length){body+=subHead('Accounts Payable');
+      merge(L.accountsDue,R.accountsDue,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).amount),n((r||{}).amount),1));}
+    if((L.intermediatDebt||[]).length||(R.intermediatDebt||[]).length){body+=subHead('Intermediate Debt — Current Portion');
+      merge(L.intermediatDebt,R.intermediatDebt,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor+((l||r).security?' / '+(l||r).security:''),n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
+    if((L.reCurrent||[]).length||(R.reCurrent||[]).length){body+=subHead('RE Mortgage — Current Portion');
+      merge(L.reCurrent,R.reCurrent,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
+    if(n(L.taxesDue)||n(R.taxesDue))body+=row('Income Taxes Due',n(L.taxesDue),n(R.taxesDue),1);
+    const tcl=d=>(d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0)+(d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0)+(d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)+(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)+n(d.taxesDue);
+    body+=totRow('TOTAL CURRENT LIABILITIES',tcl(L),tcl(R));
+    // LONG-TERM LIABILITIES
+    body+=secHead('LONG-TERM LIABILITIES');
+    if((L.intermediatDebt||[]).length||(R.intermediatDebt||[]).length){body+=subHead('Intermediate Term Debt — Long-Term Portion');
+      merge(L.intermediatDebt,R.intermediatDebt,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor+((l||r).security?' / '+(l||r).security:''),Math.max(0,n((l||{}).principal)-n((l||{}).annualPmt)),Math.max(0,n((r||{}).principal)-n((r||{}).annualPmt)),1));}
+    if((L.reMortgages||[]).length||(R.reMortgages||[]).length){body+=subHead('Real Estate Mortgages');
+      merge(L.reMortgages,R.reMortgages,r=>r.lienHolder||'').forEach(({left:l,right:r})=>body+=row((l||r).lienHolder+((l||r).terms?' — '+(l||r).terms:''),n((l||{}).principal),n((r||{}).principal),1));}
+    if((L.otherLiabilities||[]).length||(R.otherLiabilities||[]).length){body+=subHead('Other Liabilities');
+      merge(L.otherLiabilities,R.otherLiabilities,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).balance),n((r||{}).balance),1));}
+    const tlt2=d=>Math.max(0,(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal)-n(r.annualPmt),0))+(d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0)+(d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+n(r.balance),0);
+    const tl=d=>tcl(d)+tlt2(d);
+    body+=totRow('TOTAL LONG-TERM LIABILITIES',tlt2(L),tlt2(R));
+    body+=totRow('TOTAL LIABILITIES',tl(L),tl(R));
+    body+=secHead('NET WORTH');
+    body+=totRow('WORKING CAPITAL',ltc(L)-tcl(L),ltc(R)-tcl(R));
+    body+=totRow('NET WORTH',ltc(L)+lta(L)-tl(L),ltc(R)+lta(R)-tl(R));
+    W.document.write('<!DOCTYPE html><html><head><title>Detail Comparison — '+clientName+'</title><style>body{font-family:Arial,sans-serif;font-size:8pt;margin:.4in;color:#000}table{width:100%;border-collapse:collapse}@media print{.no-print{display:none}}</style></head><body>'
+      +'<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt">'
+      +'<div><div style="font-size:13pt;font-weight:800">'+clientName+'</div>'
+      +'<div style="font-size:8pt;color:#555;margin-top:2pt">Detail Comparison — First Bank of Montana</div></div>'
+      +'<div style="font-size:8pt;color:#555;text-align:right">Printed '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})+'</div></div>'
+      +'<table><thead><tr style="background:#1a1a1a;color:white">'
+      +'<th style="text-align:left;padding:5pt 10pt;font-size:8pt;width:40%">Item</th>'
+      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">'+leftSheet.date+'</th>'
+      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">'+rightSheet.date+'</th>'
+      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">Change</th>'
+      +'</tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    W.document.close(); W.focus(); setTimeout(()=>W.print(),400);
+  };
+
+  const handlePrintSideBySide = (leftSheet, rightSheet) => {
+    const W = window.open("","_blank","width=1000,height=1100");
+    if (!W) return;
+    const fmtP = v => v === 0 ? '—' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+    const sbLabels = Object.keys(leftSheet.totals);
+    const rows = sbLabels.map(label => {
+      const lv = leftSheet.totals[label] || 0;
+      const rv = rightSheet.totals[label] || 0;
+      const chg = rv - lv;
+      const isBreak = SECTION_BREAKS_LIST.includes(label);
+      const isBig = ['Total Current Assets','TOTAL ASSETS','TOTAL LIABILITIES','NET WORTH'].includes(label);
+      const head = SECTION_HEADS[label];
+      let html = '';
+      if (head) html += `<tr><td colspan="4" style="background:#6B0E1E;color:white;font-weight:700;padding:5pt 10pt;font-size:8pt;letter-spacing:.8px;text-transform:uppercase">${head}</td></tr>`;
+      const rowStyle = isBig
+        ? 'font-weight:800;font-size:9pt;background:#f0f0f0;border-top:2pt solid #333;'
+        : isBreak ? 'font-weight:700;border-top:1pt solid #999;background:#fafafa;' : '';
+      const chgColor = chg > 0 ? '#15803d' : chg < 0 ? '#dc2626' : '#999';
+      html += `<tr style="${rowStyle}">
+        <td style="padding:3pt 10pt;border-bottom:.5pt dotted #ddd;font-size:8pt">${label}</td>
+        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt">${fmtP(lv)}</td>
+        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt">${fmtP(rv)}</td>
+        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt;color:${chgColor};font-weight:600">${chg !== 0 ? (chg > 0 ? '+' : '') + fmtP(chg) : '—'}</td>
+      </tr>`;
+      return html;
+    }).join('');
+
+    W.document.write(`<!DOCTYPE html><html><head><title>Comparison — ${clientName}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:8pt;margin:.4in;color:#000}
+  table{width:100%;border-collapse:collapse}
+  @media print{.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">🖨 Print</button>
+<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt">
+  <div>
+    <div style="font-size:13pt;font-weight:800">${clientName}</div>
+    <div style="font-size:8pt;color:#555;margin-top:2pt">Balance Sheet Comparison — First Bank of Montana</div>
+  </div>
+  <div style="font-size:8pt;color:#555">Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+</div>
+<table>
+  <thead>
+    <tr style="background:#1a1a1a;color:white">
+      <th style="text-align:left;padding:5pt 10pt;font-size:8pt;width:40%">Category</th>
+      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">${leftSheet.date} <span style="font-weight:400;font-size:7pt">(Prior)</span></th>
+      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">${rightSheet.date} <span style="font-weight:400;font-size:7pt">(Current)</span></th>
+      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">Change</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+</body></html>`);
+    W.document.close();
+    W.focus();
+    setTimeout(() => W.print(), 400);
+  };
+
+  const handlePrintComparison = () => {
+    const W = window.open("","_blank","width=950,height=1100");
+    if (!W) return;
+    const labels = Object.keys(sheets[0].totals);
+    const fmtP = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+    const rows = labels.map(label => {
+      const isBold = BOLD_ROWS && BOLD_ROWS.includes(label);
+      const isBreak = SECTION_BREAKS && SECTION_BREAKS.includes(label);
+      const header = SECTION_HEADERS && SECTION_HEADERS[label];
+      const chg = (latest?.totals[label]||0) - (prior?.totals[label]||0);
+      let html = '';
+      if (header) html += `<tr><td colspan="${years.length+2}" style="background:#6B0E1E;color:white;font-weight:700;padding:4pt 8pt;font-size:8pt;letter-spacing:.5px">${header}</td></tr>`;
+      html += `<tr style="${isBold?'font-weight:700;background:#f5f0f0;':''}${isBreak?'border-top:1.5pt solid #6B0E1E;':''}">
+        <td style="padding:3pt 8pt;border-bottom:.5pt dotted #ddd;font-size:7.5pt">${label}</td>
+        ${years.map(y=>`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7.5pt;font-weight:${isBold?700:400}">${fmtP(sheets.find(s=>s.date===y)?.totals[label]||0)}</td>`).join('')}
+        ${years.length>1?`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7pt;color:${chg>0?'#15803d':chg<0?'#dc2626':'#555'}">${(chg>0?'+':'')+fmtP(chg)}</td>`:''}
+      </tr>`;
+      return html;
+    }).join('');
+    W.document.write(`<!DOCTYPE html><html><head><title>Year Comparison — ${clientName}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:8pt;margin:.45in .4in;color:#000}
+  table{width:100%;border-collapse:collapse}
+  @media print{.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8pt;border-bottom:2pt solid #6B0E1E;padding-bottom:6pt">
+  <div>
+    <div style="font-size:12pt;font-weight:700">${clientName}</div>
+    <div style="font-size:8pt;color:#555">Year-Over-Year Balance Sheet Comparison</div>
+  </div>
+  <div style="font-size:8pt;color:#555;text-align:right">First Bank of Montana<br/>Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="text-align:left;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Category</th>
+    ${years.map(y=>`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">${y}</th>`).join('')}
+    ${years.length>1?`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Change</th>`:''}
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e0c0c5;border-radius:6pt;background:#fdf8f8">
+  <div style="font-weight:700;font-size:9pt;color:#6B0E1E;margin-bottom:6pt">AI Financial Insights</div>
+  <div style="font-size:7.5pt;line-height:1.5;color:#333;white-space:pre-wrap">${compInsight}</div>
+</div>`:''}
+</body></html>`);
+    W.document.close();
+    W.focus();
+    setTimeout(()=>W.print(),400);
   };
 
   return (
@@ -1426,6 +1665,50 @@ function ComparisonView({
             disabled={compInsightLoading}>
             {compInsightLoading ? 'Analyzing...' : compInsight ? 'Re-analyze' : 'Generate Insights'}
           </button>
+          <button onClick={handlePrintComparison}
+            style={{background:'#374151',color:'white',border:'none',borderRadius:8,padding:'9px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            🖨 Print
+          </button>
+          {compSheets.length >= 2 && (() => {
+            const leftSheet = compSheets.find(s=>s.date===sbLeft) || compSheets[compSheets.length-2];
+            const rightSheet = compSheets.find(s=>s.date===sbRight) || compSheets[compSheets.length-1];
+            const lDate = sbLeft || compSheets[compSheets.length-2]?.date;
+            const rDate = sbRight || compSheets[compSheets.length-1]?.date;
+            return (
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginTop:6,padding:'8px 12px',background:'#f8f4f4',borderRadius:8,border:'1px solid #e5d5d5'}}>
+                <span style={{fontSize:'.78rem',fontWeight:700,color:'#6B0E1E'}}>Side by Side:</span>
+                <select value={lDate} onChange={e=>setSbLeft(e.target.value)}
+                  style={{border:'1px solid #ccc',borderRadius:6,padding:'4px 8px',fontSize:'.8rem',fontFamily:'inherit'}}>
+                  {compSheets.map(s=><option key={s.date} value={s.date}>{s.date}</option>)}
+                </select>
+                <span style={{fontSize:'.78rem',color:'#888'}}>vs</span>
+                <select value={rDate} onChange={e=>setSbRight(e.target.value)}
+                  style={{border:'1px solid #ccc',borderRadius:6,padding:'4px 8px',fontSize:'.8rem',fontFamily:'inherit'}}>
+                  {compSheets.map(s=><option key={s.date} value={s.date}>{s.date}</option>)}
+                </select>
+                <button
+                  onClick={()=>{
+                    const ls = compSheets.find(s=>s.date===lDate);
+                    const rs = compSheets.find(s=>s.date===rDate);
+                    if(ls&&rs) handlePrintSideBySide(ls,rs);
+                  }}
+                  disabled={!lDate||!rDate||lDate===rDate}
+                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
+                  📄 Print Side by Side
+                </button>
+                <button
+                  onClick={()=>{
+                    const ls = compSheets.find(s=>s.date===lDate);
+                    const rs = compSheets.find(s=>s.date===rDate);
+                    if(ls&&rs) handlePrintDetailComparison(ls,rs);
+                  }}
+                  disabled={!lDate||!rDate||lDate===rDate}
+                  style={{background:'#374151',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
+                  🔍 Detail Comparison
+                </button>
+              </div>
+            );
+          })()}
         </div>
         {compInsightLoading && (
           <div className="insight-loading">
@@ -3101,6 +3384,7 @@ function ExpenseListEditor({expenseList,setExpenseList,onClose}) {
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
+const FBMT_FUNCTION_SECRET = window.FBMT_FUNCTION_SECRET || '';
 
 // Auth session — module-level so all storage calls pick it up automatically
 let currentSession = null;
@@ -3374,10 +3658,10 @@ function BSCompareModal({review, onAccept, onDiscard}) {
     otherAssets:(d.otherAssets||[]).reduce((s,r)=>s+nm(r.amount),0),
     opNotes:    (d.operatingNotes||[]).reduce((s,r)=>s+nm(r.balance),0),
     acctsDue:   (d.accountsDue||[]).reduce((s,r)=>s+nm(r.amount),0),
-    intermed:   (d.intermediatDebt||[]).reduce((s,r)=>s+nm(r.principal),0),
-    reCur:      (d.reCurrent||[]).reduce((s,r)=>s+nm(r.annualPmt),0),
-    reMort:     (d.reMortgages||[]).reduce((s,r)=>s+nm(r.principal),0),
-    otherLiab:  (d.otherLiabilities||[]).reduce((s,r)=>s+nm(r.amount),0),
+    intermed:   (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+nm(r.principal),0),
+    reCur:      (d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+nm(r.annualPmt),0),
+    reMort:     (d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+nm(r.principal),0),
+    otherLiab:  (d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+nm(r.amount),0),
   });
   const O = calcBS(orig), C = calcBS(draft);
   const oTA = O.cash+O.farmProd+O.supplies+O.otherCur+O.lsMkt+O.breeding+O.re+O.vehicles+O.machinery+O.otherAssets;
@@ -3469,6 +3753,666 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
+
+// ─── ForcePasswordChange ─────────────────────────────────────────────────────
+function ForcePasswordChange({ session, onDone }) {
+  const [newPwd, setNewPwd] = React.useState('');
+  const [confirm, setConfirm] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const handleChange = async () => {
+    if (newPwd.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (newPwd !== confirm) { setError('Passwords do not match'); return; }
+    setLoading(true); setError('');
+    try {
+      const r = await fetch(window.SUPABASE_URL + '/auth/v1/user', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'apikey': window.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+        body: JSON.stringify({ password: newPwd })
+      });
+      if (!r.ok) throw new Error('Failed to update password');
+      await fetch(window.SUPABASE_URL + '/rest/v1/profiles?id=eq.' + session.user.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'apikey': window.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ force_password_change: false })
+      });
+      onDone();
+    } catch(e) { setError(e.message); }
+    setLoading(false);
+  };
+  return (
+    <div style={{minHeight:'100vh',background:'#6B0E1E',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{background:'white',borderRadius:14,padding:40,width:'min(420px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+        <div style={{textAlign:'center',marginBottom:24}}>
+          <div style={{fontSize:32,marginBottom:8}}>🔐</div>
+          <div style={{fontWeight:700,fontSize:20,color:'#6B0E1E'}}>Set Your Password</div>
+          <div style={{fontSize:13,color:'#888',marginTop:6}}>Your administrator set a temporary password. Please create a new one to continue.</div>
+        </div>
+        {error && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'10px 14px',marginBottom:14,fontSize:13,color:'#991b1b'}}>{error}</div>}
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>NEW PASSWORD</label>
+          <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="Minimum 8 characters"
+            style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}/>
+        </div>
+        <div style={{marginBottom:20}}>
+          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>CONFIRM PASSWORD</label>
+          <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="Re-enter new password"
+            onKeyDown={e=>e.key==='Enter'&&handleChange()}
+            style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}/>
+        </div>
+        <button onClick={handleChange} disabled={loading}
+          style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:11,fontWeight:700,fontSize:15,cursor:loading?'wait':'pointer',opacity:loading?.7:1,fontFamily:'inherit'}}>
+          {loading ? 'Saving...' : 'Set New Password & Continue'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── AdminScreen ─────────────────────────────────────────────────────────────
+function AdminScreen({ session, profile, onSignOut }) {
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [showAdd, setShowAdd] = React.useState(false);
+  const [editUser, setEditUser] = React.useState(null);
+  const [resetUser, setResetUser] = React.useState(null);
+  const [newPwd, setNewPwd] = React.useState('');
+  const [form, setForm] = React.useState({ fullName:'', email:'', role:'lender', password:'' });
+  const [formError, setFormError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+
+  const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
+  const adminCall = async (action, params) => {
+    const r = await fetch('/.netlify/functions/admin-user', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-fbmt-secret':window.FBMT_FUNCTION_SECRET||''},
+      body:JSON.stringify({action,...params})
+    });
+    return r.json();
+  };
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(window.SUPABASE_URL+'/rest/v1/profiles?select=*&order=created_at.asc', {headers:hdr});
+      setUsers(await r.json());
+    } catch {}
+    setLoading(false);
+  };
+  React.useEffect(()=>{ loadUsers(); },[]);
+
+  const handleAddUser = async () => {
+    if (!form.fullName||!form.email||!form.password) { setFormError('All fields required'); return; }
+    if (form.password.length < 8) { setFormError('Password must be at least 8 characters'); return; }
+    setSaving(true); setFormError('');
+    const res = await adminCall('create_user', { fullName:form.fullName, email:form.email, role:form.role, password:form.password });
+    if (res.error) { setFormError(res.error); setSaving(false); return; }
+    setMsg('User created successfully'); setShowAdd(false); setForm({fullName:'',email:'',role:'lender',password:''});
+    await loadUsers(); setSaving(false);
+  };
+
+  const handleUpdateRole = async (userId, updates) => {
+    await adminCall('update_profile', { userId, updates });
+    await loadUsers(); setEditUser(null); setMsg('User updated');
+  };
+
+  const handleResetPassword = async () => {
+    if (newPwd.length < 8) { setFormError('Password must be at least 8 characters'); return; }
+    setSaving(true);
+    const res = await adminCall('reset_password', { userId: resetUser.id, password: newPwd });
+    if (res.error) { setFormError(res.error); setSaving(false); return; }
+    setMsg('Password reset — user will be prompted to change on next login');
+    setResetUser(null); setNewPwd(''); setSaving(false);
+  };
+
+  const roleColor = r => r==='admin'?'#6B0E1E':r==='ca'?'#1d4ed8':'#374151';
+  const inp = (val,onChange,ph,type='text') => (
+    <input type={type} value={val} onChange={e=>onChange(e.target.value)} placeholder={ph}
+      style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8}}/>
+  );
+
+  return (
+    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
+      {/* Header */}
+      <div style={{background:'#6B0E1E',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana — Admin</div>
+          <div style={{fontSize:12,opacity:.8}}>User Management</div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <span style={{fontSize:13,opacity:.8}}>{profile?.full_name}</span>
+          <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:900,margin:'32px auto',padding:'0 24px'}}>
+        {msg && <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#166534'}}>{msg} <button onClick={()=>setMsg('')} style={{float:'right',background:'none',border:'none',cursor:'pointer',color:'#166534'}}>✕</button></div>}
+
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
+          <button onClick={()=>{setShowAdd(true);setFormError('');}}
+            style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            + Add User
+          </button>
+        </div>
+
+        {loading ? <div style={{textAlign:'center',padding:40,color:'#888'}}>Loading users...</div> : (
+          <div style={{background:'white',borderRadius:10,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'#1a1a1a',color:'white'}}>
+                  {['Name','Email','Role','Status','Actions'].map(h=>(
+                    <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,letterSpacing:'.5px'}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u,i)=>(
+                  <tr key={u.id} style={{borderBottom:'1px solid #f0f0f0',background:i%2===0?'white':'#fafafa'}}>
+                    <td style={{padding:'10px 16px',fontSize:13,fontWeight:600}}>{u.full_name}</td>
+                    <td style={{padding:'10px 16px',fontSize:13,color:'#555'}}>{u.email}</td>
+                    <td style={{padding:'10px 16px'}}>
+                      <span style={{background:roleColor(u.role),color:'white',borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700}}>
+                        {(u.role||'').toUpperCase()}
+                      </span>
+                    </td>
+                    <td style={{padding:'10px 16px'}}>
+                      <span style={{color:u.is_active!==false?'#15803d':'#dc2626',fontSize:12,fontWeight:600}}>
+                        {u.is_active!==false?'Active':'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{padding:'10px 16px'}}>
+                      <div style={{display:'flex',gap:6}}>
+                        <button onClick={()=>{setEditUser({...u});setFormError('');}}
+                          style={{background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:'#1d4ed8',fontWeight:600}}>Edit</button>
+                        <button onClick={()=>{setResetUser(u);setNewPwd('');setFormError('');}}
+                          style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:'#c2410c',fontWeight:600}}>Reset Pwd</button>
+                        {u.id !== session.user.id && (
+                          <button onClick={()=>handleUpdateRole(u.id,{is_active:u.is_active===false})}
+                            style={{background:u.is_active!==false?'#fef2f2':'#f0fdf4',border:'1px solid '+(u.is_active!==false?'#fca5a5':'#86efac'),borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:u.is_active!==false?'#dc2626':'#15803d',fontWeight:600}}>
+                            {u.is_active!==false?'Deactivate':'Activate'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Add User Modal */}
+      {showAdd && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:20,color:'#1a1a1a'}}>Add New User</div>
+            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
+            {inp(form.fullName,v=>setForm(f=>({...f,fullName:v})),'Full Name')}
+            {inp(form.email,v=>setForm(f=>({...f,email:v})),'Email Address','email')}
+            {inp(form.password,v=>setForm(f=>({...f,password:v})),'Temporary Password (min 8 chars)','password')}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
+              <select value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}
+                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
+                <option value="lender">Lender</option>
+                <option value="ca">Credit Analyst (CA)</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div style={{fontSize:11,color:'#888',marginBottom:16}}>User will be prompted to change their password on first login.</div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={handleAddUser} disabled={saving}
+                style={{flex:1,background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:saving?'wait':'pointer',fontFamily:'inherit',opacity:saving?.7:1}}>
+                {saving?'Creating...':'Create User'}
+              </button>
+              <button onClick={()=>{setShowAdd(false);setFormError('');}}
+                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {editUser && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:20}}>Edit User — {editUser.full_name}</div>
+            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
+            {inp(editUser.full_name,v=>setEditUser(u=>({...u,full_name:v})),'Full Name')}
+            {inp(editUser.email,v=>setEditUser(u=>({...u,email:v})),'Email')}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
+              <select value={editUser.role} onChange={e=>setEditUser(u=>({...u,role:e.target.value}))}
+                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
+                <option value="lender">Lender</option>
+                <option value="ca">Credit Analyst (CA)</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>handleUpdateRole(editUser.id,{full_name:editUser.full_name,email:editUser.email,role:editUser.role})}
+                style={{flex:1,background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Save Changes
+              </button>
+              <button onClick={()=>{setEditUser(null);setFormError('');}}
+                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {resetUser && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:8}}>Reset Password</div>
+            <div style={{fontSize:13,color:'#555',marginBottom:20}}>Set a new temporary password for <strong>{resetUser.full_name}</strong>. They will be prompted to change it on next login.</div>
+            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
+            {inp(newPwd,setNewPwd,'New temporary password (min 8 chars)','password')}
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={handleResetPassword} disabled={saving}
+                style={{flex:1,background:'#c2410c',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:saving?'wait':'pointer',fontFamily:'inherit',opacity:saving?.7:1}}>
+                {saving?'Resetting...':'Reset Password'}
+              </button>
+              <button onClick={()=>{setResetUser(null);setFormError('');}}
+                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CAPortal ─────────────────────────────────────────────────────────────────
+function CAPortal({ session, profile, onSignOut }) {
+  const [shares, setShares] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [openSheet, setOpenSheet] = React.useState(null); // {share, data}
+  const [editData, setEditData] = React.useState(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitMsg, setSubmitMsg] = React.useState('');
+  const [caEdits, setCaEdits] = React.useState({}); // shareId -> pending edit
+
+  const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
+
+  const loadShares = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(window.SUPABASE_URL+'/rest/v1/ca_shares?ca_user_id=eq.'+session.user.id+'&dismissed_by_ca=eq.false&select=*&order=shared_at.desc', {headers:hdr});
+      const data = await r.json();
+      setShares(Array.isArray(data) ? data : []);
+      // Load pending edits for these shares
+      if (data.length) {
+        const ids = data.map(s=>s.id).join(',');
+        const er = await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?ca_user_id=eq.'+session.user.id+'&status=eq.pending&select=*', {headers:hdr});
+        const edits = await er.json();
+        const editMap = {};
+        (edits||[]).forEach(e => { editMap[e.share_id] = e; });
+        setCaEdits(editMap);
+      }
+    } catch {}
+    setLoading(false);
+  };
+  React.useEffect(()=>{ loadShares(); },[]);
+
+  const dismissShare = async (shareId) => {
+    setShares(s=>s.filter(x=>x.id!==shareId));
+    await fetch(window.SUPABASE_URL+'/rest/v1/ca_shares?id=eq.'+shareId, {
+      method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
+      body: JSON.stringify({dismissed_by_ca:true})
+    });
+  };
+
+  const openForEdit = (share) => {
+    const data = share.sheet_data || {};
+    setEditData({...data});
+    setOpenSheet(share);
+    setSubmitMsg('');
+  };
+
+  const handleSubmitChanges = async () => {
+    if (!editData || !openSheet) return;
+    setSubmitting(true);
+    try {
+      // Check if there's already a pending edit — update it, otherwise insert
+      const existing = caEdits[openSheet.id];
+      if (existing) {
+        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {
+          method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
+          body: JSON.stringify({edited_data:editData, submitted_at:new Date().toISOString(), status:'pending'})
+        });
+      } else {
+        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits', {
+          method:'POST', headers:{...hdr,'Prefer':'return=minimal'},
+          body: JSON.stringify({
+            share_id: openSheet.id,
+            ca_user_id: session.user.id,
+            ca_name: profile?.full_name || session.user.email,
+            client_name: openSheet.client_name,
+            sheet_key: openSheet.sheet_key,
+            edited_data: editData,
+            status: 'pending'
+          })
+        });
+      }
+      setSubmitMsg('Changes submitted to lender for review.');
+      await loadShares();
+    } catch(e) { setSubmitMsg('Error: '+e.message); }
+    setSubmitting(false);
+  };
+
+  // Group shares by lender
+  const byLender = shares.reduce((acc,s) => {
+    const key = s.lender_name || 'Unknown Lender';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(s);
+    return acc;
+  },{});
+
+  if (openSheet) {
+    return (
+      <CASheetView
+        share={openSheet}
+        data={editData}
+        setData={setEditData}
+        session={session}
+        profile={profile}
+        onBack={()=>{ setOpenSheet(null); setEditData(null); }}
+        onSubmit={handleSubmitChanges}
+        submitting={submitting}
+        submitMsg={submitMsg}
+        hasPendingEdit={!!caEdits[openSheet.id]}
+      />
+    );
+  }
+
+  return (
+    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
+      <div style={{background:'#6B0E1E',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana</div>
+          <div style={{fontSize:12,opacity:.8}}>Credit Analyst Portal — {profile?.full_name}</div>
+        </div>
+        <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
+      </div>
+
+      <div style={{maxWidth:800,margin:'32px auto',padding:'0 24px'}}>
+        {loading ? (
+          <div style={{textAlign:'center',padding:60,color:'#888'}}>Loading shared files...</div>
+        ) : shares.length === 0 ? (
+          <div style={{textAlign:'center',padding:60,color:'#888',background:'white',borderRadius:12,boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
+            <div style={{fontSize:40,marginBottom:12}}>📂</div>
+            <div style={{fontWeight:600,fontSize:16,marginBottom:8}}>No shared files yet</div>
+            <div style={{fontSize:13}}>Files shared with you by lenders will appear here.</div>
+          </div>
+        ) : (
+          Object.entries(byLender).map(([lender, lenderShares]) => (
+            <div key={lender} style={{marginBottom:28}}>
+              <div style={{fontWeight:700,fontSize:15,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',paddingBottom:6,marginBottom:12}}>
+                🏦 {lender}
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {lenderShares.map(share => (
+                  <div key={share.id} style={{background:'white',borderRadius:10,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'0 1px 4px rgba(0,0,0,.08)',border:'1px solid #e5e7eb'}}>
+                    <div style={{fontSize:24}}>📋</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a'}}>{share.client_name}</div>
+                      <div style={{fontSize:12,color:'#888',marginTop:2}}>
+                        Shared {new Date(share.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                        {caEdits[share.id] && <span style={{marginLeft:8,background:'#fef3c7',color:'#92400e',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>Changes Pending Review</span>}
+                      </div>
+                    </div>
+                    <button onClick={()=>openForEdit(share)}
+                      style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'7px 16px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                      Open
+                    </button>
+                    <button onClick={()=>{ if(window.confirm("Remove this file from your portal? This does not delete the lender original.")) dismissShare(share.id); }}
+                      style={{background:'none',border:'1px solid #f0c0c0',borderRadius:7,padding:'7px 12px',fontSize:12,cursor:'pointer',color:'#dc2626',fontFamily:'inherit'}}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CASheetView ─────────────────────────────────────────────────────────────
+function CASheetView({ share, data, setData, session, profile, onBack, onSubmit, submitting, submitMsg, hasPendingEdit }) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmt = v => n(v)?'$'+Math.round(n(v)).toLocaleString():'—';
+
+  const set = (field, val) => setData(d=>({...d,[field]:val}));
+  const setArr = (field, i, key, val) => setData(d=>({...d,[field]:d[field].map((r,j)=>j===i?{...r,[key]:val}:r)}));
+
+  const sections = [
+    {label:'Cash',fields:[{label:'Glacier Bank',key:'cashGlacier',type:'num'}]},
+  ];
+
+  return (
+    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
+      <div style={{background:'#1d4ed8',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:14}}>
+          <button onClick={onBack} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>← Back</button>
+          <div>
+            <div style={{fontWeight:800,fontSize:16}}>{share.client_name}</div>
+            <div style={{fontSize:11,opacity:.8}}>CA Edit Mode — changes go to lender for review</div>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {submitMsg && <span style={{fontSize:12,background:'rgba(255,255,255,.15)',padding:'4px 10px',borderRadius:6}}>{submitMsg}</span>}
+          <button onClick={onSubmit} disabled={submitting}
+            style={{background:'#fbbf24',color:'#1a1a1a',border:'none',borderRadius:7,padding:'8px 20px',fontWeight:800,fontSize:14,cursor:submitting?'wait':'pointer',fontFamily:'inherit',opacity:submitting?.7:1}}>
+            {submitting?'Submitting...':(hasPendingEdit?'Resubmit Changes':'Submit Changes to Lender')}
+          </button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:1000,margin:'24px auto',padding:'0 24px'}}>
+        <div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:'10px 16px',marginBottom:20,fontSize:13,color:'#1e40af'}}>
+          📝 You are reviewing <strong>{share.client_name}</strong> shared by <strong>{share.lender_name}</strong>. Edit any fields below and click <strong>Submit Changes to Lender</strong> when done. The lender will review your changes before they are saved.
+        </div>
+
+        {/* Balance Sheet Editor — simplified view of all main fields */}
+        <CABalanceSheetEditor data={data} setData={setData} />
+      </div>
+    </div>
+  );
+}
+
+// ─── CABalanceSheetEditor ────────────────────────────────────────────────────
+function CABalanceSheetEditor({ data, setData }) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmt = v => n(v)?'$'+Math.round(n(v)).toLocaleString():'';
+  const set = (k,v) => setData(d=>({...d,[k]:v}));
+  const setArr = (f,i,k,v) => setData(d=>({...d,[f]:d[f].map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  const addRow = (f,empty) => setData(d=>({...d,[f]:[...(d[f]||[]),empty]}));
+  const removeRow = (f,i) => setData(d=>({...d,[f]:(d[f]||[]).filter((_,j)=>j!==i)}));
+
+  const inp = (val,onChange,ph='',prefix='') => (
+    <div style={{display:'flex',alignItems:'center',border:'1px solid #d1d5db',borderRadius:5,background:'white',overflow:'hidden',flex:1}}>
+      {prefix&&<span style={{padding:'5px 6px',background:'#f3f4f6',fontSize:12,color:'#666',borderRight:'1px solid #d1d5db'}}>{prefix}</span>}
+      <input type="text" value={val||''} onChange={e=>onChange(e.target.value)} placeholder={ph}
+        style={{flex:1,border:'none',padding:'5px 8px',fontSize:12,fontFamily:'inherit',outline:'none'}}/>
+    </div>
+  );
+  const numInp = (val,onChange,ph='') => inp(val,onChange,ph,'$');
+  const sec = (title) => <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:12,padding:'6px 12px',marginTop:16,marginBottom:6,borderRadius:5,letterSpacing:'.5px'}}>{title}</div>;
+  const row = (children) => <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:6}}>{children}</div>;
+  const lbl = (t) => <span style={{fontSize:11,color:'#555',width:160,flexShrink:0}}>{t}</span>;
+  const del = (onClick) => <button onClick={onClick} style={{background:'none',border:'1px solid #f0c0c0',borderRadius:4,padding:'3px 7px',fontSize:11,cursor:'pointer',color:'#dc2626',flexShrink:0}}>✕</button>;
+  const addBtn = (onClick,label='+ Add Row') => <button onClick={onClick} style={{background:'none',border:'1px dashed #ccc',borderRadius:5,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#555',fontFamily:'inherit',marginBottom:8}}>{label}</button>;
+
+  return (
+    <div style={{background:'white',borderRadius:10,padding:20,boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
+      {/* Client info */}
+      {sec('CLIENT INFORMATION')}
+      {row(<>{lbl('Client Name')}{inp(data.clientName,v=>set('clientName',v),'Client name')}</>)}
+      {row(<>{lbl('As of Date')}<input type="date" value={data.asOfDate||''} onChange={e=>set('asOfDate',e.target.value)} style={{border:'1px solid #d1d5db',borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit'}}/></>)}
+
+      {/* Current Assets */}
+      {sec('CURRENT ASSETS')}
+      {row(<>{lbl('Glacier Bank Cash')}{numInp(data.cashGlacier,v=>set('cashGlacier',v))}</>)}
+      {(data.cashOther||[]).map((r,i)=>row(<>{lbl(i===0?'Other Bank Accounts':'')}{inp(r.bank,v=>setArr('cashOther',i,'bank',v),'Bank name')}{numInp(r.amount,v=>setArr('cashOther',i,'amount',v))}{del(()=>removeRow('cashOther',i))}</>))}
+      {addBtn(()=>addRow('cashOther',{bank:'',amount:''}),'+ Add Bank Account')}
+
+      {(data.receivables||[]).map((r,i)=>row(<>{lbl(i===0?'Receivables':'')}{inp(r.description,v=>setArr('receivables',i,'description',v),'Description')}{numInp(r.amount,v=>setArr('receivables',i,'amount',v))}{del(()=>removeRow('receivables',i))}</>))}
+      {addBtn(()=>addRow('receivables',{description:'',amount:''}),'+ Add Receivable')}
+
+      {(data.farmProducts||[]).map((r,i)=>row(<>{lbl(i===0?'Grain/Farm Products':'')}{inp(r.kind,v=>setArr('farmProducts',i,'kind',v),'Kind')}{inp(r.quantity,v=>setArr('farmProducts',i,'quantity',v),'Qty')}{inp(r.unit,v=>setArr('farmProducts',i,'unit',v),'Unit')}{numInp(r.pricePerUnit,v=>setArr('farmProducts',i,'pricePerUnit',v))}{del(()=>removeRow('farmProducts',i))}</>))}
+      {addBtn(()=>addRow('farmProducts',{kind:'',quantity:'',unit:'bu',pricePerUnit:'',share:'100'}),'+ Add Farm Product')}
+
+      {/* Long-Term Assets */}
+      {sec('LONG-TERM ASSETS')}
+      {(data.realEstate||[]).map((r,i)=>row(<>{lbl(i===0?'Real Estate':'')}{inp(r.description,v=>setArr('realEstate',i,'description',v),'Description')}{inp(r.acres,v=>setArr('realEstate',i,'acres',v),'Acres')}{numInp(r.valuePerAcre,v=>setArr('realEstate',i,'valuePerAcre',v))}{del(()=>removeRow('realEstate',i))}</>))}
+      {addBtn(()=>addRow('realEstate',{description:'',acres:'',valuePerAcre:'',reType:'',legal:''}),'+ Add Real Estate')}
+
+      {(data.machinery||[]).map((r,i)=>row(<>{lbl(i===0?'Machinery':'')}{inp(r.year,v=>setArr('machinery',i,'year',v),'Year')}{inp(r.make,v=>setArr('machinery',i,'make',v),'Make/Model')}{numInp(r.value,v=>setArr('machinery',i,'value',v))}{del(()=>removeRow('machinery',i))}</>))}
+      {addBtn(()=>addRow('machinery',{year:'',make:'',size:'',serial:'',condition:'',value:''}),'+ Add Machinery')}
+
+      {(data.vehicles||[]).map((r,i)=>row(<>{lbl(i===0?'Vehicles':'')}{inp(r.year,v=>setArr('vehicles',i,'year',v),'Year')}{inp(r.make,v=>setArr('vehicles',i,'make',v),'Make/Model')}{numInp(r.value,v=>setArr('vehicles',i,'value',v))}{del(()=>removeRow('vehicles',i))}</>))}
+      {addBtn(()=>addRow('vehicles',{year:'',make:'',vin:'',condition:'',value:''}),'+ Add Vehicle')}
+
+      {/* Liabilities */}
+      {sec('LIABILITIES')}
+      {(data.operatingNotes||[]).map((r,i)=>row(<>{lbl(i===0?'Operating Notes':'')}{inp(r.creditor,v=>setArr('operatingNotes',i,'creditor',v),'Creditor')}{numInp(r.balance,v=>setArr('operatingNotes',i,'balance',v))}{del(()=>removeRow('operatingNotes',i))}</>))}
+      {addBtn(()=>addRow('operatingNotes',{creditor:'',balance:'',dueDate:''}),'+ Add Operating Note')}
+
+      {(data.intermediatDebt||[]).map((r,i)=>row(<>{lbl(i===0?'Term Debt':'')}{inp(r.creditor,v=>setArr('intermediatDebt',i,'creditor',v),'Creditor')}{inp(r.security,v=>setArr('intermediatDebt',i,'security',v),'Security')}{numInp(r.principal,v=>setArr('intermediatDebt',i,'principal',v))}{numInp(r.annualPmt,v=>setArr('intermediatDebt',i,'annualPmt',v))}{del(()=>removeRow('intermediatDebt',i))}</>))}
+      {addBtn(()=>addRow('intermediatDebt',{creditor:'',security:'',principal:'',rate:'',annualPmt:'',dueDate:''}),'+ Add Term Debt')}
+
+      {(data.reMortgages||[]).map((r,i)=>row(<>{lbl(i===0?'RE Mortgages':'')}{inp(r.lienHolder,v=>setArr('reMortgages',i,'lienHolder',v),'Lien Holder')}{numInp(r.principal,v=>setArr('reMortgages',i,'principal',v))}{inp(r.rate,v=>setArr('reMortgages',i,'rate',v),'Rate')}{del(()=>removeRow('reMortgages',i))}</>))}
+      {addBtn(()=>addRow('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''}),'+ Add RE Mortgage')}
+
+      {/* Notes */}
+      {sec('NOTES')}
+      {row(<>{lbl('Comments/Notes')}<textarea value={data.notes||''} onChange={e=>set('notes',e.target.value)} rows={3}
+        style={{flex:1,border:'1px solid #d1d5db',borderRadius:5,padding:'6px 8px',fontSize:12,fontFamily:'inherit',resize:'vertical'}}/></>)}
+    </div>
+  );
+}
+
+// ─── CAEditDiff ──────────────────────────────────────────────────────────────
+function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting }) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmt = v => n(v)?'$'+Math.round(n(v)).toLocaleString():'—';
+
+  // Flat compare: extract all comparable fields
+  const diffs = [];
+  const compare = (key, label, oval, nval) => {
+    const os = String(oval||'').trim();
+    const ns = String(nval||'').trim();
+    if (os !== ns) diffs.push({key, label, old: os, new: ns});
+  };
+
+  // Compare scalar fields
+  const scalarFields = [
+    ['clientName','Client Name'],['asOfDate','As of Date'],['cashGlacier','Glacier Bank Cash'],['notes','Notes']
+  ];
+  scalarFields.forEach(([k,l]) => compare(k, l, original[k], edited[k]));
+
+  // Compare array fields
+  const arrayFields = [
+    {field:'cashOther', label:'Other Bank', key:'bank', val:'amount'},
+    {field:'receivables', label:'Receivable', key:'description', val:'amount'},
+    {field:'farmProducts', label:'Farm Product', key:'kind', val:'pricePerUnit'},
+    {field:'realEstate', label:'Real Estate', key:'description', val:'valuePerAcre'},
+    {field:'machinery', label:'Machinery', key:'make', val:'value'},
+    {field:'vehicles', label:'Vehicle', key:'make', val:'value'},
+    {field:'operatingNotes', label:'Operating Note', key:'creditor', val:'balance'},
+    {field:'intermediatDebt', label:'Term Debt', key:'creditor', val:'principal'},
+    {field:'reMortgages', label:'RE Mortgage', key:'lienHolder', val:'principal'},
+  ];
+  arrayFields.forEach(({field, label, key, val}) => {
+    const orig = original[field] || [];
+    const edit = edited[field] || [];
+    const maxLen = Math.max(orig.length, edit.length);
+    for (let i=0; i<maxLen; i++) {
+      const o = orig[i] || {};
+      const e = edit[i] || {};
+      const name = e[key]||o[key]||`${label} ${i+1}`;
+      compare(`${field}_${i}_${key}`, `${label}: ${name} (name)`, o[key], e[key]);
+      compare(`${field}_${i}_${val}`, `${label}: ${name} (value)`, o[val], e[val]);
+    }
+  });
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}>
+      <div style={{background:'white',borderRadius:12,width:'min(700px,100%)',maxHeight:'85vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
+        <div style={{padding:'18px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,color:'#1a1a1a'}}>Review CA Changes — {clientName}</div>
+            <div style={{fontSize:12,color:'#888',marginTop:2}}>Submitted by {caName}</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#888'}}>✕</button>
+        </div>
+
+        <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
+          {diffs.length === 0 ? (
+            <div style={{textAlign:'center',padding:40,color:'#888'}}>
+              <div style={{fontSize:32,marginBottom:8}}>✓</div>
+              <div>No changes detected</div>
+            </div>
+          ) : (
+            <>
+              <div style={{fontSize:13,color:'#555',marginBottom:14}}>{diffs.length} change{diffs.length!==1?'s':''} proposed:</div>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  <tr style={{background:'#f3f4f6'}}>
+                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#374151',border:'1px solid #e5e7eb'}}>Field</th>
+                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#dc2626',border:'1px solid #e5e7eb'}}>Current Value</th>
+                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#15803d',border:'1px solid #e5e7eb'}}>CA Proposed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diffs.map((d,i) => (
+                    <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
+                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#374151'}}>{d.label}</td>
+                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{d.old||'—'}</td>
+                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{d.new||'—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+
+        <div style={{padding:'16px 24px',borderTop:'1px solid #e5e7eb',display:'flex',gap:10,justifyContent:'flex-end'}}>
+          <button onClick={onReject}
+            style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            Reject Changes
+          </button>
+          {diffs.length > 0 && (
+            <button onClick={onAccept} disabled={accepting}
+              style={{background:'#15803d',color:'white',border:'none',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:accepting?'wait':'pointer',fontFamily:'inherit',opacity:accepting?.7:1}}>
+              {accepting?'Saving...':'Accept & Save to Sheet'}
+            </button>
+          )}
+          <button onClick={onClose}
+            style={{background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:7,padding:'9px 20px',fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
@@ -3529,6 +4473,16 @@ export default function BalanceSheet() {
   const [editingFolder, setEditingFolder] = useState(null); // { path, newName }
   const [linkedEntityNWMap, setLinkedEntityNWMap] = useState({}); // { clientName: netWorth }
   const [availableEntities, setAvailableEntities] = useState([]);
+  const [pendingEntityName, setPendingEntityName] = useState('');
+  const [pendingEntityDate, setPendingEntityDate] = useState('');
+  // CA sharing
+  const [caUsers, setCAUsers] = useState([]);
+  const [showShareCA, setShowShareCA] = useState(null); // sheet key being shared
+  const [sharingCA, setSharingCA] = useState(false);
+  const [selectedCAUser, setSelectedCAUser] = useState('');
+  const [pendingCAEdits, setPendingCAEdits] = useState([]);
+  const [showCADiff, setShowCADiff] = useState(null); // ca_edit record
+  const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -3563,6 +4517,8 @@ export default function BalanceSheet() {
     setTimeout(() => {
       loadSavedList();
       loadPendingReviews();
+      loadCAUsers();
+      loadPendingCAEdits();
     }, 100);
   }, [session?.access_token]);
 
@@ -3659,12 +4615,16 @@ export default function BalanceSheet() {
     }
   }, [screen]);
 
+  // Normalize linkedEntities: support both legacy strings and new {name,date} objects
+  const normalizeLinked = (arr) => (arr||[]).map(e => typeof e === 'string' ? {name:e, date:null} : e);
+
   // Load available entities for the link picker
   useEffect(() => {
     if (savedSheets.length > 0) {
-      const linked = data.linkedEntities || [];
+      const linked = normalizeLinked(data.linkedEntities);
+      const linkedNames = linked.map(e=>e.name);
       const names = [...new Set(savedSheets.map(s => s.clientName))]
-        .filter(n => n !== data.clientName && !linked.includes(n))
+        .filter(n => n !== data.clientName && !linkedNames.includes(n))
         .sort();
       setAvailableEntities(names);
     }
@@ -3801,6 +4761,93 @@ export default function BalanceSheet() {
     setImportError("");
     setImportData(null);
     const ext = file.name.split(".").pop().toLowerCase();
+
+    // ── PDF import via Claude API ──────────────────────────────────────────
+    if (ext === "pdf") {
+      setImportError("Reading PDF...");
+      try {
+        const base64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result.split(",")[1]);
+          r.onerror = () => rej(new Error("Failed to read file"));
+          r.readAsDataURL(file);
+        });
+
+
+        const response = await fetch('/.netlify/functions/analyze', {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-fbmt-secret": FBMT_FUNCTION_SECRET },
+          body: JSON.stringify({
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 4000,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+                { type: "text", text: `You are a financial data extractor. This is an agricultural balance sheet or loan package PDF. Extract ALL financial data into a JSON object matching this exact structure. Return ONLY valid JSON, no markdown, no explanation.
+
+{
+  "clientName": "string",
+  "asOfDate": "YYYY-MM-DD",
+  "cashGlacier": "number as string",
+  "cashOther": [{"bank":"","amount":""}],
+  "receivables": [{"description":"","amount":""}],
+  "federalPayments": [{"description":"","amount":""}],
+  "livestockMarket": [{"number":"","kind":"","weight":"","pricePerHead":"","value":""}],
+  "farmProducts": [{"kind":"","quantity":"","unit":"bu","pricePerUnit":"","share":"100"}],
+  "cropInvestment": [{"cropType":"","acres":"","valuePerAcre":""}],
+  "supplies": [{"description":"","value":""}],
+  "otherCurrent": [{"description":"","amount":""}],
+  "breedingStock": [{"number":"","kind":"","value":""}],
+  "realEstate": [{"description":"","acres":"","valuePerAcre":"","reType":"","legal":""}],
+  "vehicles": [{"year":"","make":"","vin":"","condition":"","value":""}],
+  "machinery": [{"year":"","make":"","size":"","serial":"","condition":"","value":""}],
+  "otherAssets": [{"description":"","amount":""}],
+  "operatingNotes": [{"creditor":"","balance":"","dueDate":""}],
+  "accountsDue": [{"creditor":"","amount":"","dueDate":""}],
+  "intermediatDebt": [{"creditor":"","security":"","principal":"","rate":"","annualPmt":"","dueDate":""}],
+  "reCurrent": [{"creditor":"","annualPmt":""}],
+  "taxesDue": [{"description":"","amount":""}],
+  "reMortgages": [{"lienHolder":"","terms":"","principal":"","rate":""}],
+  "otherLiabilities": [{"description":"","balance":""}]
+}
+
+Rules: all numeric values as strings without dollar signs or commas. Use empty string or empty array if not found. Dates as YYYY-MM-DD. For real estate, valuePerAcre = total value divided by acres if not stated directly.` }
+              ]
+            }]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error("API " + response.status + ": " + errText.slice(0, 300));
+        }
+        const result = await response.json();
+        const text = result.content?.find(b=>b.type==="text")?.text || "";
+        const clean = text.replace(/```json|```/g,"").trim();
+        const parsed = JSON.parse(clean);
+
+        // Merge with emptyData so all required fields exist
+        const base = emptyData();
+        const merged = { ...base, ...parsed };
+
+        // Fix arrays — ensure they have at least one empty row where needed
+        const arrayFields = ["cashOther","receivables","federalPayments","livestockMarket","farmProducts",
+          "cropInvestment","supplies","otherCurrent","breedingStock","realEstate","vehicles","machinery",
+          "otherAssets","operatingNotes","accountsDue","intermediatDebt","reCurrent","taxesDue",
+          "reMortgages","otherLiabilities"];
+        arrayFields.forEach(f => {
+          if (!Array.isArray(merged[f]) || merged[f].length === 0) merged[f] = base[f];
+        });
+
+        setImportData(merged);
+        if (merged.asOfDate) setImportDate(merged.asOfDate);
+        setImportError("");
+      } catch(err) {
+        setImportError("PDF extraction failed: " + err.message);
+      }
+      return;
+    }
 
     function parseBudgetSheet(rows) {
       const R = i => rows[i]||[];
@@ -4354,17 +5401,17 @@ export default function BalanceSheet() {
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
   const linkedEntityVal = Object.values(linkedEntityNWMap).reduce((s,v)=>s+v,0);
   const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
-  const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
-  const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
-  const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
-  const intermedLTPortion = data.intermediatDebt.reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
+  const opNotesTotal = data.operatingNotes.filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0);
+  const acctsDueTotal = data.accountsDue.filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
+  const intermedCurrentPortion = data.intermediatDebt.filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0);
+  const intermedLTPortion = data.intermediatDebt.filter(r=>r.creditor).reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
   const intermedTotal = intermedCurrentPortion; // alias used in summary display
-  const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0);
+  const reCurrentTotal = data.reCurrent.filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0);
   const taxesDueVal = n(data.taxesDue);
   const otherCLTotal = data.otherCurrentLiab.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
-  const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0);
-  const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
+  const reMortTotal = data.reMortgages.filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0);
+  const otherLiabTotal = data.otherLiabilities.filter(r=>r.description).reduce((s,r)=>s+n(r.balance),0);
   const totalLiabilities = totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal;
   const netWorth = totalAssets - totalLiabilities;
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
@@ -4440,15 +5487,15 @@ export default function BalanceSheet() {
     const oa = (d.otherAssets||[]).reduce((s,r)=>s+m(r.amount),0);
     const tlt = bs+re+(d.reContracts||[]).reduce((s,r)=>s+m(r.amount),0)+veh+mach+oa;
     const ta = tc+tlt;
-    const on = (d.operatingNotes||[]).reduce((s,r)=>s+m(r.balance),0);
-    const ad = (d.accountsDue||[]).reduce((s,r)=>s+m(r.amount),0);
-    const id = (d.intermediatDebt||[]).reduce((s,r)=>s+m(r.annualPmt),0);
-    const idLT = (d.intermediatDebt||[]).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
-    const rc = (d.reCurrent||[]).reduce((s,r)=>s+m(r.annualPmt),0);
+    const on = (d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.balance),0);
+    const ad = (d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.amount),0);
+    const id = (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.annualPmt),0);
+    const idLT = (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
+    const rc = (d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.annualPmt),0);
     const ocl = (d.otherCurrentLiab||[]).reduce((s,r)=>s+m(r.amount),0);
     const tcl = on+ad+id+rc+m(d.taxesDue)+ocl;
-    const rm = (d.reMortgages||[]).reduce((s,r)=>s+m(r.principal),0);
-    const ol = (d.otherLiabilities||[]).reduce((s,r)=>s+m(r.balance),0);
+    const rm = (d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+m(r.principal),0);
+    const ol = (d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+m(r.balance),0);
     const tl = tcl+idLT+rm+ol;
     return {
       "Cash & Bank":cash, "Receivables":rec, "Federal Payments":m(d.federalPayments),
@@ -4470,16 +5517,23 @@ export default function BalanceSheet() {
   // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
   useEffect(() => {
     async function fetchAllLinkedNW() {
-      const entities = data.linkedEntities || [];
+      const entities = normalizeLinked(data.linkedEntities);
       if (!entities.length) { setLinkedEntityNWMap({}); return; }
       const newMap = {};
-      for (const name of entities) {
+      for (const {name, date} of entities) {
         try {
           const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
           const result = await storage.list(prefix);
           if (result && result.keys && result.keys.length > 0) {
-            const sorted = result.keys.sort((a,b) => b.localeCompare(a));
-            const item = await storage.get(sorted[0]);
+            let key;
+            if (date) {
+              // Use specific date
+              key = result.keys.find(k => k.includes(date)) || result.keys.sort((a,b)=>b.localeCompare(a))[0];
+            } else {
+              // Legacy: use most recent
+              key = result.keys.sort((a,b)=>b.localeCompare(a))[0];
+            }
+            const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
               const totals = sheetTotals(p);
@@ -4507,7 +5561,7 @@ export default function BalanceSheet() {
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ date: p.asOfDate, totals: sheetTotals(p) });
+              sheets.push({ date: p.asOfDate, totals: sheetTotals(p), raw: p });
             }
           } catch {}
         }
@@ -4553,7 +5607,7 @@ export default function BalanceSheet() {
 
       const resp = await fetch(apiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-fbmt-secret": FBMT_FUNCTION_SECRET },
         body: JSON.stringify(requestBody)
       });
       if (!resp.ok) {
@@ -4782,6 +5836,73 @@ export default function BalanceSheet() {
     }
   };
 
+  // ── CA Functions ────────────────────────────────────────────────────────────
+  const loadCAUsers = async () => {
+    try {
+      const r = await fetch(SUPABASE_URL+'/rest/v1/profiles?role=eq.ca&is_active=eq.true&select=id,full_name,email', {headers:supaHeaders()});
+      const d = await r.json();
+      setCAUsers(Array.isArray(d)?d:[]);
+    } catch {}
+  };
+
+  const shareWithCA = async (sheetKey, caUserId) => {
+    if (!sheetKey||!caUserId) return;
+    setSharingCA(true);
+    try {
+      const item = await storage.get(sheetKey);
+      const sheetData = item ? JSON.parse(item.value) : {};
+      const sheet = savedSheets.find(s=>s.key===sheetKey);
+      await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
+        method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
+        body: JSON.stringify({
+          lender_user_id: session?.user?.id,
+          lender_name: profile?.full_name || session?.user?.email || 'First Bank of Montana',
+          ca_user_id: caUserId,
+          client_name: sheet?.clientName || sheetData.clientName || '',
+          sheet_key: sheetKey,
+          sheet_data: sheetData
+        })
+      });
+      setShowShareCA(null); setSelectedCAUser('');
+      alert('Sheet shared with CA successfully.');
+    } catch(e) { alert('Error sharing: '+e.message); }
+    setSharingCA(false);
+  };
+
+  const loadPendingCAEdits = async () => {
+    if (!session?.user?.id) return;
+    try {
+      const r = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?status=eq.pending&select=*', {headers:supaHeaders()});
+      const edits = await r.json();
+      setPendingCAEdits(Array.isArray(edits)?edits:[]);
+    } catch {}
+  };
+
+  const acceptCAEdit = async (edit) => {
+    setAcceptingCAEdit(true);
+    try {
+      await storage.set(edit.sheet_key, JSON.stringify({...edit.edited_data, _lastCAEdit: new Date().toISOString()}));
+      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+edit.id, {
+        method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
+        body: JSON.stringify({status:'accepted'})
+      });
+      setPendingCAEdits(p=>p.filter(e=>e.id!==edit.id));
+      setShowCADiff(null);
+      await loadSavedList();
+      alert('CA changes accepted and saved to the sheet.');
+    } catch(e) { alert('Error accepting: '+e.message); }
+    setAcceptingCAEdit(false);
+  };
+
+  const rejectCAEdit = async (editId) => {
+    await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+editId, {
+      method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
+      body: JSON.stringify({status:'rejected'})
+    });
+    setPendingCAEdits(p=>p.filter(e=>e.id!==editId));
+    setShowCADiff(null);
+  };
+
   const loadBSReview = async (review, saveDate) => {
     if (!review.customer_draft && !review.original_data) return;
     const d = {...emptyData(),...(review.original_data||{}),...(review.customer_draft||{})};
@@ -4858,11 +5979,14 @@ export default function BalanceSheet() {
 
   const generateLenderPackage = async () => {
     // Fetch linked entity full data
-    const linkedNames = data.linkedEntities || [];
+    const linkedEntries = (data.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,date:null}:e);
     const linkedData = (await Promise.all(
-      linkedNames.map(async name => {
-        const sheet = savedSheets.find(s => s.clientName === name);
-        if (!sheet) return null;
+      linkedEntries.map(async ({name,date}) => {
+        const sheets = savedSheets.filter(s => s.clientName === name);
+        if (!sheets.length) return null;
+        const sheet = date
+          ? (sheets.find(s=>s.asOfDate===date) || sheets.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0])
+          : sheets.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
         try { const item = await storage.get(sheet.key); return item ? JSON.parse(item.value) : null; }
         catch { return null; }
       })
@@ -4990,12 +6114,12 @@ export default function BalanceSheet() {
       +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0)
       +linkedEntityVal;
     const totalAssets = totalCurrentAssets + totalLTAssets;
-    const opNotesTot = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)
-      +(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
+    const opNotesTot = (d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0)
+      +(d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
     const totalLiabilities = opNotesTot
       +(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0)
-      +(d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0)
-      +(d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)
+      +(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
+      +(d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0)
       +(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.taxesDue||[]).reduce((s,r)=>s+n(r.amount),0);
     const netWorth = totalAssets - totalLiabilities;
@@ -5003,7 +6127,8 @@ export default function BalanceSheet() {
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
-body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:.45in .4in;}
+@page{size:legal portrait;margin:.4in .45in;}
+body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:0;}
 h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:4pt;}
 h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:8pt;}
 .logo-box{border:2pt solid #6B0E1E;padding:4pt 7pt;display:inline-block;text-align:center;font-weight:900;color:#6B0E1E;}
@@ -5996,19 +7121,17 @@ ${extraPages}
             </div>
 
             {/* Currently linked entities */}
-            {(data.linkedEntities||[]).length > 0 && (
+            {normalizeLinked(data.linkedEntities).length > 0 && (
               <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
-                {(data.linkedEntities||[]).map((name, i) => (
+                {normalizeLinked(data.linkedEntities).map((entry, i) => (
                   <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"white",border:"1px solid #c0d8f0",borderRadius:8,padding:"8px 12px"}}>
                     <span style={{fontSize:"1rem"}}>🏢</span>
                     <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{name}</div>
-                      {linkedEntityNWMap[name] !== undefined && (
-                        <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
-                          Net Worth: {fmt(linkedEntityNWMap[name])}
-                          {" — added as Investment in " + name}
-                        </div>
-                      )}
+                      <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
+                      <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
+                        {entry.date ? `As of ${entry.date}` : "Latest available"}
+                        {linkedEntityNWMap[entry.name] !== undefined && ` — Net Worth: ${fmt(linkedEntityNWMap[entry.name])}`}
+                      </div>
                     </div>
                     <button
                       onClick={()=>set("linkedEntities",(data.linkedEntities||[]).filter((_,j)=>j!==i))}
@@ -6023,36 +7146,43 @@ ${extraPages}
               </div>
             )}
 
-            {/* Add entity dropdown */}
-            {availableEntities.length > 0 ? (
-              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <select
-                  defaultValue=""
-                  onChange={e=>{
-                    const name = e.target.value;
-                    if (!name) return;
-                    if (!(data.linkedEntities||[]).includes(name)) {
-                      set("linkedEntities",[...(data.linkedEntities||[]),name]);
-                    }
-                    e.target.value = "";
-                  }}
-                  style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
-                  <option value="">+ Add a linked entity...</option>
-                  {availableEntities.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-                <span style={{fontSize:".75rem",color:"#aaa"}}>
-                  Select from saved clients
-                </span>
-              </div>
-            ) : (data.linkedEntities||[]).length === 0 ? (
-              <div style={{fontSize:".78rem",color:"#888"}}>
-                Save other balance sheets first, then link them here to include their net worth on this statement.
-              </div>
-            ) : (
-              <div style={{fontSize:".78rem",color:"#aaa",fontStyle:"italic"}}>
-                All available entities are already linked.
+            {/* Add entity — two-step: pick name then date */}
+            {availableEntities.length > 0 && (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <select
+                    value={pendingEntityName}
+                    onChange={e=>{setPendingEntityName(e.target.value);setPendingEntityDate('');}}
+                    style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
+                    <option value="">+ Select entity to link...</option>
+                    {availableEntities.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                  {pendingEntityName && (() => {
+                    const dates = savedSheets.filter(s=>s.clientName===pendingEntityName).map(s=>s.asOfDate).filter(Boolean).sort((a,b)=>b.localeCompare(a));
+                    return dates.length > 0 ? (
+                      <select
+                        value={pendingEntityDate}
+                        onChange={e=>setPendingEntityDate(e.target.value)}
+                        style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",cursor:"pointer"}}>
+                        <option value="">Select date...</option>
+                        {dates.map(d=>(<option key={d} value={d}>{d}</option>))}
+                      </select>
+                    ) : null;
+                  })()}
+                  {pendingEntityName && pendingEntityDate && (
+                    <button
+                      onClick={()=>{
+                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate}]);
+                        setPendingEntityName('');
+                        setPendingEntityDate('');
+                      }}
+                      style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontSize:".85rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      Link
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -6121,6 +7251,12 @@ ${extraPages}
       </div>
     );
   }
+
+  // ── Role-based routing ───────────────────────────────────────────────────────
+  const handleSignOut = async () => { await supaLogout(); setSession(null); setProfile(null); };
+  if (profile?.force_password_change) return <ForcePasswordChange session={session} onDone={()=>supaGetProfile().then(p=>setProfile(p))} />;
+  if (profile?.role === 'admin') return <AdminScreen session={session} profile={profile} onSignOut={handleSignOut} />;
+  if (profile?.role === 'ca') return <CAPortal session={session} profile={profile} onSignOut={handleSignOut} />;
 
   if (screen === "home") {
     return (
@@ -6192,16 +7328,24 @@ ${extraPages}
                     cursor:"pointer",fontFamily:"inherit"
                   }}>
                     Browse for File
-                    <input type="file" accept=".csv,.xlsx,.xls"
+                    <input type="file" accept=".csv,.xlsx,.xls,.pdf"
                       style={{display:"none"}}
                       onChange={e=>{if(e.target.files[0])handleImportFile(e.target.files[0]);}} />
                   </label>
-                  <div style={{fontSize:".78rem",color:"#aaa",marginTop:10}}>CSV, XLSX, or XLS</div>
+                  <div style={{fontSize:".78rem",color:"#aaa",marginTop:10}}>CSV, XLSX, XLS or PDF — PDFs are read by AI</div>
                 </div>
 
                 {importError && (
-                  <div style={{background:"#fce8e8",border:"1px solid #f0c0c0",borderRadius:8,padding:12,fontSize:".85rem",color:"#7a1a1a",marginBottom:16}}>
+                  <div style={{
+                    background: importError.startsWith("Reading PDF") ? "#f0f6ff" : "#fce8e8",
+                    border: "1px solid " + (importError.startsWith("Reading PDF") ? "#bfdbfe" : "#f0c0c0"),
+                    borderRadius:8, padding:12, fontSize:".85rem",
+                    color: importError.startsWith("Reading PDF") ? "#1e40af" : "#7a1a1a",
+                    marginBottom:16, display:"flex", alignItems:"center", gap:8
+                  }}>
+                    {importError.startsWith("Reading PDF") && <span style={{fontSize:"1.2rem"}}>🤖</span>}
                     {importError}
+                    {importError.startsWith("Reading PDF") && <span style={{marginLeft:4,fontSize:".78rem",color:"#3b82f6"}}>AI is extracting your financial data...</span>}
                   </div>
                 )}
 
@@ -6267,6 +7411,39 @@ ${extraPages}
           )}
 
           {/* ── Pending Reviews ── */}
+          {pendingCAEdits.length > 0 && (
+            <div style={{background:"white",borderRadius:10,padding:"14px 18px",marginBottom:16,border:"1px solid #93c5fd",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>Pending CA Changes</div>
+                <div style={{background:"#1d4ed8",color:"white",borderRadius:999,padding:"1px 8px",fontSize:".75rem",fontWeight:700}}>{pendingCAEdits.length}</div>
+              </div>
+              {pendingCAEdits.map(edit=>(
+                <div key={edit.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"#f0f6ff",borderRadius:8,marginBottom:8,border:"1px solid #bfdbfe"}}>
+                  <span style={{fontSize:"1.2rem"}}>📝</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:".88rem"}}>{edit.client_name}</div>
+                    <div style={{fontSize:".78rem",color:"#555"}}>Changes by {edit.ca_name} · {new Date(edit.submitted_at).toLocaleDateString()}</div>
+                  </div>
+                  <button onClick={async()=>{
+                    // Load original sheet data for diff
+                    try {
+                      const item = await storage.get(edit.sheet_key);
+                      const orig = item ? JSON.parse(item.value) : {};
+                      setShowCADiff({...edit, original: orig});
+                    } catch { setShowCADiff({...edit, original:{}}); }
+                  }}
+                    style={{background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:"6px 14px",fontWeight:700,fontSize:".8rem",cursor:"pointer",fontFamily:"inherit"}}>
+                    Review Changes
+                  </button>
+                  <button onClick={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(edit.id); }}
+                    style={{background:"none",border:"1px solid #f0c0c0",borderRadius:6,padding:"6px 10px",fontSize:".8rem",cursor:"pointer",color:"#dc2626",fontFamily:"inherit"}}>
+                    Reject
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {pendingReviews.length > 0 && (
             <div style={{marginBottom:28}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
@@ -6311,6 +7488,47 @@ ${extraPages}
           )}
 
           {bsCompare && <BSCompareModal review={bsCompare} onAccept={acceptCustomerBS} onDiscard={()=>setBsCompare(null)} />}
+
+          {/* Share with CA Modal */}
+          {showShareCA && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+              <div style={{background:"white",borderRadius:12,padding:28,width:"min(400px,90%)",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                <div style={{fontWeight:700,fontSize:16,marginBottom:6}}>Share with Credit Analyst</div>
+                <div style={{fontSize:13,color:"#555",marginBottom:18}}>Select a CA to share this balance sheet with. They will be able to view, edit, and submit changes back to you.</div>
+                <select value={selectedCAUser} onChange={e=>setSelectedCAUser(e.target.value)}
+                  style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"9px 12px",fontSize:14,fontFamily:"inherit",marginBottom:16,boxSizing:"border-box"}}>
+                  <option value="">Select a Credit Analyst...</option>
+                  {caUsers.map(u=>(
+                    <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
+                  ))}
+                </select>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={()=>shareWithCA(showShareCA, selectedCAUser)} disabled={!selectedCAUser||sharingCA}
+                    style={{flex:1,background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:(!selectedCAUser||sharingCA)?"not-allowed":"pointer",fontFamily:"inherit",opacity:(!selectedCAUser||sharingCA)?.7:1}}>
+                    {sharingCA?"Sharing...":"Share"}
+                  </button>
+                  <button onClick={()=>{setShowShareCA(null);setSelectedCAUser('');}}
+                    style={{flex:1,background:"#f3f4f6",color:"#374151",border:"1px solid #d1d5db",borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CA Edit Diff Modal */}
+          {showCADiff && (
+            <CAEditDiff
+              original={showCADiff.original||{}}
+              edited={showCADiff.edited_data||{}}
+              caName={showCADiff.ca_name}
+              clientName={showCADiff.client_name}
+              accepting={acceptingCAEdit}
+              onAccept={()=>acceptCAEdit(showCADiff)}
+              onReject={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(showCADiff.id); }}
+              onClose={()=>setShowCADiff(null)}
+            />
+          )}
 
           <div className="home-section-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <span>
@@ -6529,6 +7747,12 @@ ${extraPages}
                                 onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}>
                                 Move
                               </button>
+                              {caUsers.length > 0 && (
+                                <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
+                                  onClick={e=>{e.stopPropagation();setShowShareCA(s.key);setSelectedCAUser('');}}>
+                                  Share CA
+                                </button>
+                              )}
                               <button className="sheet-delete" onClick={e=>deleteSheet(s.key,e)}>Delete</button>
                             </div>
                           ))}
