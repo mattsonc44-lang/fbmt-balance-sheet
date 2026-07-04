@@ -3810,7 +3810,7 @@ function ForcePasswordChange({ session, onDone }) {
 }
 
 // ─── AdminScreen ─────────────────────────────────────────────────────────────
-function AdminScreen({ session, profile, onSignOut }) {
+function AdminScreen({ session, profile, onSignOut, onClose }) {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showAdd, setShowAdd] = React.useState(false);
@@ -3882,6 +3882,7 @@ function AdminScreen({ session, profile, onSignOut }) {
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <span style={{fontSize:13,opacity:.8}}>{profile?.full_name}</span>
+          {onClose && <button onClick={onClose} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>← Back to App</button>}
           <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
         </div>
       </div>
@@ -4483,6 +4484,7 @@ export default function BalanceSheet() {
   const [pendingCAEdits, setPendingCAEdits] = useState([]);
   const [showCADiff, setShowCADiff] = useState(null); // ca_edit record
   const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
+  const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -7255,8 +7257,8 @@ ${extraPages}
   // ── Role-based routing ───────────────────────────────────────────────────────
   const handleSignOut = async () => { await supaLogout(); setSession(null); setProfile(null); };
   if (profile?.force_password_change) return <ForcePasswordChange session={session} onDone={()=>supaGetProfile().then(p=>setProfile(p))} />;
-  if (profile?.role === 'admin') return <AdminScreen session={session} profile={profile} onSignOut={handleSignOut} />;
   if (profile?.role === 'ca') return <CAPortal session={session} profile={profile} onSignOut={handleSignOut} />;
+  if (showAdminScreen) return <AdminScreen session={session} profile={profile} onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)} />;
 
   if (screen === "home") {
     return (
@@ -7269,6 +7271,9 @@ ${extraPages}
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
+              {profile?.role==="admin" && (
+                <button onClick={()=>setShowAdminScreen(true)} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",color:"white",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",fontWeight:600}}>⚙ Users</button>
+              )}
               <button onClick={async()=>{await supaLogout();setSession(null);setProfile(null);}} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>Sign Out</button>
             </div>
           </div>
