@@ -1901,7 +1901,7 @@ function InspectionView({data,setData}){
     const invRows=inv.filter(r=>r.description||r.quantity).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.description||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.quantity||'—'} ${r.unitType||''}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.quantity)*nv(r.valuePerUnit))}</td></tr>`).join('');
     W.document.write(`<!DOCTYPE html><html><head><title>Ag Inspection - ${data.clientName||''}</title>
 <style>
-@page{size:landscape;margin:.35in .4in;}
+@page{size:portrait;margin:.35in .4in;}
 body{font-family:Arial,sans-serif;font-size:8pt;color:#111;margin:0;}
 table{width:100%;border-collapse:collapse;margin-bottom:12pt;}
 .sh{background:#1B4332;color:white;font-weight:700;font-size:9pt;padding:5pt 10pt;margin:12pt 0 0;letter-spacing:.5px;}
@@ -2331,7 +2331,7 @@ function PostHarvestView({data,setData}){
     const invRows=inv.filter(r=>r.description||r.quantity).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.description||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.quantity||'—'} ${r.unitType||''}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.quantity)*nv(r.valuePerUnit))}</td></tr>`).join('');
     W.document.write(`<!DOCTYPE html><html><head><title>Ag Inspection - ${data.clientName||''}</title>
 <style>
-@page{size:landscape;margin:.35in .4in;}
+@page{size:portrait;margin:.35in .4in;}
 body{font-family:Arial,sans-serif;font-size:8pt;color:#111;margin:0;}
 table{width:100%;border-collapse:collapse;margin-bottom:12pt;}
 .sh{background:#1B4332;color:white;font-weight:700;font-size:9pt;padding:5pt 10pt;margin:12pt 0 0;letter-spacing:.5px;}
