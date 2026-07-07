@@ -6282,7 +6282,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       +(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.taxesDue||[]).reduce((s,r)=>s+n(r.amount),0);
     const netWorth = totalAssets - totalLiabilities;
-    const workingCapital = totalCurrentAssets - opNotesTot;
+    const totalCurrentLiab = opNotesTot
+      +(d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
+      +(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
+      +n(d.taxesDue)
+      +(d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
+    const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
