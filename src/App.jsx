@@ -4526,6 +4526,9 @@ export default function BalanceSheet() {
       loadCAUsers();
       loadPendingCAEdits();
     }, 100);
+    // Poll for new CA edits every 30 seconds
+    const caEditPoll = setInterval(() => loadPendingCAEdits(), 30000);
+    return () => clearInterval(caEditPoll);
   }, [session?.access_token]);
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
@@ -5890,10 +5893,15 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const loadPendingCAEdits = async () => {
     if (!session?.user?.id) return;
     try {
-      const r = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?status=eq.pending&select=*', {headers:supaHeaders()});
-      const edits = await r.json();
+      // Fetch lender's shares first, then get pending edits for those shares
+      const sharesResp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares?lender_user_id=eq.'+session.user.id+'&select=id', {headers:supaHeaders()});
+      const shares = sharesResp.ok ? await sharesResp.json() : [];
+      if (!shares.length) { setPendingCAEdits([]); return; }
+      const shareIds = shares.map(s=>s.id).join(',');
+      const r = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?status=eq.pending&share_id=in.('+shareIds+')&select=*&order=submitted_at.desc', {headers:supaHeaders()});
+      const edits = r.ok ? await r.json() : [];
       setPendingCAEdits(Array.isArray(edits)?edits:[]);
-    } catch {}
+    } catch(e) { console.error('loadPendingCAEdits:', e); }
   };
 
   const acceptCAEdit = async (edit) => {
@@ -7483,11 +7491,13 @@ ${extraPages}
           )}
 
           {/* ── Pending Reviews ── */}
-          {pendingCAEdits.length > 0 && (
-            <div style={{background:"white",borderRadius:10,padding:"14px 18px",marginBottom:16,border:"1px solid #93c5fd",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-                <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>Pending CA Changes</div>
-                <div style={{background:"#1d4ed8",color:"white",borderRadius:999,padding:"1px 8px",fontSize:".75rem",fontWeight:700}}>{pendingCAEdits.length}</div>
+          {(pendingCAEdits.length > 0 || profile?.role === 'admin' || profile?.role === 'lender') && (
+            <div style={{background:"white",borderRadius:10,padding:"14px 18px",marginBottom:16,border:"1px solid "+(pendingCAEdits.length>0?"#93c5fd":"#e5e7eb"),boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:pendingCAEdits.length>0?12:0}}>
+                <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>CA Changes</div>
+                {pendingCAEdits.length>0 && <div style={{background:"#1d4ed8",color:"white",borderRadius:999,padding:"1px 8px",fontSize:".75rem",fontWeight:700}}>{pendingCAEdits.length} Pending</div>}
+                {pendingCAEdits.length===0 && <span style={{fontSize:".78rem",color:"#888"}}>No pending changes</span>}
+                <button onClick={loadPendingCAEdits} style={{marginLeft:"auto",background:"#f0f6ff",border:"1px solid #93c5fd",borderRadius:5,padding:"3px 10px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit"}}>↻ Refresh</button>
               </div>
               {pendingCAEdits.map(edit=>(
                 <div key={edit.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"#f0f6ff",borderRadius:8,marginBottom:8,border:"1px solid #bfdbfe"}}>
