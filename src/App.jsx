@@ -4310,54 +4310,61 @@ function CABalanceSheetEditor({ data, setData }) {
 // ─── CAEditDiff ──────────────────────────────────────────────────────────────
 function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting }) {
   const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-  const fmt = v => n(v)?'$'+Math.round(n(v)).toLocaleString():'—';
-
-  // Flat compare: extract all comparable fields
-  const diffs = [];
-  const compare = (key, label, oval, nval) => {
-    const os = String(oval||'').trim();
-    const ns = String(nval||'').trim();
-    if (os !== ns) diffs.push({key, label, old: os, new: ns});
+  const fmtVal = v => {
+    if (v===null||v===undefined||v==='') return '—';
+    if (typeof v === 'object') return JSON.stringify(v);
+    const num = n(v);
+    if (num && String(v).match(/^[\d.,]+$/)) return '$'+Math.round(num).toLocaleString();
+    return String(v);
   };
 
-  // Compare scalar fields
-  const scalarFields = [
-    ['clientName','Client Name'],['asOfDate','As of Date'],['cashGlacier','Glacier Bank Cash'],['notes','Notes']
-  ];
-  scalarFields.forEach(([k,l]) => compare(k, l, original[k], edited[k]));
+  // Deep flat diff — recursively compare all fields
+  const diffs = [];
+  const flatCompare = (orig, edit, path='') => {
+    const allKeys = new Set([...Object.keys(orig||{}), ...Object.keys(edit||{})]);
+    allKeys.forEach(k => {
+      const oval = (orig||{})[k];
+      const eval_ = (edit||{})[k];
+      const fullPath = path ? path+'.'+k : k;
+      if (Array.isArray(oval)||Array.isArray(eval_)) {
+        const oa = oval||[], ea = eval_||[];
+        const maxLen = Math.max(oa.length, ea.length);
+        for (let i=0; i<maxLen; i++) {
+          if (typeof oa[i]==='object'||typeof ea[i]==='object') {
+            flatCompare(oa[i]||{}, ea[i]||{}, fullPath+'['+i+']');
+          } else {
+            const os = String(oa[i]||'').trim();
+            const es = String(ea[i]||'').trim();
+            if (os!==es) diffs.push({path:fullPath+'['+i+']', old:os, new:es});
+          }
+        }
+      } else if (typeof oval==='object'&&oval!==null||typeof eval_==='object'&&eval_!==null) {
+        flatCompare(oval||{}, eval_||{}, fullPath);
+      } else {
+        const os = String(oval||'').trim();
+        const es = String(eval_||'').trim();
+        if (os!==es && !(os===''&&es==='') && !fullPath.includes('_lastCA')) {
+          diffs.push({path:fullPath, old:os, new:es});
+        }
+      }
+    });
+  };
+  flatCompare(original, edited);
 
-  // Compare array fields
-  const arrayFields = [
-    {field:'cashOther', label:'Other Bank', key:'bank', val:'amount'},
-    {field:'receivables', label:'Receivable', key:'description', val:'amount'},
-    {field:'farmProducts', label:'Farm Product', key:'kind', val:'pricePerUnit'},
-    {field:'realEstate', label:'Real Estate', key:'description', val:'valuePerAcre'},
-    {field:'machinery', label:'Machinery', key:'make', val:'value'},
-    {field:'vehicles', label:'Vehicle', key:'make', val:'value'},
-    {field:'operatingNotes', label:'Operating Note', key:'creditor', val:'balance'},
-    {field:'intermediatDebt', label:'Term Debt', key:'creditor', val:'principal'},
-    {field:'reMortgages', label:'RE Mortgage', key:'lienHolder', val:'principal'},
-  ];
-  arrayFields.forEach(({field, label, key, val}) => {
-    const orig = original[field] || [];
-    const edit = edited[field] || [];
-    const maxLen = Math.max(orig.length, edit.length);
-    for (let i=0; i<maxLen; i++) {
-      const o = orig[i] || {};
-      const e = edit[i] || {};
-      const name = e[key]||o[key]||`${label} ${i+1}`;
-      compare(`${field}_${i}_${key}`, `${label}: ${name} (name)`, o[key], e[key]);
-      compare(`${field}_${i}_${val}`, `${label}: ${name} (value)`, o[val], e[val]);
-    }
-  });
+  // Pretty-print field path
+  const prettyPath = p => p
+    .replace(/([A-Z])/g,' $1')
+    .replace(/\[(\d+)\]/g,' #'+((+`$1`)+1))
+    .replace(/^./,c=>c.toUpperCase())
+    .trim();
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}>
-      <div style={{background:'white',borderRadius:12,width:'min(700px,100%)',maxHeight:'85vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
+      <div style={{background:'white',borderRadius:12,width:'min(750px,100%)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
         <div style={{padding:'18px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <div>
             <div style={{fontWeight:800,fontSize:16,color:'#1a1a1a'}}>Review CA Changes — {clientName}</div>
-            <div style={{fontSize:12,color:'#888',marginTop:2}}>Submitted by {caName}</div>
+            <div style={{fontSize:12,color:'#888',marginTop:2}}>Submitted by {caName} · {diffs.length} change{diffs.length!==1?'s':''} detected</div>
           </div>
           <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#888'}}>✕</button>
         </div>
@@ -4365,31 +4372,29 @@ function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, 
         <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
           {diffs.length === 0 ? (
             <div style={{textAlign:'center',padding:40,color:'#888'}}>
-              <div style={{fontSize:32,marginBottom:8}}>✓</div>
-              <div>No changes detected</div>
+              <div style={{fontSize:32,marginBottom:8}}>🔍</div>
+              <div style={{fontWeight:600,marginBottom:8}}>No differences detected</div>
+              <div style={{fontSize:12,color:'#aaa'}}>The CA submission appears identical to the current sheet data. The CA may have submitted without making changes, or changes were already saved.</div>
             </div>
           ) : (
-            <>
-              <div style={{fontSize:13,color:'#555',marginBottom:14}}>{diffs.length} change{diffs.length!==1?'s':''} proposed:</div>
-              <table style={{width:'100%',borderCollapse:'collapse'}}>
-                <thead>
-                  <tr style={{background:'#f3f4f6'}}>
-                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#374151',border:'1px solid #e5e7eb'}}>Field</th>
-                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#dc2626',border:'1px solid #e5e7eb'}}>Current Value</th>
-                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#15803d',border:'1px solid #e5e7eb'}}>CA Proposed</th>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'#f3f4f6'}}>
+                  <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#374151',border:'1px solid #e5e7eb',width:'40%'}}>Field</th>
+                  <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#dc2626',border:'1px solid #e5e7eb',width:'30%'}}>Current Value</th>
+                  <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#15803d',border:'1px solid #e5e7eb',width:'30%'}}>CA Proposed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diffs.map((d,i) => (
+                  <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
+                    <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#374151',fontFamily:'monospace',fontSize:11}}>{prettyPath(d.path)}</td>
+                    <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{fmtVal(d.old)}</td>
+                    <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{fmtVal(d.new)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {diffs.map((d,i) => (
-                    <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
-                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#374151'}}>{d.label}</td>
-                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{d.old||'—'}</td>
-                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{d.new||'—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
 
