@@ -7217,18 +7217,24 @@ ${extraPages}
                 <button className="btn btn-save" onClick={async()=>{
                   setSaveStatus('saving');
                   try {
-                    const existing = caEdits[caOpenShare.id];
                     const hdr2 = {...supaHeaders(),'Prefer':'return=minimal'};
-                    if (existing) {
-                      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {method:'PATCH',headers:hdr2,body:JSON.stringify({edited_data:data,submitted_at:new Date().toISOString(),status:'pending'})});
+                    // Check if a pending edit already exists for this share
+                    const checkResp = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?share_id=eq.'+caOpenShare.id+'&status=eq.pending&select=id', {headers:supaHeaders()});
+                    const existing = checkResp.ok ? await checkResp.json() : [];
+                    if (existing.length > 0) {
+                      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing[0].id, {method:'PATCH',headers:hdr2,body:JSON.stringify({edited_data:data,submitted_at:new Date().toISOString(),status:'pending'})});
                     } else {
                       await fetch(SUPABASE_URL+'/rest/v1/ca_edits', {method:'POST',headers:hdr2,body:JSON.stringify({share_id:caOpenShare.id,ca_user_id:session?.user?.id,ca_name:profile?.full_name||session?.user?.email,client_name:caOpenShare.client_name,sheet_key:caOpenShare.sheet_key,edited_data:data,status:'pending'})});
                     }
                     setSaveStatus('saved');
-                    setTimeout(()=>setSaveStatus(null),2000);
-                  } catch(e) { setSaveStatus('error:'+e.message); }
+                    setTimeout(()=>setSaveStatus(null),3000);
+                  } catch(e) {
+                    setSaveStatus('error');
+                    console.error('Submit CA changes error:', e.message);
+                    setTimeout(()=>setSaveStatus(null),3000);
+                  }
                 }}>
-                  {saveStatus==='saving'?'Submitting...':saveStatus==='saved'?'Submitted!':'Submit Changes to Lender'}
+                  {saveStatus==='saving'?'Submitting...':saveStatus==='saved'?'✓ Submitted to Lender':saveStatus==='error'?'Error — try again':'Submit Changes to Lender'}
                 </button>
                 <button className="btn btn-secondary" onClick={()=>{setCaOpenShare(null);setData(emptyData());}}>← Back to Portal</button>
               </>
