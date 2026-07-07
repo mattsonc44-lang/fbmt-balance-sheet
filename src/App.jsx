@@ -1878,7 +1878,71 @@ function InspectionView({data,setData}){
     setCheckingResponse(false);
   };
 
-  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
+  const handlePDF=()=>{
+    const W=window.open('','_blank','width=950,height=1200');
+    if(!W)return;
+    const crops=data.inspCrops||[];
+    const ls=data.inspLivestock||[];
+    const inv=data.inspInventory||[];
+    const nv=v=>Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const f$=v=>nv(v)?'$'+Math.round(nv(v)).toLocaleString():'—';
+    const cropTot=crops.reduce((s,r)=>s+nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice),0);
+    const lsTot=ls.reduce((s,r)=>s+nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice),0);
+    const invTot=inv.reduce((s,r)=>s+nv(r.quantity)*nv(r.valuePerUnit),0);
+    const grandTot=cropTot+lsTot+invTot;
+    const iMode=data.inspMode==='post'?'Post-Harvest':'Pre-Harvest';
+    const condColor=c=>c==='Excellent'?'#15803d':c==='Good'?'#166534':c==='Fair'?'#92400e':c==='Poor'?'#991b1b':'#374151';
+    const th=`background:#1B4332;color:white;padding:5pt 7pt;text-align:left;font-size:7pt;font-weight:700;`;
+    const thR=`background:#1B4332;color:white;padding:5pt 7pt;text-align:right;font-size:7pt;font-weight:700;`;
+    const td=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;`;
+    const tdR=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;text-align:right;font-weight:600;`;
+    const cropRows=crops.filter(r=>r.budgetedCrop||r.actualAcres).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedCrop||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedAcres||'—'}</td><td style="${tdR}">${r.actualAcres||r.budgetedAcres||'—'}</td><td style="${tdR}">${r.budgetedYield||'—'} ${r.budgetedUnit||'bu'}</td><td style="${tdR}">${r.actualYield||r.budgetedYield||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
+    const lsRows=ls.filter(r=>r.budgetedType||r.actualHead).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedType||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedHead||'—'}</td><td style="${tdR}">${r.actualHead||r.budgetedHead||'—'}</td><td style="${tdR}">${r.budgetedLbs||'—'} lbs</td><td style="${tdR}">${r.estWeight||r.budgetedLbs||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
+    const invRows=inv.filter(r=>r.description||r.quantity).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.description||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.quantity||'—'} ${r.unitType||''}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.quantity)*nv(r.valuePerUnit))}</td></tr>`).join('');
+    W.document.write(`<!DOCTYPE html><html><head><title>Ag Inspection - ${data.clientName||''}</title>
+<style>
+@page{size:landscape;margin:.35in .4in;}
+body{font-family:Arial,sans-serif;font-size:8pt;color:#111;margin:0;}
+table{width:100%;border-collapse:collapse;margin-bottom:12pt;}
+.sh{background:#1B4332;color:white;font-weight:700;font-size:9pt;padding:5pt 10pt;margin:12pt 0 0;letter-spacing:.5px;}
+.tot-row{background:#dcfce7;}
+.grand{background:#1B4332;color:white;padding:10pt 16pt;display:flex;justify-content:space-between;align-items:center;margin-top:14pt;border-radius:4pt;}
+.sig{border-top:1pt solid #555;margin-top:32pt;padding-top:4pt;font-size:7pt;color:#555;}
+@media print{.np{display:none}}
+</style></head><body>
+<button class="np" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#1B4332;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px;z-index:999">🖨 Print / PDF</button>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10pt;border-bottom:3pt solid #1B4332;padding-bottom:10pt;">
+  <div style="display:flex;align-items:center;gap:14pt;">
+    <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:52px;width:auto;"/>
+    <div>
+      <div style="font-size:17pt;font-weight:900;color:#1B4332;letter-spacing:-0.5px;">Agricultural Inspection Report</div>
+      <div style="font-size:9pt;color:#2D6A4F;font-weight:600;margin-top:2pt;">First Bank of Montana &nbsp;·&nbsp; ${iMode}</div>
+    </div>
+  </div>
+  <div style="text-align:right;font-size:8pt;color:#374151;line-height:1.8;">
+    <div><strong>Borrower:</strong> ${data.clientName||'—'}</div>
+    <div><strong>Inspection Date:</strong> ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+    <div><strong>As of Date:</strong> ${data.asOfDate||'—'}</div>
+    <div><strong>Prepared:</strong> ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+  </div>
+</div>
+${cropRows?`<div class="sh">🌾 CROP INSPECTION</div><table><thead><tr><th style="${th}width:13%">Crop</th><th style="${th}width:12%">Location/Field</th><th style="${thR}width:7%">Budg.Acres</th><th style="${thR}width:7%">Act.Acres</th><th style="${thR}width:8%">Budg.Yield</th><th style="${thR}width:7%">Act.Yield</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${cropRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">CROP TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(cropTot)}</td><td></td></tr></tfoot></table>`:''}
+${lsRows?`<div class="sh">🐄 LIVESTOCK INSPECTION</div><table><thead><tr><th style="${th}width:13%">Type</th><th style="${th}width:12%">Location</th><th style="${thR}width:7%">Budg.Head</th><th style="${thR}width:7%">Act.Head</th><th style="${thR}width:8%">Budg.Wt</th><th style="${thR}width:7%">Est.Wt</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${lsRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">LIVESTOCK TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(lsTot)}</td><td></td></tr></tfoot></table>`:''}
+${invRows?`<div class="sh">📦 INVENTORY / STORED COMMODITIES</div><table><thead><tr><th style="${th}width:24%">Description</th><th style="${th}width:18%">Location</th><th style="${th}width:10%">Condition</th><th style="${thR}width:14%">Quantity</th><th style="${thR}width:12%">Value/Unit</th><th style="${thR}width:12%">Est.Value</th></tr></thead><tbody>${invRows}</tbody><tfoot><tr class="tot-row"><td colspan="5" style="${tdR}color:#1B4332;font-size:8.5pt;">INVENTORY TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(invTot)}</td></tr></tfoot></table>`:''}
+<div class="grand">
+  <div><div style="font-size:9pt;opacity:.8;letter-spacing:.5px;text-transform:uppercase;">Total Estimated Collateral Value</div><div style="font-size:8pt;opacity:.6;margin-top:2pt;">${iMode} · ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'}):''}</div></div>
+  <div style="font-size:22pt;font-weight:900;letter-spacing:-1px;">${f$(grandTot)}</div>
+</div>
+${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;grid-template-columns:1fr 1fr;gap:12pt;">${data.inspEnvCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Environmental / Crop Conditions</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspEnvCmt}</div></div>`:''} ${data.inspAddlCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Additional Comments</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspAddlCmt}</div></div>`:''}</div>`:''}
+<div style="margin-top:22pt;display:grid;grid-template-columns:1fr 1fr 1fr;gap:24pt;">
+  <div><div class="sig">Loan Officer Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
+  <div><div class="sig">Borrower Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
+  <div><div class="sig">Second Signature (if applicable)</div><div style="margin-top:14pt;" class="sig">Date</div></div>
+</div>
+<div style="margin-top:12pt;font-size:6.5pt;color:#aaa;text-align:center;border-top:0.5pt solid #e5e7eb;padding-top:5pt;">This inspection report is prepared for loan documentation purposes only. Values are estimates based on field observation and are subject to change. &nbsp;·&nbsp; First Bank of Montana</div>
+</body></html>`);
+    W.document.close();W.focus();setTimeout(()=>W.print(),500);
+  };
   const handleSubmit=async()=>{setSubmitErr('');setSubmitting(true);try{handlePDF();}catch(e){setSubmitErr('PDF failed: '+e.message);}finally{setSubmitting(false);}};
   if(submitted)return React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:48}},React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420}},React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),React.createElement('div',{style:{fontWeight:800,fontSize:22,color:ISH,marginBottom:8}},'Report Complete!'),React.createElement('button',{onClick:()=>setSubmitted(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer',marginTop:12}},'New Inspection')));
 
@@ -2244,7 +2308,71 @@ function PostHarvestView({data,setData}){
   const handleFiles=e=>{Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>setData(d=>({...d,postPhotos:[...(d.postPhotos||[]),{id:inspUid(),src:ev.target.result,label:'',ts:new Date().toLocaleString()}]}));r.readAsDataURL(f);});e.target.value='';};
   const rowTot=r=>(parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
   const grandTot=storage.reduce((s,r)=>s+rowTot(r),0);
-  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`post-harvest-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
+  const handlePDF=()=>{
+    const W=window.open('','_blank','width=950,height=1200');
+    if(!W)return;
+    const crops=data.inspCrops||[];
+    const ls=data.inspLivestock||[];
+    const inv=data.inspInventory||[];
+    const nv=v=>Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const f$=v=>nv(v)?'$'+Math.round(nv(v)).toLocaleString():'—';
+    const cropTot=crops.reduce((s,r)=>s+nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice),0);
+    const lsTot=ls.reduce((s,r)=>s+nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice),0);
+    const invTot=inv.reduce((s,r)=>s+nv(r.quantity)*nv(r.valuePerUnit),0);
+    const grandTot=cropTot+lsTot+invTot;
+    const iMode=data.inspMode==='post'?'Post-Harvest':'Pre-Harvest';
+    const condColor=c=>c==='Excellent'?'#15803d':c==='Good'?'#166534':c==='Fair'?'#92400e':c==='Poor'?'#991b1b':'#374151';
+    const th=`background:#1B4332;color:white;padding:5pt 7pt;text-align:left;font-size:7pt;font-weight:700;`;
+    const thR=`background:#1B4332;color:white;padding:5pt 7pt;text-align:right;font-size:7pt;font-weight:700;`;
+    const td=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;`;
+    const tdR=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;text-align:right;font-weight:600;`;
+    const cropRows=crops.filter(r=>r.budgetedCrop||r.actualAcres).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedCrop||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedAcres||'—'}</td><td style="${tdR}">${r.actualAcres||r.budgetedAcres||'—'}</td><td style="${tdR}">${r.budgetedYield||'—'} ${r.budgetedUnit||'bu'}</td><td style="${tdR}">${r.actualYield||r.budgetedYield||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
+    const lsRows=ls.filter(r=>r.budgetedType||r.actualHead).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedType||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedHead||'—'}</td><td style="${tdR}">${r.actualHead||r.budgetedHead||'—'}</td><td style="${tdR}">${r.budgetedLbs||'—'} lbs</td><td style="${tdR}">${r.estWeight||r.budgetedLbs||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
+    const invRows=inv.filter(r=>r.description||r.quantity).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.description||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.quantity||'—'} ${r.unitType||''}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.quantity)*nv(r.valuePerUnit))}</td></tr>`).join('');
+    W.document.write(`<!DOCTYPE html><html><head><title>Ag Inspection - ${data.clientName||''}</title>
+<style>
+@page{size:landscape;margin:.35in .4in;}
+body{font-family:Arial,sans-serif;font-size:8pt;color:#111;margin:0;}
+table{width:100%;border-collapse:collapse;margin-bottom:12pt;}
+.sh{background:#1B4332;color:white;font-weight:700;font-size:9pt;padding:5pt 10pt;margin:12pt 0 0;letter-spacing:.5px;}
+.tot-row{background:#dcfce7;}
+.grand{background:#1B4332;color:white;padding:10pt 16pt;display:flex;justify-content:space-between;align-items:center;margin-top:14pt;border-radius:4pt;}
+.sig{border-top:1pt solid #555;margin-top:32pt;padding-top:4pt;font-size:7pt;color:#555;}
+@media print{.np{display:none}}
+</style></head><body>
+<button class="np" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#1B4332;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px;z-index:999">🖨 Print / PDF</button>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10pt;border-bottom:3pt solid #1B4332;padding-bottom:10pt;">
+  <div style="display:flex;align-items:center;gap:14pt;">
+    <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:52px;width:auto;"/>
+    <div>
+      <div style="font-size:17pt;font-weight:900;color:#1B4332;letter-spacing:-0.5px;">Agricultural Inspection Report</div>
+      <div style="font-size:9pt;color:#2D6A4F;font-weight:600;margin-top:2pt;">First Bank of Montana &nbsp;·&nbsp; ${iMode}</div>
+    </div>
+  </div>
+  <div style="text-align:right;font-size:8pt;color:#374151;line-height:1.8;">
+    <div><strong>Borrower:</strong> ${data.clientName||'—'}</div>
+    <div><strong>Inspection Date:</strong> ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+    <div><strong>As of Date:</strong> ${data.asOfDate||'—'}</div>
+    <div><strong>Prepared:</strong> ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+  </div>
+</div>
+${cropRows?`<div class="sh">🌾 CROP INSPECTION</div><table><thead><tr><th style="${th}width:13%">Crop</th><th style="${th}width:12%">Location/Field</th><th style="${thR}width:7%">Budg.Acres</th><th style="${thR}width:7%">Act.Acres</th><th style="${thR}width:8%">Budg.Yield</th><th style="${thR}width:7%">Act.Yield</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${cropRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">CROP TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(cropTot)}</td><td></td></tr></tfoot></table>`:''}
+${lsRows?`<div class="sh">🐄 LIVESTOCK INSPECTION</div><table><thead><tr><th style="${th}width:13%">Type</th><th style="${th}width:12%">Location</th><th style="${thR}width:7%">Budg.Head</th><th style="${thR}width:7%">Act.Head</th><th style="${thR}width:8%">Budg.Wt</th><th style="${thR}width:7%">Est.Wt</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${lsRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">LIVESTOCK TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(lsTot)}</td><td></td></tr></tfoot></table>`:''}
+${invRows?`<div class="sh">📦 INVENTORY / STORED COMMODITIES</div><table><thead><tr><th style="${th}width:24%">Description</th><th style="${th}width:18%">Location</th><th style="${th}width:10%">Condition</th><th style="${thR}width:14%">Quantity</th><th style="${thR}width:12%">Value/Unit</th><th style="${thR}width:12%">Est.Value</th></tr></thead><tbody>${invRows}</tbody><tfoot><tr class="tot-row"><td colspan="5" style="${tdR}color:#1B4332;font-size:8.5pt;">INVENTORY TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(invTot)}</td></tr></tfoot></table>`:''}
+<div class="grand">
+  <div><div style="font-size:9pt;opacity:.8;letter-spacing:.5px;text-transform:uppercase;">Total Estimated Collateral Value</div><div style="font-size:8pt;opacity:.6;margin-top:2pt;">${iMode} · ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'}):''}</div></div>
+  <div style="font-size:22pt;font-weight:900;letter-spacing:-1px;">${f$(grandTot)}</div>
+</div>
+${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;grid-template-columns:1fr 1fr;gap:12pt;">${data.inspEnvCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Environmental / Crop Conditions</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspEnvCmt}</div></div>`:''} ${data.inspAddlCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Additional Comments</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspAddlCmt}</div></div>`:''}</div>`:''}
+<div style="margin-top:22pt;display:grid;grid-template-columns:1fr 1fr 1fr;gap:24pt;">
+  <div><div class="sig">Loan Officer Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
+  <div><div class="sig">Borrower Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
+  <div><div class="sig">Second Signature (if applicable)</div><div style="margin-top:14pt;" class="sig">Date</div></div>
+</div>
+<div style="margin-top:12pt;font-size:6.5pt;color:#aaa;text-align:center;border-top:0.5pt solid #e5e7eb;padding-top:5pt;">This inspection report is prepared for loan documentation purposes only. Values are estimates based on field observation and are subject to change. &nbsp;·&nbsp; First Bank of Montana</div>
+</body></html>`);
+    W.document.close();W.focus();setTimeout(()=>W.print(),500);
+  };
 
   return React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},
     React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,gap:10,flexWrap:'wrap'}},
@@ -4388,7 +4516,7 @@ function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, 
               <tbody>
                 {diffs.map((d,i) => (
                   <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
-                    <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#374151',fontFamily:'monospace',fontSize:11}}>{prettyPath(d.path)}</td>
+                    <td style={{padding:'7px 12px',fontSize:11,border:'1px solid #e5e7eb',color:'#374151',fontFamily:'monospace'}}>{prettyPath(d.path)}</td>
                     <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{fmtVal(d.old)}</td>
                     <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{fmtVal(d.new)}</td>
                   </tr>
