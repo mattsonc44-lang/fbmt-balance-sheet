@@ -4547,27 +4547,8 @@ function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, 
 }
 
 export default function BalanceSheet() {
-  const [step, setStep] = useState(() => Number(sessionStorage.getItem('fbmt_step')||0));
-  const [screen, setScreen] = useState(() => sessionStorage.getItem('fbmt_screen')||"home");
-
-  // ── Persist navigation state to sessionStorage ───────────────────────────────
-  useEffect(() => { sessionStorage.setItem('fbmt_screen', screen); }, [screen]);
-  useEffect(() => { sessionStorage.setItem('fbmt_step', step); }, [step]);
-  useEffect(() => { sessionStorage.setItem('fbmt_tab', activeTab); }, [activeTab]);
-
-  // ── Restore last open sheet when reloading on wizard screen ─────────────────
-  useEffect(() => {
-    if (screen !== 'wizard') return;
-    if (!session?.access_token) return;
-    const savedKey = sessionStorage.getItem('fbmt_current_key');
-    if (savedKey && (!data.clientName)) {
-      storage.get(savedKey).then(item => {
-        if (item) {
-          try { setData({...emptyData(), ...JSON.parse(item.value)}); } catch {}
-        }
-      }).catch(()=>{});
-    }
-  }, [session?.access_token]);
+  const [step, setStep] = useState(0);
+  const [screen, setScreen] = useState("home");
 
 
   const _params = new URLSearchParams(window.location.search);
@@ -4608,7 +4589,7 @@ export default function BalanceSheet() {
   const [reviewSaveDate, setReviewSaveDate] = useState({});
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [bsCompare, setBsCompare] = useState(null); // {review, orig, draft}
-  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('fbmt_tab')||"balance");
+  const [activeTab, setActiveTab] = useState("balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
   const [compInsight, setCompInsight] = useState("");
@@ -4641,6 +4622,34 @@ export default function BalanceSheet() {
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
+
+  // ── Persist navigation state to sessionStorage ───────────────────────────────
+  useEffect(() => { if (screen !== 'home') sessionStorage.setItem('fbmt_screen', screen); }, [screen]);
+  useEffect(() => { sessionStorage.setItem('fbmt_step', step); }, [step]);
+  useEffect(() => { sessionStorage.setItem('fbmt_tab', activeTab); }, [activeTab]);
+
+  // ── Restore last position after auth loads ───────────────────────────────────
+  useEffect(() => {
+    if (!session?.access_token) return;
+    const savedScreen = sessionStorage.getItem('fbmt_screen');
+    const savedStep = Number(sessionStorage.getItem('fbmt_step')||0);
+    const savedTab = sessionStorage.getItem('fbmt_tab');
+    const savedKey = sessionStorage.getItem('fbmt_current_key');
+    if (savedScreen === 'wizard' && savedKey) {
+      storage.get(savedKey).then(item => {
+        if (item) {
+          try {
+            setData({...emptyData(), ...JSON.parse(item.value)});
+            setStep(savedStep);
+            if (savedTab) setActiveTab(savedTab);
+            setScreen('wizard');
+          } catch {}
+        }
+      }).catch(()=>{});
+    } else if (savedScreen && savedScreen !== 'wizard') {
+      setScreen(savedScreen);
+    }
+  }, [session?.access_token]);
 
   useEffect(() => {
     const fl = document.createElement("link");
