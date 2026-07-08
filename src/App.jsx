@@ -1973,8 +1973,7 @@ ${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;
               onClick:()=>{setData(s.data);setShowInspSaves(false);if(s.data&&s.data._customerResponse){setCustomerResponse(s.data._customerResponse);setShowResponseReview(true);}}},
               React.createElement('div',{style:{fontWeight:600,color:'#1a1a1a'}},s.client_name.replace('[Insp] ','')),
               React.createElement('div',{style:{fontSize:11,color:'#6b7280'}},s.as_of_date))))),
-        React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
-        React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📤 Save PDF Report'))),
+        React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📄 Print / Save PDF'))),
     submitErr&&React.createElement('div',{style:{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}},'⚠️ '+submitErr),
     // ── Share with Customer Modal ──────────────────────────────────────────────
     showShareModal&&React.createElement('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
