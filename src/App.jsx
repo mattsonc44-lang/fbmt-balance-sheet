@@ -6661,6 +6661,113 @@ ${extraPages}
     W.focus();
     setTimeout(()=>W.print(), 400);
   };
+
+  const handlePrintBudgetSummary = () => {
+    const W = window.open("","_blank","width=800,height=1000");
+    if (!W) return;
+    const corpPDTotal = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0);
+    const totalExp = budgetTotalExpenses + corpPDTotal;
+    const netInc = budgetTotalIncome - totalExp;
+    const netIncInsured = budgetTotalIncomeInsured - totalExp;
+    const insEnabled = data.budgetInsuranceEnabled;
+    const f$ = v => v ? '$'+Math.round(numVal(v)).toLocaleString() : '—';
+    const tr = (label, val, bold=false, color='') =>
+      `<tr style="${bold?'font-weight:700;background:#f5f0f0;':''}border-top:${bold?'1.5pt solid #6B0E1E':'0'}">
+        <td style="padding:5pt 10pt;font-size:9pt;border-bottom:.5pt dotted #ddd;color:${color||'inherit'}">${label}</td>
+        <td style="padding:5pt 10pt;text-align:right;font-size:9pt;font-weight:${bold?700:600};border-bottom:.5pt dotted #ddd;color:${color||'inherit'}">${val}</td>
+      </tr>`;
+    const secHead = t => `<tr><td colspan="2" style="background:#6B0E1E;color:white;font-weight:700;font-size:9pt;padding:6pt 10pt;letter-spacing:.5px">${t}</td></tr>`;
+
+    // Crop rows
+    const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
+      const needle=(r.crop||'').toLowerCase().trim();
+      const exact=!r.contracted&&needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
+      const fuzzy=(!exact&&!r.contracted&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
+      const cp=exact||fuzzy;
+      const ep = r.contracted ? numVal(r.price) : (cp ? numVal(cp.price) : numVal(r.price));
+      const rv = numVal(r.acres)*numVal(r.yieldPerAcre)*ep*(numVal(r.share||"100")/100);
+      const insTotal = insEnabled ? numVal(r.acres)*numVal(r.insYield)*numVal(r.insPrice)*(numVal(r.share||"100")/100) : 0;
+      return tr(
+        `${r.crop} &nbsp;<span style="font-size:8pt;color:#666;font-weight:400">${r.acres} ac × ${r.yieldPerAcre} ${r.unit||'bu'} × $${ep.toFixed(2)}${r.share&&r.share!=='100'?' @ '+r.share+'%':''}</span>`,
+        `${f$(rv)}${insEnabled&&insTotal?' <span style="color:#15803d;font-size:8pt"> (ins: '+f$(insTotal)+')</span>':''}`
+      );
+    }).join('');
+
+    // Livestock rows
+    const lsRows = data.budgetLivestock.filter(r=>r.type||r.head).map(r=>{
+      const needle=(r.type||'').toLowerCase().trim();
+      const exact=needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
+      const fuzzy=(!exact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
+      const ep = numVal((exact||fuzzy)?.price || r.price);
+      const rv = numVal(r.head)*numVal(r.lbs)*ep;
+      return tr(`${r.type} &nbsp;<span style="font-size:8pt;color:#666;font-weight:400">${r.head} hd × ${r.lbs} lbs × $${ep.toFixed(2)}/lb</span>`, f$(rv));
+    }).join('');
+
+    // Misc income rows
+    const miscRows = data.budgetMisc.filter(r=>r.description&&numVal(r.amount)>0).map(r=>tr(r.description, f$(numVal(r.amount)))).join('');
+
+    // Debt rows
+    const debtRows = [
+      ...[...debtServiceTermsPersonal,...debtServiceREPersonal].map(r=>tr(`${r.creditor}${r.security?' / '+r.security:''}`, f$(numVal(r.annualPmt)))),
+      ...[...debtServiceTermsCorp,...debtServiceRECorp].map(r=>tr(`${r.creditor} <span style="color:#2d5a8e;font-size:8pt">(corp pays)</span>`, `<span style="color:#2d5a8e">${f$(numVal(r.annualPmt))}</span>`)),
+      ...(data.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>tr(`${r.description} <span style="color:#6B0E1E;font-size:8pt">(proposed)</span>`, f$(numVal(r.annualPmt)))),
+    ].join('');
+
+    W.document.write(`<!DOCTYPE html><html><head><title>Budget Summary — ${data.clientName}</title>
+<style>
+@page{size:letter portrait;margin:.45in .5in;}
+body{font-family:Arial,sans-serif;font-size:9pt;color:#000;margin:0;}
+table{width:100%;border-collapse:collapse;}
+@media print{.np{display:none}}
+</style></head><body>
+<button class="np" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:7px 16px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt;">
+  <div>
+    <img src="${FBMT_LOGO}" alt="FBMT" style="height:44px;width:auto;display:block;margin-bottom:4pt"/>
+    <div style="font-size:14pt;font-weight:800;color:#1a1a1a">${data.clientName}</div>
+    <div style="font-size:9pt;color:#555">Budget Summary &nbsp;·&nbsp; First Bank of Montana</div>
+  </div>
+  <div style="text-align:right;font-size:8.5pt;color:#555">
+    <div>As of ${data.asOfDate||'—'}</div>
+    <div>Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+  </div>
+</div>
+
+<table>
+  ${secHead('CROP INCOME')}
+  ${cropRows}
+  ${tr('Total Your Value', f$(budgetCropTotal), true)}
+  ${insEnabled ? tr('Total Insurance Value', f$(budgetInsuranceTotal), false, '#15803d') : ''}
+
+  ${lsRows ? secHead('LIVESTOCK INCOME') + lsRows + tr('Livestock Total', f$(budgetLivestockTotal), true) : ''}
+
+  ${miscRows ? secHead('MISCELLANEOUS INCOME') + miscRows : ''}
+
+  ${tr('TOTAL INCOME', f$(budgetTotalIncome), true)}
+
+  ${secHead('EXPENSES & DEBT SERVICE')}
+  ${tr('Total Operating Expenses', f$(budgetOperatingExpenses))}
+  ${debtRows}
+  ${corpPDTotal > 0 ? tr('Personal Debt', f$(corpPDTotal)) : ''}
+  ${tr('TOTAL EXPENSES + DEBT', f$(totalExp), true)}
+
+  ${secHead('MARGIN')}
+  <tr style="font-size:11pt;font-weight:800;background:${netInc>=0?'#e8f5ea':'#fce8e8'}">
+    <td style="padding:8pt 10pt;color:${netInc>=0?'#15803d':'#dc2626'}">${netInc>=0?'BORROWER MARGIN (Net Income)':'BORROWER MARGIN (Net Loss)'}</td>
+    <td style="padding:8pt 10pt;text-align:right;color:${netInc>=0?'#15803d':'#dc2626'}">${f$(Math.abs(netInc))}</td>
+  </tr>
+  ${insEnabled ? `<tr style="font-size:11pt;font-weight:800;background:${netIncInsured>=0?'#f0fdf4':'#fce8e8'};border:1.5pt solid #15803d">
+    <td style="padding:8pt 10pt;color:#15803d">🛡 ${netIncInsured>=0?'INSURANCE MARGIN (Net Income)':'INSURANCE MARGIN (Net Loss)'}</td>
+    <td style="padding:8pt 10pt;text-align:right;color:${netIncInsured>=0?'#15803d':'#dc2626'}">${f$(Math.abs(netIncInsured))}</td>
+  </tr>` : ''}
+</table>
+</body></html>`);
+    W.document.close();
+    W.focus();
+    setTimeout(()=>W.print(), 400);
+  };
+
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => {
@@ -8368,6 +8475,10 @@ ${extraPages}
             <button className="btn btn-secondary" onClick={handlePrintBudget}
               style={{fontSize:".85rem"}}>
               Print Budget
+            </button>
+            <button className="btn btn-secondary" onClick={handlePrintBudgetSummary}
+              style={{fontSize:".85rem",background:"#374151",color:"white",border:"none"}}>
+              Print Summary
             </button>
             {profile?.role === 'admin' && (
               <button onClick={()=>setShowPriceList(true)}
