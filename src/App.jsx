@@ -4635,6 +4635,12 @@ export default function BalanceSheet() {
     const savedStep = Number(sessionStorage.getItem('fbmt_step')||0);
     const savedTab = sessionStorage.getItem('fbmt_tab');
     const savedKey = sessionStorage.getItem('fbmt_current_key');
+    // Only restore known lender screens — never restore customer-facing routes
+    const validScreens = ['wizard', 'home'];
+    if (!validScreens.includes(savedScreen)) {
+      sessionStorage.removeItem('fbmt_screen');
+      return;
+    }
     if (savedScreen === 'wizard' && savedKey) {
       storage.get(savedKey).then(item => {
         if (item) {
@@ -4643,11 +4649,12 @@ export default function BalanceSheet() {
             setStep(savedStep);
             if (savedTab) setActiveTab(savedTab);
             setScreen('wizard');
-          } catch {}
+          } catch { sessionStorage.removeItem('fbmt_screen'); }
+        } else {
+          sessionStorage.removeItem('fbmt_screen');
+          sessionStorage.removeItem('fbmt_current_key');
         }
-      }).catch(()=>{});
-    } else if (savedScreen && savedScreen !== 'wizard') {
-      setScreen(savedScreen);
+      }).catch(()=>{ sessionStorage.removeItem('fbmt_screen'); });
     }
   }, [session?.access_token]);
 
@@ -7475,7 +7482,13 @@ ${extraPages}
   }
 
   // ── Role-based routing ───────────────────────────────────────────────────────
-  const handleSignOut = async () => { await supaLogout(); setSession(null); setProfile(null); setProfileLoading(true); };
+  const handleSignOut = async () => {
+    sessionStorage.removeItem('fbmt_screen');
+    sessionStorage.removeItem('fbmt_step');
+    sessionStorage.removeItem('fbmt_tab');
+    sessionStorage.removeItem('fbmt_current_key');
+    await supaLogout(); setSession(null); setProfile(null); setProfileLoading(true);
+  };
 
   // Wait for profile to load before routing — prevents CA briefly seeing lender screen
   if (profileLoading && session) {
