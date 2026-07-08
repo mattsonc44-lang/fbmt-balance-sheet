@@ -5601,8 +5601,14 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
   // Budget calcs
   const budgetCropTotal = data.budgetCrops.reduce((s,r)=>{
-    const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
-    const effectivePrice = (cp ? cp.price : null) || r.price;
+    let effectivePrice = r.price;
+    if (!r.contracted) {
+      const needle = (r.crop||'').toLowerCase().trim();
+      const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
+      const fuzzy = (!exact&&needle) ? commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))) : null;
+      const cp = exact || fuzzy;
+      if (cp) effectivePrice = cp.price;
+    }
     return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
   },0);
   // Total guaranteed insurance value across all crop rows (acres × guar.yield × guar.price × share%)
@@ -6258,7 +6264,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     const entityBudgetPages = linkedData.map(d => {
       const insEnabled = !!d.budgetInsuranceEnabled;
       const bCrop=(d.budgetCrops||[]).reduce((s,r)=>{
-        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
+        const cp=!r.contracted?(()=>{
+        const needle=(r.crop||'').toLowerCase().trim();
+        const exact=needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
+        const fuzzy=(!exact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
+        return exact||fuzzy;
+      })():null;
         return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
       },0);
       const bInsTotal = insEnabled ? (d.budgetCrops||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100),0) : 0;
@@ -6277,7 +6288,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       const bNetInsured=bIncInsured-bExp-bDebt;
       if (bInc<=1&&bExp<=1) return ''; // no budget data
       const cropRows=(d.budgetCrops||[]).filter(r=>r.crop).map(r=>{
-        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
+        const cp=!r.contracted?(()=>{
+        const needle=(r.crop||'').toLowerCase().trim();
+        const exact=needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
+        const fuzzy=(!exact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
+        return exact||fuzzy;
+      })():null;
         const ep=n2(cp?cp.price:null)||n2(r.price);
         const rv=n2(r.acres)*n2(r.yieldPerAcre)*ep*(n2(r.share||'100')/100);
         const it=insEnabled?n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100):0;
@@ -6538,7 +6554,10 @@ ${extraPages}
     const netIncInsured = budgetTotalIncomeInsured - totalExp;
     const insEnabled = data.budgetInsuranceEnabled;
     const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
-      const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+      const needle=(r.crop||'').toLowerCase().trim();
+      const cpExact=!r.contracted?(needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null):null;
+      const cpFuzzy=(!r.contracted&&!cpExact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
+      const cp=cpExact||cpFuzzy;
       const effectivePrice = r.contracted ? numVal(r.price) : (cp ? numVal(cp.price) : numVal(r.price));
       const rv = numVal(r.acres)*numVal(r.yieldPerAcre)*effectivePrice*(numVal(r.share||"100")/100);
       const insTotal = insEnabled ? numVal(r.acres)*numVal(r.insYield)*numVal(r.insPrice)*(numVal(r.share||"100")/100) : 0;
