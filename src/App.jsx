@@ -4555,6 +4555,12 @@ export default function BalanceSheet() {
   const _inspId = _params.get('id');
   const _bsId   = _params.get('bs');
   const _budId  = _params.get('budget');
+
+  // Clean URL after reading params so reloading doesn't re-trigger customer routes
+  if (_inspId || _bsId || _budId) {
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+
   if (_inspId) return <CustomerInspectForm shareId={_inspId} />;
   if (_bsId)   return <CustomerBalanceSheetForm shareId={_bsId} />;
   if (_budId)  return <CustomerBudgetForm shareId={_budId} />;
