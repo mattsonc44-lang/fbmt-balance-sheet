@@ -6081,7 +6081,43 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const acceptCAEdit = async (edit) => {
     setAcceptingCAEdit(true);
     try {
-      await storage.set(edit.sheet_key, JSON.stringify({...edit.edited_data, _lastCAEdit: new Date().toISOString()}));
+      // Load lender's CURRENT version from storage
+      const currentItem = await storage.get(edit.sheet_key);
+      const currentData = currentItem ? JSON.parse(currentItem.value) : {};
+
+      // Load the original snapshot that was shared with the CA
+      const shareResp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares?id=eq.'+edit.share_id+'&select=sheet_data', {headers:supaHeaders()});
+      const shares = shareResp.ok ? await shareResp.json() : [];
+      const originalSnapshot = shares[0]?.sheet_data || {};
+
+      // 3-way merge: apply only fields CA actually changed vs original snapshot
+      // onto the lender's current data
+      const caEdited = edit.edited_data || {};
+      const mergedData = {...currentData};
+
+      const mergeValue = (key, orig, ca, current) => {
+        const origStr = JSON.stringify(orig);
+        const caStr = JSON.stringify(ca);
+        const currentStr = JSON.stringify(current);
+        if (caStr === origStr) return current; // CA didn't change this field — keep lender's current
+        if (currentStr === origStr) return ca;  // Lender didn't change it — use CA's version
+        // Both changed — CA wins (lender can always re-edit after accepting)
+        return ca;
+      };
+
+      // Merge all top-level fields
+      const allKeys = new Set([...Object.keys(originalSnapshot), ...Object.keys(caEdited), ...Object.keys(currentData)]);
+      allKeys.forEach(key => {
+        if (key.startsWith('_')) return; // skip internal fields
+        if (key in caEdited || key in originalSnapshot) {
+          mergedData[key] = mergeValue(key, originalSnapshot[key], caEdited[key], currentData[key]);
+        }
+      });
+
+      // Save merged result
+      await storage.set(edit.sheet_key, JSON.stringify({...mergedData, _lastCAEdit: new Date().toISOString(), _lastCAName: edit.ca_name}));
+
+      // Mark edit as accepted
       await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+edit.id, {
         method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
         body: JSON.stringify({status:'accepted'})
@@ -6089,7 +6125,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       setPendingCAEdits(p=>p.filter(e=>e.id!==edit.id));
       setShowCADiff(null);
       await loadSavedList();
-      alert('CA changes accepted and saved to the sheet.');
+      alert('CA changes merged with your latest version and saved.');
     } catch(e) { alert('Error accepting: '+e.message); }
     setAcceptingCAEdit(false);
   };
