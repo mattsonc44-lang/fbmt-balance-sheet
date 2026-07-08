@@ -4547,10 +4547,29 @@ function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, 
 }
 
 export default function BalanceSheet() {
-  const [step, setStep] = useState(0);
-  const [screen, setScreen] = useState("home");
+  const [step, setStep] = useState(() => Number(sessionStorage.getItem('fbmt_step')||0));
+  const [screen, setScreen] = useState(() => sessionStorage.getItem('fbmt_screen')||"home");
 
-  // ── Route customer links ─────────────────────────────────────────────────────
+  // ── Persist navigation state to sessionStorage ───────────────────────────────
+  useEffect(() => { sessionStorage.setItem('fbmt_screen', screen); }, [screen]);
+  useEffect(() => { sessionStorage.setItem('fbmt_step', step); }, [step]);
+  useEffect(() => { sessionStorage.setItem('fbmt_tab', activeTab); }, [activeTab]);
+
+  // ── Restore last open sheet when reloading on wizard screen ─────────────────
+  useEffect(() => {
+    if (screen !== 'wizard') return;
+    if (!session?.access_token) return;
+    const savedKey = sessionStorage.getItem('fbmt_current_key');
+    if (savedKey && (!data.clientName)) {
+      storage.get(savedKey).then(item => {
+        if (item) {
+          try { setData({...emptyData(), ...JSON.parse(item.value)}); } catch {}
+        }
+      }).catch(()=>{});
+    }
+  }, [session?.access_token]);
+
+
   const _params = new URLSearchParams(window.location.search);
   const _inspId = _params.get('id');
   const _bsId   = _params.get('bs');
@@ -4589,7 +4608,7 @@ export default function BalanceSheet() {
   const [reviewSaveDate, setReviewSaveDate] = useState({});
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [bsCompare, setBsCompare] = useState(null); // {review, orig, draft}
-  const [activeTab, setActiveTab] = useState("balance");
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('fbmt_tab')||"balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
   const [compInsight, setCompInsight] = useState("");
@@ -4832,10 +4851,11 @@ export default function BalanceSheet() {
       if (item) {
         const p = JSON.parse(item.value); delete p._savedAt;
         setData({ ...emptyData(), ...p }); setStep(0); setScreen("wizard");
+        sessionStorage.setItem('fbmt_current_key', key);
       }
     } catch {}
   };
-  const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); };
+  const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); sessionStorage.removeItem('fbmt_current_key'); };
 
   // ── Import helpers ─────────────────────────────────────────────────────────
   async function downloadTemplate() {
