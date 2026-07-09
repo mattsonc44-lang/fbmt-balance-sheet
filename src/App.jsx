@@ -4596,6 +4596,8 @@ export default function BalanceSheet() {
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [bsCompare, setBsCompare] = useState(null); // {review, orig, draft}
   const [activeTab, setActiveTab] = useState("balance");
+  const [activeBudget, setActiveBudget] = useState(0); // 0 = scenario 1, 1 = scenario 2
+  const [showBudget2Modal, setShowBudget2Modal] = useState(false);
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
   const [compInsight, setCompInsight] = useState("");
@@ -5604,7 +5606,38 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
   // Budget calcs
-  const budgetCropTotal = data.budgetCrops.reduce((s,r)=>{
+  // ── Active budget scenario data ────────────────────────────────────────────
+  const emptyBudget2 = () => ({
+    budgetCrops: [{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""}],
+    budgetLivestock: [{type:"",head:"",lbs:"",price:""}],
+    budgetMisc: [{description:"",amount:""}],
+    budgetExpenses: [{description:"",amount:"",prepaid:false}],
+    budgetInsuranceEnabled: false,
+    budgetProposedDebt: [],
+  });
+  const budgetViewData = activeBudget === 0 ? data : {
+    ...data,
+    budgetCrops: (data.budget2||{}).budgetCrops || emptyBudget2().budgetCrops,
+    budgetLivestock: (data.budget2||{}).budgetLivestock || emptyBudget2().budgetLivestock,
+    budgetMisc: (data.budget2||{}).budgetMisc || emptyBudget2().budgetMisc,
+    budgetExpenses: (data.budget2||{}).budgetExpenses || emptyBudget2().budgetExpenses,
+    budgetInsuranceEnabled: (data.budget2||{}).budgetInsuranceEnabled || false,
+    budgetProposedDebt: (data.budget2||{}).budgetProposedDebt || [],
+  };
+  const setBudgetViewArr = (field, i, key, val) => {
+    if (activeBudget === 0) { setArr(field, i, key, val); }
+    else { setData(d => { const b2={...(d.budget2||emptyBudget2())}; const arr=[...(b2[field]||[])]; arr[i]={...(arr[i]||{}),[key]:val}; b2[field]=arr; return {...d,budget2:b2}; }); }
+  };
+  const addBudgetViewRow = (field, empty) => {
+    if (activeBudget === 0) { addRow(field, empty); }
+    else { setData(d => { const b2={...(d.budget2||emptyBudget2())}; b2[field]=[...(b2[field]||[]),empty]; return {...d,budget2:b2}; }); }
+  };
+  const removeBudgetViewRow = (field, i) => {
+    if (activeBudget === 0) { removeRow(field, i); }
+    else { setData(d => { const b2={...(d.budget2||emptyBudget2())}; b2[field]=(b2[field]||[]).filter((_,j)=>j!==i); return {...d,budget2:b2}; }); }
+  };
+
+  const budgetCropTotal = budgetViewData.budgetCrops.reduce((s,r)=>{
     let effectivePrice = r.price;
     if (!r.contracted) {
       const needle = (r.crop||'').toLowerCase().trim();
@@ -5616,22 +5649,22 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
   },0);
   // Total guaranteed insurance value across all crop rows (acres × guar.yield × guar.price × share%)
-  const budgetInsuranceTotal = data.budgetInsuranceEnabled ? data.budgetCrops.reduce((s,r)=>{
+  const budgetInsuranceTotal = budgetViewData.budgetInsuranceEnabled ? budgetViewData.budgetCrops.reduce((s,r)=>{
     return s + n(r.acres)*n(r.insYield)*n(r.insPrice)*(n(r.share||"100")/100);
   },0) : 0;
-  const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>{
+  const budgetLivestockTotal = budgetViewData.budgetLivestock.reduce((s,r)=>{
     const needle = (r.type||'').toLowerCase().trim();
     const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
     const fuzzy = (!exact&&needle) ? commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))) : null;
     const ep = (exact||fuzzy) ? (exact||fuzzy).price : r.price;
     return s+n(r.head)*n(r.lbs)*n(ep);
   },0);
-  const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
+  const budgetMiscTotal = budgetViewData.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
   // Insurance scenario: crop income replaced by the insurance guarantee total
   const budgetTotalIncomeInsured = budgetInsuranceTotal + budgetLivestockTotal + budgetMiscTotal;
-  const budgetOperatingExpenses = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
-  const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  const budgetOperatingExpenses = budgetViewData.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  const budgetPrepaidTotal = budgetViewData.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!r.corpPaid);
@@ -6587,7 +6620,7 @@ ${extraPages}
       "<tr style='"+(r.prepaid?"color:#15803d;":"")+"'><td>"+r.description+(r.prepaid?" <em>(pre-paid)</em>":"")+"</td><td class='r'"+(r.prepaid?" style='text-decoration:line-through;color:#15803d;'":"")+">"+(r.prepaid?"":"")+"$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
     ).join("");
     const prepaidTotal = data.budgetExpenses.filter(r=>r.prepaid&&numVal(r.amount)>0).reduce((s,r)=>s+numVal(r.amount),0);
-    const propDebtRows = (data.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>
+    const propDebtRows = (budgetViewData.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>
       "<tr><td>"+r.description+" <em style='color:#6B0E1E'>(proposed)</em></td><td class='r'>$"+Math.round(numVal(r.annualPmt)).toLocaleString()+"</td></tr>"
     ).join("");
     const debtPersonalRows = [...debtServiceTermsPersonal,...debtServiceREPersonal].map(r=>
@@ -6714,7 +6747,7 @@ ${extraPages}
     const debtRows = [
       ...[...debtServiceTermsPersonal,...debtServiceREPersonal].map(r=>tr(`${r.creditor}${r.security?' / '+r.security:''}`, f$(numVal(r.annualPmt)))),
       ...[...debtServiceTermsCorp,...debtServiceRECorp].map(r=>tr(`${r.creditor} <span style="color:#2d5a8e;font-size:8pt">(corp pays)</span>`, `<span style="color:#2d5a8e">${f$(numVal(r.annualPmt))}</span>`)),
-      ...(data.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>tr(`${r.description} <span style="color:#6B0E1E;font-size:8pt">(proposed)</span>`, f$(numVal(r.annualPmt)))),
+      ...(budgetViewData.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>tr(`${r.description} <span style="color:#6B0E1E;font-size:8pt">(proposed)</span>`, f$(numVal(r.annualPmt)))),
     ].join('');
 
     W.document.write(`<!DOCTYPE html><html><head><title>Budget Summary — ${data.clientName}</title>
@@ -8491,6 +8524,69 @@ table{width:100%;border-collapse:collapse;}
 
       {activeTab === "budget" && (
         <div className="budget-page">
+          {/* Scenario selector */}
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",background:"#f8f8f8",borderBottom:"1px solid #e5e7eb"}}>
+            <span style={{fontSize:".8rem",fontWeight:600,color:"#555"}}>Budget Scenario:</span>
+            <button onClick={()=>setActiveBudget(0)}
+              style={{background:activeBudget===0?"#6B0E1E":"white",color:activeBudget===0?"white":"#374151",border:"1px solid "+(activeBudget===0?"#6B0E1E":"#d1d5db"),borderRadius:6,padding:"4px 14px",fontWeight:activeBudget===0?700:400,fontSize:".82rem",cursor:"pointer",fontFamily:"inherit"}}>
+              {data.budget1Name||"Scenario 1"}
+            </button>
+            {data.budget2 ? (
+              <button onClick={()=>setActiveBudget(1)}
+                style={{background:activeBudget===1?"#6B0E1E":"white",color:activeBudget===1?"white":"#374151",border:"1px solid "+(activeBudget===1?"#6B0E1E":"#d1d5db"),borderRadius:6,padding:"4px 14px",fontWeight:activeBudget===1?700:400,fontSize:".82rem",cursor:"pointer",fontFamily:"inherit"}}>
+                {(data.budget2||{}).budget2Name||"Scenario 2"}
+              </button>
+            ) : (
+              <button onClick={()=>setShowBudget2Modal(true)}
+                style={{background:"none",border:"1.5px dashed #9ca3af",color:"#6b7280",borderRadius:6,padding:"4px 14px",fontSize:".82rem",cursor:"pointer",fontFamily:"inherit"}}>
+                + Add Budget Scenario
+              </button>
+            )}
+            {data.budget2 && activeBudget===1 && (
+              <button onClick={()=>{if(window.confirm("Remove Scenario 2?")) {setData(d=>{const d2={...d};delete d2.budget2;return d2;});setActiveBudget(0);}}}
+                style={{marginLeft:"auto",background:"none",border:"1px solid #fca5a5",color:"#dc2626",borderRadius:5,padding:"3px 10px",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
+                Remove Scenario 2
+              </button>
+            )}
+          </div>
+
+          {/* Add Budget 2 Modal */}
+          {showBudget2Modal && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+              <div style={{background:"white",borderRadius:12,padding:32,width:"min(400px,90%)",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                <div style={{fontWeight:700,fontSize:17,marginBottom:8}}>Add Budget Scenario 2</div>
+                <div style={{fontSize:13,color:"#555",marginBottom:20}}>Would you like to start with a copy of Scenario 1 or start fresh?</div>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  <button onClick={()=>{
+                    setData(d=>({...d,budget2:{
+                      budgetCrops:[...d.budgetCrops.map(r=>({...r}))],
+                      budgetLivestock:[...d.budgetLivestock.map(r=>({...r}))],
+                      budgetMisc:[...d.budgetMisc.map(r=>({...r}))],
+                      budgetExpenses:[...d.budgetExpenses.map(r=>({...r}))],
+                      budgetInsuranceEnabled:d.budgetInsuranceEnabled,
+                      budgetProposedDebt:[...(d.budgetProposedDebt||[]).map(r=>({...r}))],
+                      budget2Name:"Scenario 2"
+                    }}));
+                    setActiveBudget(1);setShowBudget2Modal(false);
+                  }} style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"11px 20px",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+                    📋 Copy from Scenario 1
+                  </button>
+                  <button onClick={()=>{
+                    const eb=emptyBudget2();
+                    setData(d=>({...d,budget2:{...eb,budget2Name:"Scenario 2"}}));
+                    setActiveBudget(1);setShowBudget2Modal(false);
+                  }} style={{background:"#374151",color:"white",border:"none",borderRadius:7,padding:"11px 20px",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+                    🆕 Start Fresh
+                  </button>
+                  <button onClick={()=>setShowBudget2Modal(false)}
+                    style={{background:"#f3f4f6",color:"#374151",border:"1px solid #d1d5db",borderRadius:7,padding:"11px 20px",fontWeight:600,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="budget-top-bar">
             <div className="budget-client">{data.clientName || "Client Budget"} — {data.asOfDate}</div>
             <div className="budget-top-totals">
@@ -8533,7 +8629,7 @@ table{width:100%;border-collapse:collapse;}
           </div>
           <div className="budget-body">
             <BudgetView
-              data={data}
+              data={budgetViewData}
               budgetCropTotal={budgetCropTotal}
               budgetInsuranceTotal={budgetInsuranceTotal}
               budgetTotalIncomeInsured={budgetTotalIncomeInsured}
@@ -8558,9 +8654,9 @@ table{width:100%;border-collapse:collapse;}
               corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
-              setArr={setArr}
-              removeRow={removeRow}
-              addRow={addRow}
+              setArr={setBudgetViewArr}
+              removeRow={removeBudgetViewRow}
+              addRow={addBudgetViewRow}
               lookupPrice={lookupPrice}
               commodityPrices={commodityPrices}
               expenseList={expenseList}
