@@ -1286,7 +1286,7 @@ function ComparisonView({
       merge(L.machinery,R.machinery,r=>((r.year||'')+' '+(r.make||'')+' '+(r.size||'')).trim()||'equip').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make,(l||r).size].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
     if((L.otherAssets||[]).length||(R.otherAssets||[]).length){body+=subHead('Other Assets');
       merge(L.otherAssets,R.otherAssets,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
-    const lta=d=>(d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)+(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.vehicles||[]).reduce((s,r)=>s+n(r.value),0)+(d.machinery||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+    const lta=d=>(d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value)),0)+(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.vehicles||[]).reduce((s,r)=>s+n(r.value),0)+(d.machinery||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
     body+=totRow('TOTAL LONG-TERM ASSETS',lta(L),lta(R));
     body+=totRow('TOTAL ASSETS',ltc(L)+lta(L),ltc(R)+lta(R));
     // CURRENT LIABILITIES
@@ -2952,7 +2952,7 @@ function CustomerBalanceSheetForm({shareId}) {
   const farmProdTot = (data.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0);
   const lsMktTot = (data.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0);
   const cropInvTot = (data.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
-  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+n(r.value),0);
+  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value)),0);
   const reTot = (data.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const vehTot = (data.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
   const machTot = (data.machinery||[]).reduce((s,r)=>s+n(r.value),0);
@@ -3778,7 +3778,7 @@ function BSCompareModal({review, onAccept, onDiscard}) {
     supplies:   (d.supplies||[]).reduce((s,r)=>s+nm(r.value),0),
     otherCur:   (d.otherCurrent||[]).reduce((s,r)=>s+nm(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+nm(r.amount),0),
     lsMkt:      (d.livestockMarket||[]).reduce((s,r)=>s+nm(r.value),0),
-    breeding:   (d.breedingStock||[]).reduce((s,r)=>s+nm(r.value),0),
+    breeding:   (d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?nm(r.number)*nm(r.valuePerHead):nm(r.value)),0),
     re:         (d.realEstate||[]).reduce((s,r)=>s+nm(r.acres)*nm(r.valuePerAcre),0),
     vehicles:   (d.vehicles||[]).reduce((s,r)=>s+nm(r.value),0),
     machinery:  (d.machinery||[]).reduce((s,r)=>s+nm(r.value),0),
@@ -5575,7 +5575,11 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const suppliesTotal = data.supplies.reduce((s,r)=>s+n(r.value),0);
   const otherCurTotal = data.otherCurrent.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentAssets = cashTotal+recTotal+fedPay+lsMktTotal+farmProdTotal+cropInv+suppliesTotal+otherCurTotal;
-  const breedingTotal = data.breedingStock.reduce((s,r)=>s+n(r.value),0);
+  const breedingTotal = data.breedingStock.reduce((s,r)=>{
+    const perHead = n(r.valuePerHead||r.value);
+    const total = r.valuePerHead ? n(r.number)*perHead : n(r.value);
+    return s + total;
+  },0);
   const reTotal = data.realEstate.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const reConTotal = data.reContracts.reduce((s,r)=>s+n(r.amount),0);
   const vehiclesVal = data.vehicles.reduce((s,r)=>s+n(r.value),0);
@@ -5669,7 +5673,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       ? (d.federalPayments||[]).reduce((s,r)=>s+m(r.amount),0)
       : m(d.federalPayments||"");
     const tc = cash+rec+fedP+ls+fp+ci+sup+oc;
-    const bs = (d.breedingStock||[]).reduce((s,r)=>s+m(r.value),0);
+    const bs = (d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?m(r.number)*m(r.valuePerHead):m(r.value)),0);
     const re = (d.realEstate||[]).reduce((s,r)=>s+m(r.acres)*m(r.valuePerAcre),0);
     const veh = (d.vehicles||[]).reduce((s,r)=>s+m(r.value),0);
     const mach = (d.machinery||[]).reduce((s,r)=>s+m(r.value),0);
@@ -6361,7 +6365,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       +(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
       +(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
-    const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)
+    const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value)),0)
       +(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
       +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0)
       +linkedEntityVal;
@@ -6449,7 +6453,7 @@ ${(d.supplies||[]).filter(r=>r.description||r.value).length>0?`<div class="sec">
 ${(d.otherCurrent||[]).filter(r=>r.description||r.amount).length>0?`<div class="sec">Other Current Assets:</div>${(d.otherCurrent||[]).filter(r=>r.description||r.amount).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
 <div class="subtot"><span>TOTAL CURRENT ASSETS:</span><span>${pFmt(totalCurrentAssets)||"$0"}</span></div>
 <div class="sec">Breeding Stock:</div>
-${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
+${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>{const tot=r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value);return`<div class="trow"><span class="c1">${r.number||""} hd</span><span class="c2">${r.kind||""}</span><span class="c3">${r.valuePerHead?'$'+n(r.valuePerHead).toLocaleString()+'/hd':''}</span><span class="c5">${pFmt(tot)}</span></div>`;}).join("")}
 <div class="sec">Real Estate:</div>
 <div class="trow th"><span class="c1">Acres</span><span class="c2">Type</span><span class="c3">$/Acre</span><span class="c5">Total Value</span></div>
 ${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
@@ -7064,16 +7068,46 @@ table{width:100%;border-collapse:collapse;}
         <div className="step-content">
           <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding" />
           <p className="phase-badge">Intermediate and Long-Term Assets</p>
-          {data.breedingStock.map((r,i) => (
-            <div key={i} className="row-entry" data-rowkey={`breedingStock-${i}`}>
-              <span className="row-num">{i+1}</span>
-              <TxtInp label="Number" value={r.number} onChange={v=>setArr("breedingStock",i,"number",v)} placeholder="# head" />
-              <TxtInp label="Kind" value={r.kind} onChange={v=>setArr("breedingStock",i,"kind",v)} placeholder="e.g., Angus cows" />
-              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("breedingStock",i,"value",v)} />
-              <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
-            </div>
-          ))}
-          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",value:""})}>+ Add Breeding Stock</button>
+          <div className="fp-header-row">
+            <span style={{width:20}}></span>
+            <span className="fp-col-label" style={{width:80}}>Head</span>
+            <span className="fp-col-label" style={{flex:1}}>Kind / Description</span>
+            <span className="fp-col-label" style={{width:120}}>Value/Head</span>
+            <span className="fp-col-label" style={{width:120}}>Total Value</span>
+            <span style={{width:32}}></span>
+          </div>
+          {data.breedingStock.map((r,i) => {
+            const total = numVal(r.number) * numVal(r.valuePerHead||r.value);
+            return (
+              <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`}>
+                <span className="row-num">{i+1}</span>
+                <div className="input-group" style={{width:80,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.number} placeholder="0"
+                      onChange={e=>setArr("breedingStock",i,"number",e.target.value.replace(/[^0-9]/g,""))} />
+                  </div>
+                </div>
+                <div className="input-group" style={{flex:1}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.kind} placeholder="e.g., Bred Heifers, Angus Cows"
+                      onChange={e=>setArr("breedingStock",i,"kind",e.target.value)} />
+                  </div>
+                </div>
+                <div className="input-group" style={{width:120,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <span className="prefix">$</span>
+                    <input type="text" value={r.valuePerHead||r.value||""} placeholder="0"
+                      onChange={e=>setArr("breedingStock",i,"valuePerHead",e.target.value.replace(/[^0-9.]/g,""))} />
+                  </div>
+                </div>
+                <div style={{width:120,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:8,fontWeight:700,fontSize:".9rem",color:total>0?"#1a1a1a":"#ccc"}}>
+                  {total>0 ? fmt(total) : "—"}
+                </div>
+                <button className="remove-btn" style={{width:32}} onClick={()=>removeRow("breedingStock",i)}>x</button>
+              </div>
+            );
+          })}
+          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",valuePerHead:"",value:""})}>+ Add Breeding Stock</button>
           <div className="subtotal-row"><span>Total Breeding Stock</span><strong>{fmt(breedingTotal)}</strong></div>
         </div>
       );
