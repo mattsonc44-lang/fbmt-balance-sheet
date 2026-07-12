@@ -6419,10 +6419,24 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       +(d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
     const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
+    // Count total data rows to determine font size — more rows = smaller font
+    const totalRows = [
+      d.cashOther||[], d.receivables||[], d.federalPayments||[], d.livestockMarket||[],
+      d.farmProducts||[], d.cropInvestment||[], d.supplies||[], d.otherCurrent||[],
+      d.breedingStock||[], d.realEstate||[], d.vehicles||[], d.machinery||[], d.otherAssets||[],
+      d.operatingNotes||[], d.accountsDue||[], d.intermediatDebt||[], d.reCurrent||[],
+      d.reMortgages||[], d.otherLiabilities||[]
+    ].reduce((s,arr)=>s+arr.filter(r=>Object.values(r).some(v=>v&&String(v).trim())).length, 0);
+
+    const baseFontSize = totalRows < 15 ? 10.5 : totalRows < 25 ? 9.5 : totalRows < 35 ? 8.5 : totalRows < 45 ? 7.5 : 7;
+    const secFontSize = baseFontSize - 1;
+    const colHeadSize = baseFontSize + 0.5;
+    const rowMinHeight = baseFontSize + 4;
+
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
 @page{size:legal portrait;margin:.4in .45in;}
-body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:0;}
+body{font-family:Arial,sans-serif;font-size:${baseFontSize}pt;color:#000;margin:0;}
 h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:4pt;}
 h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:8pt;}
 .logo-box{border:2pt solid #6B0E1E;padding:4pt 7pt;display:inline-block;text-align:center;font-weight:900;color:#6B0E1E;}
@@ -6430,9 +6444,9 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .name-row{border-bottom:1pt solid #000;padding-bottom:3pt;margin-bottom:5pt;font-weight:700;}
 .body{display:flex;gap:8pt;}
 .col{flex:1;}
-.col-head{background:#000;color:#fff;font-weight:700;font-size:8pt;text-align:center;padding:2pt 4pt;display:flex;justify-content:space-between;}
-.sec{font-style:italic;font-size:7pt;margin:3pt 0 1pt;color:#333;}
-.row{display:flex;justify-content:space-between;min-height:12pt;border-bottom:.5pt dotted #ccc;padding:.5pt 2pt;}
+.col-head{background:#000;color:#fff;font-weight:700;font-size:${colHeadSize}pt;text-align:center;padding:2pt 4pt;display:flex;justify-content:space-between;}
+.sec{font-style:italic;font-size:${secFontSize}pt;margin:3pt 0 1pt;color:#333;}
+.row{display:flex;justify-content:space-between;min-height:${rowMinHeight}pt;border-bottom:.5pt dotted #ccc;padding:.5pt 2pt;}
 .trow{display:flex;min-height:11pt;border-bottom:.5pt dotted #ccc;font-size:7pt;padding:.5pt 0;}
 .c1{flex:1.4;} .c2{flex:1;} .c3{flex:.8;text-align:right;} .c4{flex:.8;text-align:right;} .c5{flex:.9;text-align:right;font-weight:600;}
 .th{font-weight:700;font-size:6pt;text-transform:uppercase;border-bottom:1pt solid #000;margin-bottom:1pt;}
