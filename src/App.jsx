@@ -4616,6 +4616,7 @@ export default function BalanceSheet() {
   const [availableEntities, setAvailableEntities] = useState([]);
   const [pendingEntityName, setPendingEntityName] = useState('');
   const [pendingEntityDate, setPendingEntityDate] = useState('');
+  const [pendingOwnership, setPendingOwnership] = useState('100');
   // CA sharing
   const [caUsers, setCAUsers] = useState([]);
   const [showShareCA, setShowShareCA] = useState(null); // sheet key being shared
@@ -4627,6 +4628,8 @@ export default function BalanceSheet() {
   const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [caOpenShare, setCaOpenShare] = useState(null);
+  const [showSharesPanel, setShowSharesPanel] = useState(false);
+  const [sharesData, setSharesData] = useState({caShares:[], bsShares:[], budgetShares:[], loading:false});
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -5588,7 +5591,11 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const machVal = data.machinery.reduce((s,r)=>s+n(r.value),0);
   const otherAssetsTotal = data.otherAssets.reduce((s,r)=>s+n(r.amount),0);
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
-  const linkedEntityVal = Object.values(linkedEntityNWMap).reduce((s,v)=>s+v,0);
+  const linkedEntityVal = normalizeLinked(data.linkedEntities).reduce((s,e)=>{
+    const nw = linkedEntityNWMap[e.name] || 0;
+    const pct = numVal(e.ownership||"100") || 100;
+    return s + nw * (pct/100);
+  },0);
   const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
   const opNotesTotal = data.operatingNotes.filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
@@ -6182,6 +6189,36 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     setShowCADiff(null);
   };
 
+  const loadSharesPanel = async () => {
+    setSharesData(s=>({...s,loading:true}));
+    try {
+      const [caResp, bsResp, budResp] = await Promise.all([
+        fetch(SUPABASE_URL+'/rest/v1/ca_shares?lender_user_id=eq.'+session?.user?.id+'&select=*,ca_edits(status,submitted_at)&order=shared_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?user_id=eq.'+session?.user?.id+'&select=share_id,client_name,as_of_date,created_at,status,expires_at&order=created_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?user_id=eq.'+session?.user?.id+'&select=share_id,client_name,as_of_date,created_at,status,expires_at&order=created_at.desc', {headers:supaHeaders()}),
+      ]);
+      const [caShares, bsShares, budgetShares] = await Promise.all([
+        caResp.ok?caResp.json():[],
+        bsResp.ok?bsResp.json():[],
+        budResp.ok?budResp.json():[],
+      ]);
+      // Load CA user names
+      const caUserIds = [...new Set((Array.isArray(caShares)?caShares:[]).map(s=>s.ca_user_id).filter(Boolean))];
+      let caUserMap = {};
+      if (caUserIds.length) {
+        const uResp = await fetch(SUPABASE_URL+'/rest/v1/profiles?id=in.('+caUserIds.join(',')+')&select=id,full_name,email', {headers:supaHeaders()});
+        const users = uResp.ok ? await uResp.json() : [];
+        users.forEach(u => { caUserMap[u.id] = u.full_name||u.email; });
+      }
+      setSharesData({
+        caShares: (Array.isArray(caShares)?caShares:[]).map(s=>({...s, caName: caUserMap[s.ca_user_id]||'Unknown'})),
+        bsShares: Array.isArray(bsShares)?bsShares:[],
+        budgetShares: Array.isArray(budgetShares)?budgetShares:[],
+        loading:false
+      });
+    } catch(e) { setSharesData(s=>({...s,loading:false})); }
+  };
+
   const loadBSReview = async (review, saveDate) => {
     if (!review.customer_draft && !review.original_data) return;
     const d = {...emptyData(),...(review.original_data||{}),...(review.customer_draft||{})};
@@ -6386,7 +6423,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     const blank = (arr, min) => { const r=[...arr]; while(r.length<min) r.push({}); return r; };
 
     const n = numVal;
-    const linkedEntityVal = Object.values(linkedNW||{}).reduce((s,v)=>s+(Number(v)||0),0);
+    const linkedEntityVal = Object.entries(linkedNW||{}).reduce((s,[name,nw])=>{
+      const entries = (d.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,ownership:"100"}:e);
+      const entry = entries.find(e=>e.name===name);
+      const pct = numVal((entry||{}).ownership||"100")||100;
+      return s + (Number(nw)||0)*(pct/100);
+    },0);
     const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
     const machVal = (d.machinery||[]).reduce((s,r)=>s+n(r.value),0);
     const totalCurrentAssets = n(d.cashGlacier)
@@ -6428,14 +6470,16 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       d.reMortgages||[], d.otherLiabilities||[]
     ].reduce((s,arr)=>s+arr.filter(r=>Object.values(r).some(v=>v&&String(v).trim())).length, 0);
 
-    const baseFontSize = totalRows < 15 ? 10.5 : totalRows < 25 ? 9.5 : totalRows < 35 ? 8.5 : totalRows < 45 ? 7.5 : 7;
-    const secFontSize = baseFontSize - 1;
-    const colHeadSize = baseFontSize + 0.5;
-    const rowMinHeight = baseFontSize + 4;
+    // Choose paper size based on content — legal for dense sheets, letter for sparse
+    const pageSize = totalRows < 30 ? 'letter' : 'legal';
+    const baseFontSize = 9;
+    const secFontSize = 8;
+    const colHeadSize = 9.5;
+    const rowMinHeight = 13;
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
-@page{size:legal portrait;margin:.4in .45in;}
+@page{size:${pageSize} portrait;margin:.4in .45in;}
 body{font-family:Arial,sans-serif;font-size:${baseFontSize}pt;color:#000;margin:0;}
 h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:4pt;}
 h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:8pt;}
@@ -6507,7 +6551,14 @@ ${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><
 <div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
 <div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
 ${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).length>0?`<div class="sec">Other Assets:</div>${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
-${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>`<div class="row"><span>${name}</span><span>${pFmt(nw)}</span></div>`).join("")}`:""}
+${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>{
+  const entries=(d.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,ownership:"100"}:e);
+  const entry=entries.find(e=>e.name===name)||{};
+  const pct=numVal(entry.ownership||"100")||100;
+  const owned=(Number(nw)||0)*(pct/100);
+  return `<div class="row"><span>${name}${pct<100?` <span style="font-size:6pt;color:#888">(${pct}% of ${pFmt(nw)})</span>`:''}` +
+    `</span><span>${pFmt(owned)}</span></div>`;
+}).join("")}`:""}
 <div class="tot"><span>TOTAL ASSETS</span><span>${pFmt(totalAssets)||"$0"}</span></div>
 </div>
 <div class="col">
@@ -7578,7 +7629,14 @@ table{width:100%;border-collapse:collapse;}
                       <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
                       <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
                         {entry.date ? `As of ${entry.date}` : "Latest available"}
-                        {linkedEntityNWMap[entry.name] !== undefined && ` — Net Worth: ${fmt(linkedEntityNWMap[entry.name])}`}
+                        {linkedEntityNWMap[entry.name] !== undefined && (() => {
+                          const nw = linkedEntityNWMap[entry.name];
+                          const pct = numVal(entry.ownership||"100")||100;
+                          const owned = nw * pct/100;
+                          return pct < 100
+                            ? ` — ${pct}% of ${fmt(nw)} = ${fmt(owned)}`
+                            : ` — Net Worth: ${fmt(nw)}`;
+                        })()}
                       </div>
                     </div>
                     <button
@@ -7600,8 +7658,7 @@ table{width:100%;border-collapse:collapse;}
                 <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                   <select
                     value={pendingEntityName}
-                    onChange={e=>{setPendingEntityName(e.target.value);setPendingEntityDate('');}}
-                    style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
+                    onChange={e=>{setPendingEntityName(e.target.value);setPendingEntityDate('');setPendingOwnership('100');}}                    style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
                     <option value="">+ Select entity to link...</option>
                     {availableEntities.map(name => (
                       <option key={name} value={name}>{name}</option>
@@ -7620,11 +7677,21 @@ table{width:100%;border-collapse:collapse;}
                     ) : null;
                   })()}
                   {pendingEntityName && pendingEntityDate && (
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:".8rem",color:"#555",whiteSpace:"nowrap"}}>% Owned:</span>
+                      <input type="text" value={pendingOwnership||"100"}
+                        onChange={e=>setPendingOwnership(e.target.value.replace(/[^0-9.]/g,""))}
+                        style={{width:64,border:"1.5px solid #c0d8f0",borderRadius:6,padding:"6px 8px",fontSize:".85rem",fontFamily:"inherit",textAlign:"center"}}/>
+                      <span style={{fontSize:".8rem",color:"#555"}}>%</span>
+                    </div>
+                  )}
+                  {pendingEntityName && pendingEntityDate && (
                     <button
                       onClick={()=>{
-                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate}]);
+                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate,ownership:pendingOwnership||"100"}]);
                         setPendingEntityName('');
                         setPendingEntityDate('');
+                        setPendingOwnership('100');
                       }}
                       style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontSize:".85rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                       Link
@@ -7774,6 +7841,7 @@ table{width:100%;border-collapse:collapse;}
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
+              <button onClick={()=>{setShowSharesPanel(true);loadSharesPanel();}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>📋 Shares</button>
               {profile?.role==="admin" && (
                 <button onClick={()=>setShowAdminScreen(true)} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",color:"white",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",fontWeight:600}}>⚙ Users</button>
               )}
@@ -8028,6 +8096,118 @@ table{width:100%;border-collapse:collapse;}
                     Cancel
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Shares Panel */}
+          {showSharesPanel && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",zIndex:1000}}>
+              <div style={{background:"white",width:"min(600px,95%)",height:"100vh",overflowY:"auto",boxShadow:"-4px 0 24px rgba(0,0,0,.15)",display:"flex",flexDirection:"column"}}>
+                <div style={{background:"#6B0E1E",color:"white",padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+                  <div style={{fontWeight:700,fontSize:16}}>📋 Shared Balance Sheets</div>
+                  <button onClick={()=>setShowSharesPanel(false)} style={{background:"none",border:"none",color:"white",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+                </div>
+
+                {sharesData.loading ? (
+                  <div style={{padding:40,textAlign:"center",color:"#888"}}>Loading shares...</div>
+                ) : (
+                  <div style={{flex:1,overflowY:"auto",padding:20}}>
+
+                    {/* CA Shares */}
+                    {sharesData.caShares.length > 0 && (
+                      <div style={{marginBottom:24}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#1d4ed8",borderBottom:"2px solid #bfdbfe",paddingBottom:6,marginBottom:12}}>
+                          Shared with Credit Analysts
+                        </div>
+                        {sharesData.caShares.map(s=>{
+                          const edits = s.ca_edits||[];
+                          const pending = edits.filter(e=>e.status==='pending').length;
+                          const accepted = edits.filter(e=>e.status==='accepted').length;
+                          return (
+                            <div key={s.id} style={{background:"#f0f6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                                <div>
+                                  <div style={{fontWeight:600,fontSize:13}}>{s.client_name}</div>
+                                  <div style={{fontSize:12,color:"#555",marginTop:2}}>
+                                    Shared with <strong>{s.caName}</strong> · {new Date(s.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                                  </div>
+                                </div>
+                                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                                  {pending > 0 && <span style={{background:"#fef3c7",color:"#92400e",borderRadius:999,padding:"2px 8px",fontSize:11,fontWeight:700}}>⏳ {pending} Pending</span>}
+                                  {accepted > 0 && <span style={{background:"#dcfce7",color:"#15803d",borderRadius:999,padding:"2px 8px",fontSize:11,fontWeight:700}}>✓ {accepted} Accepted</span>}
+                                  {!pending && !accepted && edits.length === 0 && <span style={{color:"#aaa",fontSize:11}}>No edits yet</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Customer BS Shares */}
+                    {sharesData.bsShares.length > 0 && (
+                      <div style={{marginBottom:24}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#2d5a8e",borderBottom:"2px solid #c0d8f0",paddingBottom:6,marginBottom:12}}>
+                          Balance Sheets Shared with Customers
+                        </div>
+                        {sharesData.bsShares.map(s=>(
+                          <div key={s.share_id} style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <div>
+                                <div style={{fontWeight:600,fontSize:13}}>{s.client_name}</div>
+                                <div style={{fontSize:12,color:"#555",marginTop:2}}>
+                                  {s.as_of_date&&`As of ${s.as_of_date} · `}Shared {new Date(s.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                                  {s.expires_at && ` · Expires ${new Date(s.expires_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}`}
+                                </div>
+                              </div>
+                              <span style={{
+                                background:s.status==='pending'?'#fef3c7':s.status==='saved'?'#dcfce7':'#f3f4f6',
+                                color:s.status==='pending'?'#92400e':s.status==='saved'?'#15803d':'#6b7280',
+                                borderRadius:999,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0
+                              }}>{s.status||'sent'}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Customer Budget Shares */}
+                    {sharesData.budgetShares.length > 0 && (
+                      <div style={{marginBottom:24}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#1B4332",borderBottom:"2px solid #bbf7d0",paddingBottom:6,marginBottom:12}}>
+                          Budgets Shared with Customers
+                        </div>
+                        {sharesData.budgetShares.map(s=>(
+                          <div key={s.share_id} style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <div>
+                                <div style={{fontWeight:600,fontSize:13}}>{s.client_name}</div>
+                                <div style={{fontSize:12,color:"#555",marginTop:2}}>
+                                  {s.as_of_date&&`As of ${s.as_of_date} · `}Shared {new Date(s.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                                  {s.expires_at && ` · Expires ${new Date(s.expires_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}`}
+                                </div>
+                              </div>
+                              <span style={{
+                                background:s.status==='pending'?'#fef3c7':s.status==='saved'?'#dcfce7':'#f3f4f6',
+                                color:s.status==='pending'?'#92400e':s.status==='saved'?'#15803d':'#6b7280',
+                                borderRadius:999,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0
+                              }}>{s.status||'sent'}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {sharesData.caShares.length===0 && sharesData.bsShares.length===0 && sharesData.budgetShares.length===0 && (
+                      <div style={{textAlign:"center",padding:60,color:"#888"}}>
+                        <div style={{fontSize:40,marginBottom:12}}>📤</div>
+                        <div style={{fontWeight:600,marginBottom:8}}>No shares yet</div>
+                        <div style={{fontSize:13}}>Balance sheets shared with CAs or customers will appear here.</div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
