@@ -3628,14 +3628,22 @@ function makeKey(clientName, asOfDate) {
 // into an undefined scope. Referenced by InspectionView and CustomerInspectForm.
 
 const STORAGE_PREFIX = "fbmt_bs:";
+// Scopes storage.list()/get() to a specific lender's records. Without this,
+// balance_sheets reads carried no user_id filter and could return ANY
+// lender's/customer's saved sheet in the whole table whose client_name
+// happened to match — e.g. a "linked entity" name lookup during CA package
+// printing could pull in a different customer's submission entirely.
+let ACTIVE_OWNER_ID = null;
 const FBMT_LOGO = "data:image/jpeg;base64,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";
 
 const storage = {
+  setOwner(id) { ACTIVE_OWNER_ID = id || null; },
   async list(prefix) {
     if (!isConfigured()) return { keys: [] };
     const clientPart = prefix.replace('fbmt_bs:', '').replace(/:$/, '').replace(/_/g, ' ');
     let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
+    if (ACTIVE_OWNER_ID) url += '&user_id=eq.' + encodeURIComponent(ACTIVE_OWNER_ID);
     const resp = await fetch(url, { headers: supaHeaders() });
     if (!resp.ok) {
       const err = await resp.text();
@@ -3648,8 +3656,9 @@ const storage = {
   async get(key) {
     if (!isConfigured()) return null;
     const { clientName, asOfDate } = parseKey(key);
-    const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
       + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + '&limit=1';
+    if (ACTIVE_OWNER_ID) url += '&user_id=eq.' + encodeURIComponent(ACTIVE_OWNER_ID);
     const resp = await fetch(url, { headers: supaHeaders() });
     if (!resp.ok) return null;
     const rows = await resp.json();
@@ -4704,6 +4713,7 @@ export default function BalanceSheet() {
 
   useEffect(() => {
     if (!session?.access_token) {
+      storage.setOwner(null);
       setUserFolders([]);
       setSavedSheets([]);
       setPendingReviews([]);
@@ -4711,6 +4721,7 @@ export default function BalanceSheet() {
       setProfileLoading(true);
       return;
     }
+    storage.setOwner(session?.user?.id || null);
     // Run everything in try/catch so nothing can silently kill it
     try {
       supaGetProfile().then(p => { setProfile(p); setProfileLoading(false); }).catch(() => { setProfileLoading(false); });
@@ -7786,7 +7797,7 @@ table{width:100%;border-collapse:collapse;}
                 }}>
                   {saveStatus==='saving'?'Submitting...':saveStatus==='saved'?'✓ Submitted to Lender':saveStatus==='error'?'Error — try again':'Submit Changes to Lender'}
                 </button>
-                <button className="btn btn-secondary" onClick={()=>{setCaOpenShare(null);setData(emptyData());}}>← Back to Portal</button>
+                <button className="btn btn-secondary" onClick={()=>{storage.setOwner(session?.user?.id || null);setCaOpenShare(null);setData(emptyData());}}>← Back to Portal</button>
               </>
             ) : (
               <>
@@ -7873,6 +7884,7 @@ table{width:100%;border-collapse:collapse;}
     if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
       onOpen={(share) => {
         const sheetData = share.sheet_data || {};
+        storage.setOwner(share.lender_user_id || null);
         setData({...emptyData(), ...sheetData});
         setCaOpenShare(share);
         setScreen('wizard');
@@ -8530,7 +8542,7 @@ table{width:100%;border-collapse:collapse;}
       {caOpenShare && (
         <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13}}>
           <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Changes will be submitted to lender for review</span>
-          <button onClick={()=>{setCaOpenShare(null);setData(emptyData());}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'3px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>← Back to Portal</button>
+          <button onClick={()=>{storage.setOwner(session?.user?.id || null);setCaOpenShare(null);setData(emptyData());}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'3px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>← Back to Portal</button>
         </div>
       )}
       {showSplitter && <BSSplitter
