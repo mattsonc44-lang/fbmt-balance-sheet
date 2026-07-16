@@ -6108,16 +6108,24 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     try {
       const item = await storage.get(sheetKey);
       const sheetData = item ? JSON.parse(item.value) : {};
-      // Merge current budget data from state into the snapshot
-      const fullData = {
-        ...sheetData,
-        budgetCrops: data.budgetCrops,
-        budgetLivestock: data.budgetLivestock,
-        budgetMisc: data.budgetMisc,
-        budgetExpenses: data.budgetExpenses,
-        budgetInsuranceEnabled: data.budgetInsuranceEnabled,
-        budgetProposedDebt: data.budgetProposedDebt,
-      };
+      // Only pull budget fields from live `data` state when the sheet being
+      // shared is the one currently open in the editor — otherwise `data`
+      // may belong to a different customer (e.g. a submission you just
+      // reviewed) and would bleed into this share. Use the saved sheet's
+      // own budget snapshot in every other case.
+      const isCurrentlyOpenSheet = data.clientName && sheetData.clientName === data.clientName
+        && data.asOfDate === sheetData.asOfDate;
+      const fullData = isCurrentlyOpenSheet
+        ? {
+            ...sheetData,
+            budgetCrops: data.budgetCrops,
+            budgetLivestock: data.budgetLivestock,
+            budgetMisc: data.budgetMisc,
+            budgetExpenses: data.budgetExpenses,
+            budgetInsuranceEnabled: data.budgetInsuranceEnabled,
+            budgetProposedDebt: data.budgetProposedDebt,
+          }
+        : sheetData;
       const sheet = savedSheets.find(s=>s.key===sheetKey);
       await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
         method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
