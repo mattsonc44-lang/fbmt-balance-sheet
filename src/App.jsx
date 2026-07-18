@@ -2885,16 +2885,22 @@ function CustomerBalanceSheetForm({shareId}) {
       if (!Array.isArray(rows) || !rows.length) { setPinErr('Link not found or expired. (share_id: '+shareId+')'); return; }
       const row = rows[0];
       if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
-      if(row.status==='reviewed'){setStage('reviewed');return;}
+      const loadRowData = (r) => {
+        setShareRow(r);
+        const d = r.customer_draft || r.original_data || {};
+        setData({...d});
+        const bd = (r.customer_draft||r.original_data||{}).budgetData || {};
+        if(bd.budgetCrops?.length) setBudgetCrops(bd.budgetCrops);
+        if(bd.budgetLivestock?.length) setBudgetLivestock(bd.budgetLivestock);
+        if(bd.budgetMisc?.length) setBudgetMisc(bd.budgetMisc);
+        if(bd.budgetExpenses?.length) setBudgetExpenses(bd.budgetExpenses);
+      };
+      if(row.status==='reviewed'){
+        if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN. Please check your email.');return;}
+        loadRowData(row);setStage('reviewed');return;
+      }
       if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN. Please check your email.');return;}
-      setShareRow(row);
-      const d = row.customer_draft || row.original_data || {};
-      setData({...d});
-      const bd = (row.customer_draft||row.original_data||{}).budgetData || {};
-      if(bd.budgetCrops?.length) setBudgetCrops(bd.budgetCrops);
-      if(bd.budgetLivestock?.length) setBudgetLivestock(bd.budgetLivestock);
-      if(bd.budgetMisc?.length) setBudgetMisc(bd.budgetMisc);
-      if(bd.budgetExpenses?.length) setBudgetExpenses(bd.budgetExpenses);
+      loadRowData(row);
       setStage('form');
     } catch(e){setPinErr('Connection error: '+e.message);}
   };
@@ -2941,13 +2947,12 @@ function CustomerBalanceSheetForm({shareId}) {
     } catch(e){alert('Submit failed: '+e.message);}
     setSubmitting(false);
   };
+  // done and reviewed stages both render the read-only summary below (see renderSummary)
 
   const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
   const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
 
   if(stage==='expired') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>⏰</div><div style={{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}}>Link Expired</div><p style={{color:'#6b7280',fontSize:14}}>This balance sheet link has expired. Please contact your lender for a new link.</p></div></div>;
-  if(stage==='reviewed') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>✅</div><div style={{fontWeight:700,fontSize:18,color:'#15803d',marginBottom:8}}>Already Submitted</div><p style={{color:'#6b7280',fontSize:14}}>Your balance sheet has been received and reviewed by your lender. Thank you!</p></div></div>;
-  if(stage==='done') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:56,marginBottom:12}}>✅</div><div style={{fontWeight:800,fontSize:22,color:'#15803d',marginBottom:8}}>Balance Sheet Submitted!</div><p style={{color:'#6b7280',fontSize:14,lineHeight:1.6}}>Your balance sheet has been sent to First Bank of Montana for review. Your lender will be in touch.</p></div></div>;
 
   if(stage==='pin') return (
     <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
@@ -2995,6 +3000,186 @@ function CustomerBalanceSheetForm({shareId}) {
   const remBtn=(k,i)=><button type="button" onClick={()=>remRow(k,i)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer',fontSize:14,flexShrink:0}}>×</button>;
   const addBtn=(k,tpl,label)=><button type="button" onClick={()=>addRow(k,tpl)} style={{marginTop:6,background:'#f5e8ea',color:'#6B0E1E',border:'1.5px dashed #6B0E1E',borderRadius:5,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}}>+ {label}</button>;
   const lbl=(text)=><div style={{fontSize:11,fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:3}}>{text}</div>;
+
+  // ── Read-only confirmation summary — used for the just-submitted and
+  // already-reviewed stages so the customer always has a copy of what
+  // they told the bank, without exposing the editable form again.
+  const ROSec = ({title,children}) => (
+    <div style={{marginBottom:16}}>
+      <div style={{fontSize:11,fontWeight:700,color:'#6B0E1E',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>{title}</div>
+      {children}
+    </div>
+  );
+  const ROLine = ({label,value}) => (
+    <div style={{display:'flex',justifyContent:'space-between',gap:10,padding:'3px 2px',fontSize:13.5,color:'#374151'}}>
+      <span>{label}</span><span style={{fontWeight:600,whiteSpace:'nowrap'}}>{value}</span>
+    </div>
+  );
+  const ROSubtotal = ({label,value}) => (
+    <div style={{display:'flex',justifyContent:'space-between',padding:'6px 2px 0',marginTop:4,borderTop:'1px dashed #ddd',fontSize:12.5,fontWeight:700,color:'#6B0E1E'}}>
+      <span>{label}</span><span>{value}</span>
+    </div>
+  );
+  const bCropTotRO = budgetCrops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
+  const bLsTotRO = budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+  const bMiscTotRO = budgetMisc.reduce((s,r)=>s+n(r.amount),0);
+  const bIncomeTotRO = bCropTotRO+bLsTotRO+bMiscTotRO;
+  const bExpTotRO = budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
+  const bNetRO = bIncomeTotRO-bExpTotRO;
+
+  const renderSummary = (justSubmitted) => (
+    <div style={pageStyle}>
+      <style>{`@media print{.fbmt-no-print{display:none !important}.fbmt-print-only{display:block !important}body{background:white !important}}`}</style>
+      <div className="fbmt-no-print" style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:20}}>🏦</span>
+          <div>
+            <div style={{color:'white',fontWeight:700,fontSize:15}}>First Bank of Montana</div>
+            <div style={{color:'rgba(255,255,255,.6)',fontSize:11}}>{shareRow?.client_name||''} — Balance Sheet{budgetIncluded?' & Budget':''}</div>
+          </div>
+        </div>
+        <button onClick={()=>window.print()} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🖨️ Print / Save PDF</button>
+      </div>
+      <div className="fbmt-print-only" style={{display:'none',padding:'10px 0',textAlign:'center',fontWeight:700,fontSize:16,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',marginBottom:14}}>
+        First Bank of Montana — {shareRow?.client_name||''} — Balance Sheet{budgetIncluded?' & Budget':''}
+      </div>
+      <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 60px'}}>
+        {justSubmitted ? (
+          <div style={{background:'#e8f5ea',border:'1px solid #bbf7d0',borderRadius:10,padding:18,marginBottom:20,textAlign:'center'}}>
+            <div style={{fontSize:40,marginBottom:6}}>✅</div>
+            <div style={{fontWeight:800,fontSize:18,color:'#15803d'}}>{budgetIncluded?'Balance Sheet & Budget Submitted!':'Balance Sheet Submitted!'}</div>
+            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Sent to First Bank of Montana for review. Below is a read-only copy of what you submitted, for your records.</div>
+          </div>
+        ) : (
+          <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:14,marginBottom:20}}>
+            <div style={{fontWeight:700,color:'#2d5a8e',fontSize:14}}>✅ Already Submitted</div>
+            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Your lender has received and reviewed this. Below is a read-only copy of what was submitted.</div>
+          </div>
+
+        )}
+
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:16}}>
+          <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:13,padding:'6px 12px',borderRadius:6,letterSpacing:.5,textTransform:'uppercase',marginBottom:14}}>Assets</div>
+
+          <ROSec title="Cash & Bank Accounts">
+            <ROLine label="Glacier Bank / FBMT Balance" value={fmt(n(data.cashGlacier))}/>
+            {(data.cashOther||[]).map((r,i)=><ROLine key={i} label={r.institution||'—'} value={fmt(n(r.amount))}/>)}
+            <ROSubtotal label="Total Cash" value={fmt(cashTot)}/>
+          </ROSec>
+
+          {(data.farmProducts||[]).length>0 && <ROSec title="Farm Products on Hand">
+            {data.farmProducts.map((r,i)=><ROLine key={i} label={`${r.kind||'—'} — ${r.quantity||0} ${r.unit||'bu'} @ ${fmt(n(r.pricePerUnit))}`} value={fmt(n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100))}/>)}
+            <ROSubtotal label="Total" value={fmt(farmProdTot)}/>
+          </ROSec>}
+
+          {(data.livestockMarket||[]).length>0 && <ROSec title="Market Livestock">
+            {data.livestockMarket.map((r,i)=><ROLine key={i} label={`${r.number||0} head — ${r.kind||'—'}`} value={fmt(n(r.value))}/>)}
+            <ROSubtotal label="Total" value={fmt(lsMktTot)}/>
+          </ROSec>}
+
+          {(data.cropInvestment||[]).length>0 && <ROSec title="Growing Crops (Input Costs)">
+            {data.cropInvestment.map((r,i)=><ROLine key={i} label={`${r.cropType||'—'} — ${r.acres||0} ac @ ${fmt(n(r.valuePerAcre))}/ac`} value={fmt(n(r.acres)*n(r.valuePerAcre))}/>)}
+            <ROSubtotal label="Total" value={fmt(cropInvTot)}/>
+          </ROSec>}
+
+          {(data.breedingStock||[]).length>0 && <ROSec title="Breeding Stock">
+            {data.breedingStock.map((r,i)=><ROLine key={i} label={`${r.number||0} head — ${r.kind||'—'}`} value={fmt(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value))}/>)}
+            <ROSubtotal label="Total" value={fmt(breedTot)}/>
+          </ROSec>}
+
+          {(data.realEstate||[]).length>0 && <ROSec title="Real Estate">
+            {data.realEstate.map((r,i)=><ROLine key={i} label={`${r.acres||0} ac — ${r.description||r.reType||'—'} @ ${fmt(n(r.valuePerAcre))}/ac`} value={fmt(n(r.acres)*n(r.valuePerAcre))}/>)}
+            <ROSubtotal label="Total" value={fmt(reTot)}/>
+          </ROSec>}
+
+          {(data.vehicles||[]).length>0 && <ROSec title="Titled Vehicles">
+            {data.vehicles.map((r,i)=><ROLine key={i} label={`${r.year||''} ${r.make||'—'}`} value={fmt(n(r.value))}/>)}
+            <ROSubtotal label="Total" value={fmt(vehTot)}/>
+          </ROSec>}
+
+          {(data.machinery||[]).length>0 && <ROSec title="Machinery & Equipment">
+            {data.machinery.map((r,i)=><ROLine key={i} label={`${r.year||''} ${r.make||'—'}`} value={fmt(n(r.value))}/>)}
+            <ROSubtotal label="Total" value={fmt(machTot)}/>
+          </ROSec>}
+
+          {(data.otherAssets||[]).length>0 && <ROSec title="Other Assets">
+            {data.otherAssets.map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
+            <ROSubtotal label="Total" value={fmt(otherATot)}/>
+          </ROSec>}
+
+          <div style={{background:'#1a5c25',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,display:'flex',justifyContent:'space-between'}}>
+            <span>TOTAL ASSETS</span><span>{fmt(totalAssets)}</span>
+          </div>
+        </div>
+
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:16}}>
+          <div style={{background:'#4a0810',color:'white',fontWeight:700,fontSize:13,padding:'6px 12px',borderRadius:6,letterSpacing:.5,textTransform:'uppercase',marginBottom:14}}>Liabilities</div>
+
+          {(data.operatingNotes||[]).length>0 && <ROSec title="Operating Notes & Lines of Credit">
+            {data.operatingNotes.map((r,i)=><ROLine key={i} label={r.creditor||'—'} value={fmt(n(r.balance))}/>)}
+            <ROSubtotal label="Total" value={fmt(opNotesTot)}/>
+          </ROSec>}
+
+          {(data.intermediatDebt||[]).length>0 && <ROSec title="Term Debt / Equipment Loans">
+            {data.intermediatDebt.map((r,i)=><ROLine key={i} label={`${r.creditor||'—'}${r.security?' ('+r.security+')':''} — bal ${fmt(n(r.principal))}`} value={fmt(n(r.annualPmt))+'/yr'}/>)}
+            <ROSubtotal label="Annual Payments" value={fmt(termTot)}/>
+          </ROSec>}
+
+          {(data.reMortgages||[]).length>0 && <ROSec title="Real Estate Mortgages">
+            {data.reMortgages.map((r,i)=><ROLine key={i} label={r.lienHolder||'—'} value={fmt(n(r.principal))}/>)}
+            <ROSubtotal label="Total" value={fmt(reMortTot)}/>
+          </ROSec>}
+
+          <ROSec title="Taxes Due & Other Liabilities">
+            {taxTot>0 && <ROLine label="Income Taxes Due" value={fmt(taxTot)}/>}
+            {(data.otherLiabilities||[]).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.balance))}/>)}
+          </ROSec>
+
+          <div style={{background:'#7a1a1a',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,display:'flex',justifyContent:'space-between'}}>
+            <span>TOTAL LIABILITIES</span><span>{fmt(totalLiab)}</span>
+          </div>
+        </div>
+
+        <div style={{background:netWorth>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginBottom:24,display:'flex',justifyContent:'space-between',fontSize:16}}>
+          <span>NET WORTH</span><span>{fmt(netWorth)}</span>
+        </div>
+
+        {budgetIncluded && (
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:24}}>
+            <div style={{background:'#1a5c25',color:'white',fontWeight:700,fontSize:13,padding:'6px 12px',borderRadius:6,letterSpacing:.5,textTransform:'uppercase',marginBottom:14}}>🌾 Budget</div>
+
+            {budgetCrops.filter(r=>r.crop||r.acres).length>0 && <ROSec title="Crop Income">
+              {budgetCrops.filter(r=>r.crop||r.acres).map((r,i)=><ROLine key={i} label={`${r.crop||'—'} — ${r.acres||0} ${r.unit||'bu'} @ ${fmt(n(r.price))}, ${r.share||100}% share`} value={fmt(n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100))}/>)}
+            </ROSec>}
+
+            {budgetLivestock.filter(r=>r.type||r.head).length>0 && <ROSec title="Livestock Income">
+              {budgetLivestock.filter(r=>r.type||r.head).map((r,i)=><ROLine key={i} label={`${r.head||0} hd — ${r.type||'—'} @ ${r.lbs||0} lbs, ${fmt(n(r.price))}/lb`} value={fmt(n(r.head)*n(r.lbs)*n(r.price))}/>)}
+            </ROSec>}
+
+            {budgetMisc.filter(r=>r.description||r.amount).length>0 && <ROSec title="Miscellaneous Income">
+              {budgetMisc.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
+            </ROSec>}
+
+            <ROSubtotal label="Total Income" value={fmt(bIncomeTotRO)}/>
+
+            {budgetExpenses.filter(r=>r.description||r.amount).length>0 && <ROSec title="Expenses">
+              {budgetExpenses.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
+              <ROSubtotal label="Total Expenses" value={fmt(bExpTotRO)}/>
+            </ROSec>}
+
+            <div style={{background:bNetRO>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginTop:10,display:'flex',justifyContent:'space-between',fontSize:15}}>
+              <span>{bNetRO>=0?'PROJECTED NET INCOME':'PROJECTED NET LOSS'}</span><span>{fmt(Math.abs(bNetRO))}</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{textAlign:'center',fontSize:11,color:'#9ca3af'}}>First Bank of Montana · This is a read-only copy for your records</div>
+      </div>
+    </div>
+  );
+
+  if(stage==='reviewed') return renderSummary(false);
+  if(stage==='done') return renderSummary(true);
 
   return (
     <div style={pageStyle}>
@@ -3296,7 +3481,6 @@ function CustomerBudgetForm({shareId}) {
       if(!rows.length){setPinErr('Link not found or expired.');return;}
       const row=rows[0];
       if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
-      if(row.status==='reviewed'){setStage('reviewed');return;}
       if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN.');return;}
       setShareRow(row);setClientName(row.client_name||'');
       if(row.customer_draft){
@@ -3306,7 +3490,7 @@ function CustomerBudgetForm({shareId}) {
         if(d.budgetMisc)setMisc(d.budgetMisc);
         if(d.budgetExpenses)setExpenses(d.budgetExpenses);
       }
-      setStage('form');
+      setStage(row.status==='reviewed'?'reviewed':'form');
     }catch(e){setPinErr('Connection error: '+e.message);}
   };
 
@@ -3336,13 +3520,6 @@ function CustomerBudgetForm({shareId}) {
   };
   const remExp=(i)=>{const ne=expenses.filter((_,j)=>j!==i);setExpenses(ne);schedSave(crops,livestock,misc,ne);};
 
-  const cropTot=crops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
-  const lsTot=livestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
-  const miscTot=misc.reduce((s,r)=>s+n(r.amount),0);
-  const totalIncome=cropTot+lsTot+miscTot;
-  const totalExpenses=expenses.reduce((s,r)=>s+n(r.amount),0);
-  const net=totalIncome-totalExpenses;
-
   const submit=async()=>{
     setSubmitting(true);
     try{
@@ -3356,9 +3533,14 @@ function CustomerBudgetForm({shareId}) {
   const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
   const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
 
+  const cropTot=crops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
+  const lsTot=livestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+  const miscTot=misc.reduce((s,r)=>s+n(r.amount),0);
+  const totalIncome=cropTot+lsTot+miscTot;
+  const totalExpenses=expenses.reduce((s,r)=>s+n(r.amount),0);
+  const net=totalIncome-totalExpenses;
+
   if(stage==='expired')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>⏰</div><div style={{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}}>Link Expired</div><p style={{color:'#6b7280',fontSize:14}}>This budget link has expired. Please contact your lender.</p></div></div>;
-  if(stage==='reviewed')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>✅</div><div style={{fontWeight:700,fontSize:18,color:'#15803d',marginBottom:8}}>Already Submitted</div><p style={{color:'#6b7280',fontSize:14}}>Your budget has been received. Thank you!</p></div></div>;
-  if(stage==='done')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:56,marginBottom:12}}>✅</div><div style={{fontWeight:800,fontSize:22,color:'#15803d',marginBottom:8}}>Budget Submitted!</div><p style={{color:'#6b7280',fontSize:14,lineHeight:1.6}}>Your budget has been sent to First Bank of Montana.</p></div></div>;
 
   if(stage==='pin')return(
     <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
@@ -3376,6 +3558,76 @@ function CustomerBudgetForm({shareId}) {
       </div>
     </div>
   );
+
+  // ── Read-only confirmation summary — used for the just-submitted and
+  // already-reviewed stages so the customer keeps a copy of what they sent.
+  const ROLine = ({label,value}) => (
+    <div style={{display:'flex',justifyContent:'space-between',gap:10,padding:'3px 2px',fontSize:13.5,color:'#374151'}}>
+      <span>{label}</span><span style={{fontWeight:600,whiteSpace:'nowrap'}}>{value}</span>
+    </div>
+  );
+  const renderSummary = (justSubmitted) => (
+    <div style={pageStyle}>
+      <style>{`@media print{.fbmt-no-print{display:none !important}.fbmt-print-only{display:block !important}body{background:white !important}}`}</style>
+      <div className="fbmt-no-print" style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:20}}>🌾</span>
+          <div><div style={{color:'white',fontWeight:700,fontSize:15}}>First Bank of Montana</div><div style={{color:'rgba(255,255,255,.6)',fontSize:11}}>{clientName} — Budget</div></div>
+        </div>
+        <button onClick={()=>window.print()} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🖨️ Print / Save PDF</button>
+      </div>
+      <div className="fbmt-print-only" style={{display:'none',padding:'10px 0',textAlign:'center',fontWeight:700,fontSize:16,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',marginBottom:14}}>
+        First Bank of Montana — {clientName} — Budget
+      </div>
+      <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 60px'}}>
+        {justSubmitted ? (
+          <div style={{background:'#e8f5ea',border:'1px solid #bbf7d0',borderRadius:10,padding:18,marginBottom:20,textAlign:'center'}}>
+            <div style={{fontSize:40,marginBottom:6}}>✅</div>
+            <div style={{fontWeight:800,fontSize:18,color:'#15803d'}}>Budget Submitted!</div>
+            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Sent to First Bank of Montana. Below is a read-only copy of what you submitted, for your records.</div>
+          </div>
+        ) : (
+          <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:14,marginBottom:20}}>
+            <div style={{fontWeight:700,color:'#2d5a8e',fontSize:14}}>✅ Already Submitted</div>
+            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Your lender has received this. Below is a read-only copy of what was submitted.</div>
+          </div>
+        )}
+
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
+          {[['Total Income',totalIncome,'#1a5c25'],['Total Expenses',totalExpenses,'#7a1a1a'],[net>=0?'Net Income':'Net Loss',Math.abs(net),net>=0?'#1a5c25':'#7a1a1a']].map(([l,v,c])=>(
+            <div key={l} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
+              <div style={{fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:4}}>{l}</div>
+              <div style={{fontSize:16,fontWeight:700,color:c}}>{fmt(v)}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:16}}>
+          {crops.filter(r=>r.crop||r.acres).length>0 && <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#1a5c25',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Crop Income</div>
+            {crops.filter(r=>r.crop||r.acres).map((r,i)=><ROLine key={i} label={`${r.crop||'—'} — ${r.acres||0} ${r.unit||'bu'} @ ${fmt(n(r.price))}, ${r.share||100}% share`} value={fmt(n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100))}/>)}
+          </div>}
+          {livestock.filter(r=>r.type||r.head).length>0 && <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#1a5c25',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Livestock Income</div>
+            {livestock.filter(r=>r.type||r.head).map((r,i)=><ROLine key={i} label={`${r.head||0} hd — ${r.type||'—'} @ ${r.lbs||0} lbs, ${fmt(n(r.price))}/lb`} value={fmt(n(r.head)*n(r.lbs)*n(r.price))}/>)}
+          </div>}
+          {misc.filter(r=>r.description||r.amount).length>0 && <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#1a5c25',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Miscellaneous Income</div>
+            {misc.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
+          </div>}
+          {expenses.filter(r=>r.description||r.amount).length>0 && <div>
+            <div style={{fontSize:11,fontWeight:700,color:'#7a1a1a',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Expenses</div>
+            {expenses.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
+          </div>}
+        </div>
+
+        <div style={{textAlign:'center',fontSize:11,color:'#9ca3af'}}>First Bank of Montana · This is a read-only copy for your records</div>
+      </div>
+    </div>
+  );
+
+  if(stage==='reviewed') return renderSummary(false);
+  if(stage==='done') return renderSummary(true);
 
   const inpStyle={border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'};
   const secHead=(color,title)=><div style={{background:color,color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase',marginBottom:0}}>{title}</div>;
