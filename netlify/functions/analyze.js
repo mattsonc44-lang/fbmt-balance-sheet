@@ -1,4 +1,4 @@
-const https = require('https');
+import https from 'https';
 
 function callAnthropic(apiKey, body) {
   return new Promise((resolve, reject) => {
@@ -31,7 +31,7 @@ function callAnthropic(apiKey, body) {
   });
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
