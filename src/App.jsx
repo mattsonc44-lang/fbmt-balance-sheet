@@ -1131,8 +1131,6 @@ function ComparisonView({
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
-  const [sbLeft, setSbLeft] = React.useState('');
-  const [sbRight, setSbRight] = React.useState('');
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
   const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
 
@@ -1201,193 +1199,6 @@ function ComparisonView({
     if (absPct >= 20) return { background: '#fee2e2', color: '#991b1b', fontWeight: 700 };
     if (absPct >= 10) return { background: '#fef3c7', color: '#92400e' };
     return {};
-  };
-
-  const SECTION_BREAKS_LIST = [
-    'Total Current Assets','TOTAL ASSETS','Total Current Liab','TOTAL LIABILITIES','WORKING CAPITAL','NET WORTH'
-  ];
-  const SECTION_HEADS = {
-    'Cash & Bank': 'CURRENT ASSETS',
-    'Breeding Stock': 'LONG-TERM ASSETS',
-    'Operating Notes': 'CURRENT LIABILITIES',
-    'Intermediate Debt (LT)': 'LONG-TERM LIABILITIES',
-    'WORKING CAPITAL': 'SUMMARY'
-  };
-
-  const handlePrintDetailComparison = (leftSheet, rightSheet) => {
-    const W = window.open("","_blank","width=1050,height=1100");
-    if (!W) return;
-    const L = leftSheet.raw || {};
-    const R = rightSheet.raw || {};
-    const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-    const f = v => v ? '$'+Math.round(v).toLocaleString() : '—';
-    const fv = v => n(v) ? '$'+Math.round(n(v)).toLocaleString() : '—';
-    const merge = (la, ra, keyFn) => {
-      const all = []; const used = new Set();
-      (la||[]).forEach(li => {
-        const k = keyFn(li).toLowerCase().trim();
-        const ri = (ra||[]).find(r => keyFn(r).toLowerCase().trim() === k);
-        all.push({left: li, right: ri || null});
-        if (ri) used.add(keyFn(ri));
-      });
-      (ra||[]).forEach(ri => { if (!used.has(keyFn(ri))) all.push({left: null, right: ri}); });
-      return all.filter(p => p.left || p.right);
-    };
-    const row = (label, lv, rv, indent=0, bold=false) => {
-      const lNum = typeof lv === 'number' ? lv : n(lv);
-      const rNum = typeof rv === 'number' ? rv : n(rv);
-      const chg = rNum - lNum;
-      const chgColor = chg>0?'#15803d':chg<0?'#dc2626':'#999';
-      const bg = bold ? '#f0f0f0' : '';
-      const fw = bold ? '700' : '400';
-      const border = bold ? '1pt solid #999' : '.5pt dotted #e5e5e5';
-      return '<tr style="background:'+bg+'">'
-        +'<td style="padding:2.5pt '+(8+indent*12)+'pt 2.5pt '+(8+indent*12)+'pt;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+label+'</td>'
-        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+(lNum?'$'+Math.round(lNum).toLocaleString():'—')+'</td>'
-        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';border-bottom:'+border+'">'+(rNum?'$'+Math.round(rNum).toLocaleString():'—')+'</td>'
-        +'<td style="padding:2.5pt 8pt;text-align:right;font-size:7.5pt;font-weight:'+fw+';color:'+((lNum||rNum)?chgColor:'#ccc')+';border-bottom:'+border+'">'
-        +((lNum||rNum)?((chg>=0?'+':'')+( chg!==0?'$'+Math.round(Math.abs(chg)).toLocaleString():'—')):'—')+'</td></tr>';
-    };
-    const secHead = t => '<tr><td colspan="4" style="background:#6B0E1E;color:white;font-weight:700;padding:5pt 10pt;font-size:8.5pt;letter-spacing:.8px">'+t+'</td></tr>';
-    const subHead = t => '<tr><td colspan="4" style="background:#374151;color:white;font-weight:600;padding:3pt 10pt;font-size:7.5pt">'+t+'</td></tr>';
-    const totRow = (l,lv,rv) => row(l,lv,rv,0,true);
-    let body = '';
-    // CURRENT ASSETS
-    body += secHead('CURRENT ASSETS');
-    body += subHead('Cash & Deposits');
-    body += row('Glacier Bank', n(L.cashGlacier), n(R.cashGlacier), 1);
-    merge(L.cashOther,R.cashOther,r=>r.bank||r.description||'other').forEach(({left:l,right:r})=>
-      body+=row((l||r).bank||'Other Bank',n((l||{}).amount),n((r||{}).amount),1));
-    if((L.receivables||[]).length||(R.receivables||[]).length){body+=subHead('Receivables');
-      merge(L.receivables,R.receivables,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
-    if((L.federalPayments||[]).length||(R.federalPayments||[]).length){body+=subHead('Federal Payments');
-      merge(L.federalPayments,R.federalPayments,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
-    if((L.livestockMarket||[]).length||(R.livestockMarket||[]).length){body+=subHead('Market Livestock');
-      merge(L.livestockMarket,R.livestockMarket,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row((l||r).kind,n((l||{}).value),n((r||{}).value),1));}
-    if((L.farmProducts||[]).length||(R.farmProducts||[]).length){body+=subHead('Farm Products / Grain');
-      merge(L.farmProducts,R.farmProducts,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row((l||r).kind,n((l||{}).quantity)*n((l||{}).pricePerUnit)*(n((l||{}).share||100)/100),n((r||{}).quantity)*n((r||{}).pricePerUnit)*(n((r||{}).share||100)/100),1));}
-    if((L.cropInvestment||[]).length||(R.cropInvestment||[]).length){body+=subHead('Growing Crops');
-      merge(L.cropInvestment,R.cropInvestment,r=>r.cropType||'').forEach(({left:l,right:r})=>body+=row((l||r).cropType,n((l||{}).acres)*n((l||{}).valuePerAcre),n((r||{}).acres)*n((r||{}).valuePerAcre),1));}
-    if((L.supplies||[]).length||(R.supplies||[]).length){body+=subHead('Supplies & Prepaid');
-      merge(L.supplies,R.supplies,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).value),n((r||{}).value),1));}
-    if((L.otherCurrent||[]).length||(R.otherCurrent||[]).length){body+=subHead('Other Current Assets');
-      merge(L.otherCurrent,R.otherCurrent,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
-    const ltc=d=>n(d.cashGlacier)+(d.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)+(d.receivables||[]).reduce((s,r)=>s+n(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0)+(d.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0)+(d.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0)+(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
-    body+=totRow('TOTAL CURRENT ASSETS',ltc(L),ltc(R));
-    // LONG-TERM ASSETS
-    body+=secHead('LONG-TERM ASSETS');
-    if((L.breedingStock||[]).length||(R.breedingStock||[]).length){body+=subHead('Breeding Stock');
-      merge(L.breedingStock,R.breedingStock,r=>r.kind||'').forEach(({left:l,right:r})=>body+=row([(l||r).number,(l||r).kind].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
-    if((L.realEstate||[]).length||(R.realEstate||[]).length){body+=subHead('Real Estate');
-      merge(L.realEstate,R.realEstate,r=>r.description||r.legal||'').forEach(({left:l,right:r})=>body+=row(((l||r).description||(l||r).legal||'Parcel')+((l||r).acres?' ('+( l||r).acres+' ac)':''),n((l||{}).acres)*n((l||{}).valuePerAcre),n((r||{}).acres)*n((r||{}).valuePerAcre),1));}
-    if((L.vehicles||[]).length||(R.vehicles||[]).length){body+=subHead('Titled Vehicles');
-      merge(L.vehicles,R.vehicles,r=>((r.year||'')+' '+(r.make||'')).trim()||'vehicle').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
-    if((L.machinery||[]).length||(R.machinery||[]).length){body+=subHead('Machinery & Equipment');
-      merge(L.machinery,R.machinery,r=>((r.year||'')+' '+(r.make||'')+' '+(r.size||'')).trim()||'equip').forEach(({left:l,right:r})=>body+=row([(l||r).year,(l||r).make,(l||r).size].filter(Boolean).join(' '),n((l||{}).value),n((r||{}).value),1));}
-    if((L.otherAssets||[]).length||(R.otherAssets||[]).length){body+=subHead('Other Assets');
-      merge(L.otherAssets,R.otherAssets,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).amount),n((r||{}).amount),1));}
-    const lta=d=>(d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value)),0)+(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)+(d.vehicles||[]).reduce((s,r)=>s+n(r.value),0)+(d.machinery||[]).reduce((s,r)=>s+n(r.value),0)+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
-    body+=totRow('TOTAL LONG-TERM ASSETS',lta(L),lta(R));
-    body+=totRow('TOTAL ASSETS',ltc(L)+lta(L),ltc(R)+lta(R));
-    // CURRENT LIABILITIES
-    body+=secHead('CURRENT LIABILITIES');
-    if((L.operatingNotes||[]).length||(R.operatingNotes||[]).length){body+=subHead('Operating Notes');
-      merge(L.operatingNotes,R.operatingNotes,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).balance),n((r||{}).balance),1));}
-    if((L.accountsDue||[]).length||(R.accountsDue||[]).length){body+=subHead('Accounts Payable');
-      merge(L.accountsDue,R.accountsDue,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).amount),n((r||{}).amount),1));}
-    if((L.intermediatDebt||[]).length||(R.intermediatDebt||[]).length){body+=subHead('Intermediate Debt — Current Portion');
-      merge(L.intermediatDebt,R.intermediatDebt,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor+((l||r).security?' / '+(l||r).security:''),n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
-    if((L.reCurrent||[]).length||(R.reCurrent||[]).length){body+=subHead('RE Mortgage — Current Portion');
-      merge(L.reCurrent,R.reCurrent,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor,n((l||{}).annualPmt),n((r||{}).annualPmt),1));}
-    if(n(L.taxesDue)||n(R.taxesDue))body+=row('Income Taxes Due',n(L.taxesDue),n(R.taxesDue),1);
-    const tcl=d=>(d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0)+(d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0)+(d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)+(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)+n(d.taxesDue);
-    body+=totRow('TOTAL CURRENT LIABILITIES',tcl(L),tcl(R));
-    // LONG-TERM LIABILITIES
-    body+=secHead('LONG-TERM LIABILITIES');
-    if((L.intermediatDebt||[]).length||(R.intermediatDebt||[]).length){body+=subHead('Intermediate Term Debt — Long-Term Portion');
-      merge(L.intermediatDebt,R.intermediatDebt,r=>r.creditor||'').forEach(({left:l,right:r})=>body+=row((l||r).creditor+((l||r).security?' / '+(l||r).security:''),Math.max(0,n((l||{}).principal)-n((l||{}).annualPmt)),Math.max(0,n((r||{}).principal)-n((r||{}).annualPmt)),1));}
-    if((L.reMortgages||[]).length||(R.reMortgages||[]).length){body+=subHead('Real Estate Mortgages');
-      merge(L.reMortgages,R.reMortgages,r=>r.lienHolder||'').forEach(({left:l,right:r})=>body+=row((l||r).lienHolder+((l||r).terms?' — '+(l||r).terms:''),n((l||{}).principal),n((r||{}).principal),1));}
-    if((L.otherLiabilities||[]).length||(R.otherLiabilities||[]).length){body+=subHead('Other Liabilities');
-      merge(L.otherLiabilities,R.otherLiabilities,r=>r.description||'').forEach(({left:l,right:r})=>body+=row((l||r).description,n((l||{}).balance),n((r||{}).balance),1));}
-    const tlt2=d=>Math.max(0,(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal)-n(r.annualPmt),0))+(d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0)+(d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+n(r.balance),0);
-    const tl=d=>tcl(d)+tlt2(d);
-    body+=totRow('TOTAL LONG-TERM LIABILITIES',tlt2(L),tlt2(R));
-    body+=totRow('TOTAL LIABILITIES',tl(L),tl(R));
-    body+=secHead('NET WORTH');
-    body+=totRow('WORKING CAPITAL',ltc(L)-tcl(L),ltc(R)-tcl(R));
-    body+=totRow('NET WORTH',ltc(L)+lta(L)-tl(L),ltc(R)+lta(R)-tl(R));
-    W.document.write('<!DOCTYPE html><html><head><title>Detail Comparison — '+clientName+'</title><style>body{font-family:Arial,sans-serif;font-size:8pt;margin:.4in;color:#000}table{width:100%;border-collapse:collapse}@media print{.no-print{display:none}}</style></head><body>'
-      +'<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>'
-      +'<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt">'
-      +'<div><div style="font-size:13pt;font-weight:800">'+clientName+'</div>'
-      +'<div style="font-size:8pt;color:#555;margin-top:2pt">Detail Comparison — First Bank of Montana</div></div>'
-      +'<div style="font-size:8pt;color:#555;text-align:right">Printed '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})+'</div></div>'
-      +'<table><thead><tr style="background:#1a1a1a;color:white">'
-      +'<th style="text-align:left;padding:5pt 10pt;font-size:8pt;width:40%">Item</th>'
-      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">'+leftSheet.date+'</th>'
-      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">'+rightSheet.date+'</th>'
-      +'<th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">Change</th>'
-      +'</tr></thead><tbody>'+body+'</tbody></table></body></html>');
-    W.document.close(); W.focus(); setTimeout(()=>W.print(),400);
-  };
-
-  const handlePrintSideBySide = (leftSheet, rightSheet) => {
-    const W = window.open("","_blank","width=1000,height=1100");
-    if (!W) return;
-    const fmtP = v => v === 0 ? '—' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
-    const sbLabels = Object.keys(leftSheet.totals);
-    const rows = sbLabels.map(label => {
-      const lv = leftSheet.totals[label] || 0;
-      const rv = rightSheet.totals[label] || 0;
-      const chg = rv - lv;
-      const isBreak = SECTION_BREAKS_LIST.includes(label);
-      const isBig = ['Total Current Assets','TOTAL ASSETS','TOTAL LIABILITIES','NET WORTH'].includes(label);
-      const head = SECTION_HEADS[label];
-      let html = '';
-      if (head) html += `<tr><td colspan="4" style="background:#6B0E1E;color:white;font-weight:700;padding:5pt 10pt;font-size:8pt;letter-spacing:.8px;text-transform:uppercase">${head}</td></tr>`;
-      const rowStyle = isBig
-        ? 'font-weight:800;font-size:9pt;background:#f0f0f0;border-top:2pt solid #333;'
-        : isBreak ? 'font-weight:700;border-top:1pt solid #999;background:#fafafa;' : '';
-      const chgColor = chg > 0 ? '#15803d' : chg < 0 ? '#dc2626' : '#999';
-      html += `<tr style="${rowStyle}">
-        <td style="padding:3pt 10pt;border-bottom:.5pt dotted #ddd;font-size:8pt">${label}</td>
-        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt">${fmtP(lv)}</td>
-        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt">${fmtP(rv)}</td>
-        <td style="padding:3pt 10pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:8pt;color:${chgColor};font-weight:600">${chg !== 0 ? (chg > 0 ? '+' : '') + fmtP(chg) : '—'}</td>
-      </tr>`;
-      return html;
-    }).join('');
-
-    W.document.write(`<!DOCTYPE html><html><head><title>Comparison — ${clientName}</title>
-<style>
-  body{font-family:Arial,sans-serif;font-size:8pt;margin:.4in;color:#000}
-  table{width:100%;border-collapse:collapse}
-  @media print{.no-print{display:none}}
-</style></head><body>
-<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">🖨 Print</button>
-<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt">
-  <div>
-    <div style="font-size:13pt;font-weight:800">${clientName}</div>
-    <div style="font-size:8pt;color:#555;margin-top:2pt">Balance Sheet Comparison — First Bank of Montana</div>
-  </div>
-  <div style="font-size:8pt;color:#555">Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
-</div>
-<table>
-  <thead>
-    <tr style="background:#1a1a1a;color:white">
-      <th style="text-align:left;padding:5pt 10pt;font-size:8pt;width:40%">Category</th>
-      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">${leftSheet.date} <span style="font-weight:400;font-size:7pt">(Prior)</span></th>
-      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">${rightSheet.date} <span style="font-weight:400;font-size:7pt">(Current)</span></th>
-      <th style="text-align:right;padding:5pt 10pt;font-size:8pt;width:20%">Change</th>
-    </tr>
-  </thead>
-  <tbody>${rows}</tbody>
-</table>
-</body></html>`);
-    W.document.close();
-    W.focus();
-    setTimeout(() => W.print(), 400);
   };
 
   const handlePrintComparison = () => {
@@ -1669,46 +1480,6 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
             style={{background:'#374151',color:'white',border:'none',borderRadius:8,padding:'9px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
             🖨 Print
           </button>
-          {compSheets.length >= 2 && (() => {
-            const leftSheet = compSheets.find(s=>s.date===sbLeft) || compSheets[compSheets.length-2];
-            const rightSheet = compSheets.find(s=>s.date===sbRight) || compSheets[compSheets.length-1];
-            const lDate = sbLeft || compSheets[compSheets.length-2]?.date;
-            const rDate = sbRight || compSheets[compSheets.length-1]?.date;
-            return (
-              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginTop:6,padding:'8px 12px',background:'#f8f4f4',borderRadius:8,border:'1px solid #e5d5d5'}}>
-                <span style={{fontSize:'.78rem',fontWeight:700,color:'#6B0E1E'}}>Side by Side:</span>
-                <select value={lDate} onChange={e=>setSbLeft(e.target.value)}
-                  style={{border:'1px solid #ccc',borderRadius:6,padding:'4px 8px',fontSize:'.8rem',fontFamily:'inherit'}}>
-                  {compSheets.map(s=><option key={s.date} value={s.date}>{s.date}</option>)}
-                </select>
-                <span style={{fontSize:'.78rem',color:'#888'}}>vs</span>
-                <select value={rDate} onChange={e=>setSbRight(e.target.value)}
-                  style={{border:'1px solid #ccc',borderRadius:6,padding:'4px 8px',fontSize:'.8rem',fontFamily:'inherit'}}>
-                  {compSheets.map(s=><option key={s.date} value={s.date}>{s.date}</option>)}
-                </select>
-                <button
-                  onClick={()=>{
-                    const ls = compSheets.find(s=>s.date===lDate);
-                    const rs = compSheets.find(s=>s.date===rDate);
-                    if(ls&&rs) handlePrintSideBySide(ls,rs);
-                  }}
-                  disabled={!lDate||!rDate||lDate===rDate}
-                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
-                  📄 Print Side by Side
-                </button>
-                <button
-                  onClick={()=>{
-                    const ls = compSheets.find(s=>s.date===lDate);
-                    const rs = compSheets.find(s=>s.date===rDate);
-                    if(ls&&rs) handlePrintDetailComparison(ls,rs);
-                  }}
-                  disabled={!lDate||!rDate||lDate===rDate}
-                  style={{background:'#374151',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:'pointer',fontFamily:'inherit',opacity:(!lDate||!rDate||lDate===rDate)?0.4:1}}>
-                  🔍 Detail Comparison
-                </button>
-              </div>
-            );
-          })()}
         </div>
         {compInsightLoading && (
           <div className="insight-loading">
@@ -1826,23 +1597,31 @@ function InspectionView({data,setData}){
   const INSP_PREFIX = 'fbmt_insp:';
   const loadInspections = async () => {
     try {
-      const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date,data&client_name=like.' + encodeURIComponent('[Insp]%') + '&order=as_of_date.desc';
+      const uid = currentSession?.user?.id;
+      if (!uid) { setSavedInspections([]); return; }
+      const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date,data'
+        + '&user_id=eq.' + encodeURIComponent(uid)
+        + '&client_name=like.' + encodeURIComponent('[Insp]%')
+        + '&order=as_of_date.desc';
       const resp = await fetch(url, {headers: supaHeaders()});
       if (resp.ok) { const rows = await resp.json(); setSavedInspections(rows); }
     } catch {}
   };
   const saveInspection = async () => {
     if (!data.clientName) { alert('Please enter a client name before saving.'); return; }
+    const uid = currentSession?.user?.id;
+    if (!uid) { alert('Not signed in — cannot save.'); return; }
     setSavingInsp(true);
     try {
       const key = `[Insp] ${data.clientName}`;
       const date = data.inspDate || new Date().toISOString().slice(0,10);
-      const body = { client_name: key, as_of_date: date, data: {...data, _savedAt: new Date().toISOString()}, saved_at: new Date().toISOString(), user_id: currentSession?.user?.id || null };
-      const checkUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.' + encodeURIComponent(key) + '&as_of_date=eq.' + date;
+      const body = { client_name: key, as_of_date: date, data: {...data, _savedAt: new Date().toISOString()}, saved_at: new Date().toISOString(), user_id: uid };
+      const uidFilter = '&user_id=eq.' + encodeURIComponent(uid);
+      const checkUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.' + encodeURIComponent(key) + '&as_of_date=eq.' + date + uidFilter;
       const check = await fetch(checkUrl, {headers: supaHeaders()});
       const existing = await check.json();
       if (existing.length > 0) {
-        await fetch(window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.' + encodeURIComponent(key) + '&as_of_date=eq.' + date, {method:'PATCH', headers: supaHeaders(), body: JSON.stringify({data: body.data})});
+        await fetch(checkUrl, {method:'PATCH', headers: supaHeaders(), body: JSON.stringify({data: body.data})});
       } else {
         await fetch(window.SUPABASE_URL + '/rest/v1/balance_sheets', {method:'POST', headers: supaHeaders(), body: JSON.stringify(body)});
       }
@@ -1878,82 +1657,7 @@ function InspectionView({data,setData}){
     setCheckingResponse(false);
   };
 
-  const handlePDF=()=>{
-    const W=window.open('','_blank','width=950,height=1200');
-    if(!W)return;
-    const crops=data.inspCrops||[];
-    const ls=data.inspLivestock||[];
-    const inv=data.inspInventory||[];
-    const nv=v=>Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-    const f$=v=>nv(v)?'$'+Math.round(nv(v)).toLocaleString():'—';
-    const cropTot=crops.reduce((s,r)=>s+nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice),0);
-    const lsTot=ls.reduce((s,r)=>s+nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice),0);
-    const invTot=inv.reduce((s,r)=>s+nv(r.quantity)*nv(r.valuePerUnit),0);
-    const grandTot=cropTot+lsTot+invTot;
-    const iMode=data.inspMode==='post'?'Post-Harvest':'Pre-Harvest';
-    const condColor=c=>c==='Excellent'?'#15803d':c==='Good'?'#166534':c==='Fair'?'#92400e':c==='Poor'?'#991b1b':'#374151';
-    const th=`background:#1B4332;color:white;padding:5pt 7pt;text-align:left;font-size:7pt;font-weight:700;`;
-    const thR=`background:#1B4332;color:white;padding:5pt 7pt;text-align:right;font-size:7pt;font-weight:700;`;
-    const td=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;`;
-    const tdR=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;text-align:right;font-weight:600;`;
-    const cropRows=crops.filter(r=>r.budgetedCrop||r.actualAcres).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedCrop||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedAcres||'—'}</td><td style="${tdR}">${r.actualAcres||r.budgetedAcres||'—'}</td><td style="${tdR}">${r.budgetedYield||'—'} ${r.budgetedUnit||'bu'}</td><td style="${tdR}">${r.actualYield||r.budgetedYield||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
-    const lsRows=ls.filter(r=>r.budgetedType||r.actualHead).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedType||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedHead||'—'}</td><td style="${tdR}">${r.actualHead||r.budgetedHead||'—'}</td><td style="${tdR}">${r.budgetedLbs||'—'} lbs</td><td style="${tdR}">${r.estWeight||r.budgetedLbs||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
-    const invRows=inv.filter(r=>r.description||r.quantity).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.description||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.quantity||'—'} ${r.unitType||''}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.quantity)*nv(r.valuePerUnit))}</td></tr>`).join('');
-
-    // Extra condition/comment sections
-    const cmtSection=(icon,title,cond,cmt)=>(cond||cmt)?`<div class="sh">${icon} ${title}</div><div style="padding:6pt 10pt;background:#f9fafb;border:0.5pt solid #e5e7eb;margin-bottom:4pt;">${cond?`<span style="font-weight:700;color:${condColor(cond)}">${cond}</span>${cmt?' — ':''}`:''} ${cmt||''}</div>`:'';
-    const loanSection=(data.inspLoans||[]).filter(l=>l).length?`<div class="sh">📋 LOAN INFORMATION</div><div style="padding:6pt 10pt;background:#f9fafb;border:0.5pt solid #e5e7eb;margin-bottom:4pt;">${(data.inspLoans||[]).filter(l=>l).map((l,i)=>`<span style="margin-right:16pt"><strong>Loan ${i+1}:</strong> ${l}</span>`).join('')}</div>`:'';
-    const pastureSec=cmtSection('🟤','PASTURE CONDITIONS',data.inspPastureCond,data.inspPastureCmt);
-    const waterSec=cmtSection('💧','WATER / IRRIGATION',data.inspWaterCond,data.inspWaterCmt);
-    const equipSec=cmtSection('🚜','EQUIPMENT',data.inspEquipCond,data.inspEquipCmt);
-    const cropCmtSec=data.inspCropCmt?`<div style="padding:5pt 10pt;background:#f0fdf4;border-left:3pt solid #1B4332;margin-top:4pt;font-size:8pt;"><em>Crop Comments:</em> ${data.inspCropCmt}</div>`:'';
-    const lsCmtSec=data.inspLsCmt?`<div style="padding:5pt 10pt;background:#f0fdf4;border-left:3pt solid #1B4332;margin-top:4pt;font-size:8pt;"><em>Livestock Comments:</em> ${data.inspLsCmt}</div>`:'';
-    const invCmtSec=data.inspInvCmt?`<div style="padding:5pt 10pt;background:#f0fdf4;border-left:3pt solid #1B4332;margin-top:4pt;font-size:8pt;"><em>Inventory Comments:</em> ${data.inspInvCmt}</div>`:'';
-
-    W.document.write(`<!DOCTYPE html><html><head><title>Ag Inspection - ${data.clientName||''}</title>
-<style>
-@page{size:portrait;margin:.35in .4in;}
-body{font-family:Arial,sans-serif;font-size:8pt;color:#111;margin:0;}
-table{width:100%;border-collapse:collapse;margin-bottom:12pt;}
-.sh{background:#1B4332;color:white;font-weight:700;font-size:9pt;padding:5pt 10pt;margin:12pt 0 0;letter-spacing:.5px;}
-.tot-row{background:#dcfce7;}
-.grand{background:#1B4332;color:white;padding:10pt 16pt;display:flex;justify-content:space-between;align-items:center;margin-top:14pt;border-radius:4pt;}
-.sig{border-top:1pt solid #555;margin-top:32pt;padding-top:4pt;font-size:7pt;color:#555;}
-@media print{.np{display:none}}
-</style></head><body>
-<button class="np" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#1B4332;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px;z-index:999">🖨 Print / PDF</button>
-<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10pt;border-bottom:3pt solid #1B4332;padding-bottom:10pt;">
-  <div style="display:flex;align-items:center;gap:14pt;">
-    <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:52px;width:auto;"/>
-    <div>
-      <div style="font-size:17pt;font-weight:900;color:#1B4332;letter-spacing:-0.5px;">Agricultural Inspection Report</div>
-      <div style="font-size:9pt;color:#2D6A4F;font-weight:600;margin-top:2pt;">First Bank of Montana &nbsp;·&nbsp; ${iMode}</div>
-    </div>
-  </div>
-  <div style="text-align:right;font-size:8pt;color:#374151;line-height:1.8;">
-    <div><strong>Borrower:</strong> ${data.clientName||'—'}</div>
-    <div><strong>Inspection Date:</strong> ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
-    <div><strong>As of Date:</strong> ${data.asOfDate||'—'}</div>
-    <div><strong>Prepared:</strong> ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
-  </div>
-</div>
-${cropRows?`<div class="sh">🌾 CROP INSPECTION</div><table><thead><tr><th style="${th}width:13%">Crop</th><th style="${th}width:12%">Location/Field</th><th style="${thR}width:7%">Budg.Acres</th><th style="${thR}width:7%">Act.Acres</th><th style="${thR}width:8%">Budg.Yield</th><th style="${thR}width:7%">Act.Yield</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${cropRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">CROP TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(cropTot)}</td><td></td></tr></tfoot></table>`:''}
-${cropCmtSec}${lsRows?`<div class="sh">🐄 LIVESTOCK INSPECTION</div><table><thead><tr><th style="${th}width:13%">Type</th><th style="${th}width:12%">Location</th><th style="${thR}width:7%">Budg.Head</th><th style="${thR}width:7%">Act.Head</th><th style="${thR}width:8%">Budg.Wt</th><th style="${thR}width:7%">Est.Wt</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${lsRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">LIVESTOCK TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(lsTot)}</td><td></td></tr></tfoot></table>`:''}
-${lsCmtSec}${invRows?`<div class="sh">📦 INVENTORY / STORED COMMODITIES</div><table><thead><tr><th style="${th}width:24%">Description</th><th style="${th}width:18%">Location</th><th style="${th}width:10%">Condition</th><th style="${thR}width:14%">Quantity</th><th style="${thR}width:12%">Value/Unit</th><th style="${thR}width:12%">Est.Value</th></tr></thead><tbody>${invRows}</tbody><tfoot><tr class="tot-row"><td colspan="5" style="${tdR}color:#1B4332;font-size:8.5pt;">INVENTORY TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(invTot)}</td></tr></tfoot></table>`:''}
-${invCmtSec}${pastureSec}${waterSec}${equipSec}${loanSection}<div class="grand">
-  <div><div style="font-size:9pt;opacity:.8;letter-spacing:.5px;text-transform:uppercase;">Total Estimated Collateral Value</div><div style="font-size:8pt;opacity:.6;margin-top:2pt;">${iMode} · ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'}):''}</div></div>
-  <div style="font-size:22pt;font-weight:900;letter-spacing:-1px;">${f$(grandTot)}</div>
-</div>
-${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;grid-template-columns:1fr 1fr;gap:12pt;">${data.inspEnvCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Environmental / Crop Conditions</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspEnvCmt}</div></div>`:''} ${data.inspAddlCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Additional Comments</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspAddlCmt}</div></div>`:''}</div>`:''}
-<div style="margin-top:22pt;display:grid;grid-template-columns:1fr 1fr 1fr;gap:24pt;">
-  <div><div class="sig">Loan Officer Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
-  <div><div class="sig">Borrower Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
-  <div><div class="sig">Second Signature (if applicable)</div><div style="margin-top:14pt;" class="sig">Date</div></div>
-</div>
-<div style="margin-top:12pt;font-size:6.5pt;color:#aaa;text-align:center;border-top:0.5pt solid #e5e7eb;padding-top:5pt;">This inspection report is prepared for loan documentation purposes only. Values are estimates based on field observation and are subject to change. &nbsp;·&nbsp; First Bank of Montana</div>
-</body></html>`);
-    W.document.close();W.focus();setTimeout(()=>W.print(),500);
-  };
+  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`ag-inspection-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
   const handleSubmit=async()=>{setSubmitErr('');setSubmitting(true);try{handlePDF();}catch(e){setSubmitErr('PDF failed: '+e.message);}finally{setSubmitting(false);}};
   if(submitted)return React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:48}},React.createElement('div',{style:{background:'white',borderRadius:12,padding:40,textAlign:'center',maxWidth:420}},React.createElement('div',{style:{fontSize:52,marginBottom:12}},'✅'),React.createElement('div',{style:{fontWeight:800,fontSize:22,color:ISH,marginBottom:8}},'Report Complete!'),React.createElement('button',{onClick:()=>setSubmitted(false),style:{background:ISH,color:'white',border:'none',borderRadius:6,padding:'9px 22px',fontWeight:700,cursor:'pointer',marginTop:12}},'New Inspection')));
 
@@ -1984,7 +1688,8 @@ ${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;
               onClick:()=>{setData(s.data);setShowInspSaves(false);if(s.data&&s.data._customerResponse){setCustomerResponse(s.data._customerResponse);setShowResponseReview(true);}}},
               React.createElement('div',{style:{fontWeight:600,color:'#1a1a1a'}},s.client_name.replace('[Insp] ','')),
               React.createElement('div',{style:{fontSize:11,color:'#6b7280'}},s.as_of_date))))),
-        React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📄 Print / Save PDF'))),
+        React.createElement('button',{onClick:handlePDF,style:{background:'#f0fdf4',color:ITH,border:`1.5px solid ${ITH}`,borderRadius:5,padding:'7px 14px',fontWeight:600,fontSize:12,cursor:'pointer'}},'🖨 Save PDF'),
+        React.createElement('button',{onClick:handleSubmit,disabled:submitting,style:{background:IGOLD,color:'white',border:'none',borderRadius:5,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1}},submitting?'⏳ Generating…':'📤 Save PDF Report'))),
     submitErr&&React.createElement('div',{style:{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#92400e'}},'⚠️ '+submitErr),
     // ── Share with Customer Modal ──────────────────────────────────────────────
     showShareModal&&React.createElement('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
@@ -2206,7 +1911,7 @@ ${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;
               const pct=devPct(r.actualAcres,r.budgetedAcres),showDev=pct!==null&&Math.abs(pct)>=5,ds=r.actualAcres?devStyle(pct):{};
               return React.createElement(React.Fragment,{key:r.id},
                 React.createElement('tr',{style:{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}},
-                  React.createElement('td',{style:ITDS},React.createElement('div',null,iInp(r.budgetedCrop,v=>uC(r.id,'budgetedCrop',v),'Crop name…'),r.budgetedCrop&&React.createElement('button',{type:'button',onClick:()=>uC(r.id,'substituted',!r.substituted),style:{marginTop:3,fontSize:10,background:'none',border:'none',color:r.substituted?'#dc2626':'#9ca3af',cursor:'pointer',padding:0,fontWeight:600}},r.substituted?'✕ Remove substitute':'↺ Different crop?'),r.substituted&&React.createElement('div',{style:{marginTop:3}},iInp(r.substituteCrop,v=>uC(r.id,'substituteCrop',v),'Actual crop…','text',{fontSize:12})))),
+                  React.createElement('td',{style:ITDS},r.budgetedCrop?React.createElement('div',null,React.createElement('div',{style:{fontWeight:600,fontSize:13}},r.budgetedCrop),r.substituted&&React.createElement('div',{style:{marginTop:4}},React.createElement('div',{style:{fontSize:10,color:'#d97706',fontWeight:700}},'SUBSTITUTED →'),iInp(r.substituteCrop,v=>uC(r.id,'substituteCrop',v),'Actual crop…','text',{fontSize:12})),React.createElement('button',{type:'button',onClick:()=>uC(r.id,'substituted',!r.substituted),style:{marginTop:3,fontSize:10,background:'none',border:'none',color:r.substituted?'#dc2626':'#9ca3af',cursor:'pointer',padding:0,fontWeight:600}},r.substituted?'✕ Remove':'↺ Different crop?')):iInp(r.budgetedCrop,v=>uC(r.id,'budgetedCrop',v),'Crop name…')),
                   React.createElement('td',{style:{...ITDS,textAlign:'center',background:'#f8f6f2'}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:'#6b7280'}},r.budgetedAcres||'—'),React.createElement('div',{style:{fontSize:10,color:'#9ca3af'}},'budgeted')),
                   React.createElement('td',{style:ITDS},iInp(r.actualAcres,v=>uC(r.id,'actualAcres',v),r.budgetedAcres||'0','number')),
                   React.createElement('td',{style:{...ITDS,textAlign:'center'}},r.actualAcres&&r.budgetedAcres?React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},devBadge(pct),React.createElement('div',{style:{fontSize:10,color:'#6b7280'}},(parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)>0?'+':'')+((parseFloat(r.actualAcres||0)-parseFloat(r.budgetedAcres||0)).toFixed(0))+' ac')):React.createElement('span',{style:{color:'#d1d5db',fontSize:11}},'—')),
@@ -2318,82 +2023,7 @@ function PostHarvestView({data,setData}){
   const handleFiles=e=>{Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>setData(d=>({...d,postPhotos:[...(d.postPhotos||[]),{id:inspUid(),src:ev.target.result,label:'',ts:new Date().toLocaleString()}]}));r.readAsDataURL(f);});e.target.value='';};
   const rowTot=r=>(parseFloat(r.quantity||0))*(parseFloat(r.valuePerUnit||0));
   const grandTot=storage.reduce((s,r)=>s+rowTot(r),0);
-  const handlePDF=()=>{
-    const W=window.open('','_blank','width=950,height=1200');
-    if(!W)return;
-    const crops=data.inspCrops||[];
-    const ls=data.inspLivestock||[];
-    const inv=data.inspInventory||[];
-    const nv=v=>Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-    const f$=v=>nv(v)?'$'+Math.round(nv(v)).toLocaleString():'—';
-    const cropTot=crops.reduce((s,r)=>s+nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice),0);
-    const lsTot=ls.reduce((s,r)=>s+nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice),0);
-    const invTot=inv.reduce((s,r)=>s+nv(r.quantity)*nv(r.valuePerUnit),0);
-    const grandTot=cropTot+lsTot+invTot;
-    const iMode=data.inspMode==='post'?'Post-Harvest':'Pre-Harvest';
-    const condColor=c=>c==='Excellent'?'#15803d':c==='Good'?'#166534':c==='Fair'?'#92400e':c==='Poor'?'#991b1b':'#374151';
-    const th=`background:#1B4332;color:white;padding:5pt 7pt;text-align:left;font-size:7pt;font-weight:700;`;
-    const thR=`background:#1B4332;color:white;padding:5pt 7pt;text-align:right;font-size:7pt;font-weight:700;`;
-    const td=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;`;
-    const tdR=`padding:4pt 7pt;border-bottom:0.5pt solid #d1fae5;font-size:7.5pt;vertical-align:middle;text-align:right;font-weight:600;`;
-    const cropRows=crops.filter(r=>r.budgetedCrop||r.actualAcres).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedCrop||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedAcres||'—'}</td><td style="${tdR}">${r.actualAcres||r.budgetedAcres||'—'}</td><td style="${tdR}">${r.budgetedYield||'—'} ${r.budgetedUnit||'bu'}</td><td style="${tdR}">${r.actualYield||r.budgetedYield||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualAcres||r.budgetedAcres)*nv(r.actualYield||r.budgetedYield)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
-    const lsRows=ls.filter(r=>r.budgetedType||r.actualHead).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.budgetedType||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${tdR}">${r.budgetedHead||'—'}</td><td style="${tdR}">${r.actualHead||r.budgetedHead||'—'}</td><td style="${tdR}">${r.budgetedLbs||'—'} lbs</td><td style="${tdR}">${r.estWeight||r.budgetedLbs||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):r.budgetedPrice?'$'+nv(r.budgetedPrice).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.actualHead||r.budgetedHead)*nv(r.estWeight||r.budgetedLbs)*nv(r.valuePerUnit||r.budgetedPrice))}</td><td style="${td}">${r.deviationReason||''}</td></tr>`).join('');
-    const invRows=inv.filter(r=>r.description||r.quantity).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f0fdf4'}"><td style="${td}">${r.description||'—'}</td><td style="${td}">${r.location||'—'}</td><td style="${td}color:${condColor(r.condition)};font-weight:700">${r.condition||'—'}</td><td style="${tdR}">${r.quantity||'—'} ${r.unitType||''}</td><td style="${tdR}">${r.valuePerUnit?'$'+nv(r.valuePerUnit).toFixed(2):'—'}</td><td style="${tdR}color:#15803d;font-weight:700">${f$(nv(r.quantity)*nv(r.valuePerUnit))}</td></tr>`).join('');
-
-    // Extra condition/comment sections
-    const cmtSection=(icon,title,cond,cmt)=>(cond||cmt)?`<div class="sh">${icon} ${title}</div><div style="padding:6pt 10pt;background:#f9fafb;border:0.5pt solid #e5e7eb;margin-bottom:4pt;">${cond?`<span style="font-weight:700;color:${condColor(cond)}">${cond}</span>${cmt?' — ':''}`:''} ${cmt||''}</div>`:'';
-    const loanSection=(data.inspLoans||[]).filter(l=>l).length?`<div class="sh">📋 LOAN INFORMATION</div><div style="padding:6pt 10pt;background:#f9fafb;border:0.5pt solid #e5e7eb;margin-bottom:4pt;">${(data.inspLoans||[]).filter(l=>l).map((l,i)=>`<span style="margin-right:16pt"><strong>Loan ${i+1}:</strong> ${l}</span>`).join('')}</div>`:'';
-    const pastureSec=cmtSection('🟤','PASTURE CONDITIONS',data.inspPastureCond,data.inspPastureCmt);
-    const waterSec=cmtSection('💧','WATER / IRRIGATION',data.inspWaterCond,data.inspWaterCmt);
-    const equipSec=cmtSection('🚜','EQUIPMENT',data.inspEquipCond,data.inspEquipCmt);
-    const cropCmtSec=data.inspCropCmt?`<div style="padding:5pt 10pt;background:#f0fdf4;border-left:3pt solid #1B4332;margin-top:4pt;font-size:8pt;"><em>Crop Comments:</em> ${data.inspCropCmt}</div>`:'';
-    const lsCmtSec=data.inspLsCmt?`<div style="padding:5pt 10pt;background:#f0fdf4;border-left:3pt solid #1B4332;margin-top:4pt;font-size:8pt;"><em>Livestock Comments:</em> ${data.inspLsCmt}</div>`:'';
-    const invCmtSec=data.inspInvCmt?`<div style="padding:5pt 10pt;background:#f0fdf4;border-left:3pt solid #1B4332;margin-top:4pt;font-size:8pt;"><em>Inventory Comments:</em> ${data.inspInvCmt}</div>`:'';
-
-    W.document.write(`<!DOCTYPE html><html><head><title>Ag Inspection - ${data.clientName||''}</title>
-<style>
-@page{size:portrait;margin:.35in .4in;}
-body{font-family:Arial,sans-serif;font-size:8pt;color:#111;margin:0;}
-table{width:100%;border-collapse:collapse;margin-bottom:12pt;}
-.sh{background:#1B4332;color:white;font-weight:700;font-size:9pt;padding:5pt 10pt;margin:12pt 0 0;letter-spacing:.5px;}
-.tot-row{background:#dcfce7;}
-.grand{background:#1B4332;color:white;padding:10pt 16pt;display:flex;justify-content:space-between;align-items:center;margin-top:14pt;border-radius:4pt;}
-.sig{border-top:1pt solid #555;margin-top:32pt;padding-top:4pt;font-size:7pt;color:#555;}
-@media print{.np{display:none}}
-</style></head><body>
-<button class="np" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#1B4332;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px;z-index:999">🖨 Print / PDF</button>
-<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10pt;border-bottom:3pt solid #1B4332;padding-bottom:10pt;">
-  <div style="display:flex;align-items:center;gap:14pt;">
-    <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:52px;width:auto;"/>
-    <div>
-      <div style="font-size:17pt;font-weight:900;color:#1B4332;letter-spacing:-0.5px;">Agricultural Inspection Report</div>
-      <div style="font-size:9pt;color:#2D6A4F;font-weight:600;margin-top:2pt;">First Bank of Montana &nbsp;·&nbsp; ${iMode}</div>
-    </div>
-  </div>
-  <div style="text-align:right;font-size:8pt;color:#374151;line-height:1.8;">
-    <div><strong>Borrower:</strong> ${data.clientName||'—'}</div>
-    <div><strong>Inspection Date:</strong> ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
-    <div><strong>As of Date:</strong> ${data.asOfDate||'—'}</div>
-    <div><strong>Prepared:</strong> ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
-  </div>
-</div>
-${cropRows?`<div class="sh">🌾 CROP INSPECTION</div><table><thead><tr><th style="${th}width:13%">Crop</th><th style="${th}width:12%">Location/Field</th><th style="${thR}width:7%">Budg.Acres</th><th style="${thR}width:7%">Act.Acres</th><th style="${thR}width:8%">Budg.Yield</th><th style="${thR}width:7%">Act.Yield</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${cropRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">CROP TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(cropTot)}</td><td></td></tr></tfoot></table>`:''}
-${cropCmtSec}${lsRows?`<div class="sh">🐄 LIVESTOCK INSPECTION</div><table><thead><tr><th style="${th}width:13%">Type</th><th style="${th}width:12%">Location</th><th style="${thR}width:7%">Budg.Head</th><th style="${thR}width:7%">Act.Head</th><th style="${thR}width:8%">Budg.Wt</th><th style="${thR}width:7%">Est.Wt</th><th style="${th}width:8%">Condition</th><th style="${thR}width:8%">Price/Unit</th><th style="${thR}width:9%">Est.Value</th><th style="${th}">Notes / Deviation</th></tr></thead><tbody>${lsRows}</tbody><tfoot><tr class="tot-row"><td colspan="8" style="${tdR}color:#1B4332;font-size:8.5pt;">LIVESTOCK TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(lsTot)}</td><td></td></tr></tfoot></table>`:''}
-${lsCmtSec}${invRows?`<div class="sh">📦 INVENTORY / STORED COMMODITIES</div><table><thead><tr><th style="${th}width:24%">Description</th><th style="${th}width:18%">Location</th><th style="${th}width:10%">Condition</th><th style="${thR}width:14%">Quantity</th><th style="${thR}width:12%">Value/Unit</th><th style="${thR}width:12%">Est.Value</th></tr></thead><tbody>${invRows}</tbody><tfoot><tr class="tot-row"><td colspan="5" style="${tdR}color:#1B4332;font-size:8.5pt;">INVENTORY TOTAL</td><td style="${tdR}color:#15803d;font-size:9pt;">${f$(invTot)}</td></tr></tfoot></table>`:''}
-${invCmtSec}${pastureSec}${waterSec}${equipSec}${loanSection}<div class="grand">
-  <div><div style="font-size:9pt;opacity:.8;letter-spacing:.5px;text-transform:uppercase;">Total Estimated Collateral Value</div><div style="font-size:8pt;opacity:.6;margin-top:2pt;">${iMode} · ${data.inspDate?new Date(data.inspDate+'T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'}):''}</div></div>
-  <div style="font-size:22pt;font-weight:900;letter-spacing:-1px;">${f$(grandTot)}</div>
-</div>
-${(data.inspEnvCmt||data.inspAddlCmt)?`<div style="margin-top:14pt;display:grid;grid-template-columns:1fr 1fr;gap:12pt;">${data.inspEnvCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Environmental / Crop Conditions</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspEnvCmt}</div></div>`:''} ${data.inspAddlCmt?`<div><div style="font-weight:700;font-size:8pt;color:#1B4332;margin-bottom:4pt;text-transform:uppercase;letter-spacing:.5px;">Additional Comments</div><div style="background:#f0fdf4;border:1pt solid #bbf7d0;border-radius:4pt;padding:8pt;font-size:8pt;line-height:1.5;">${data.inspAddlCmt}</div></div>`:''}</div>`:''}
-<div style="margin-top:22pt;display:grid;grid-template-columns:1fr 1fr 1fr;gap:24pt;">
-  <div><div class="sig">Loan Officer Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
-  <div><div class="sig">Borrower Signature</div><div style="margin-top:14pt;" class="sig">Date</div></div>
-  <div><div class="sig">Second Signature (if applicable)</div><div style="margin-top:14pt;" class="sig">Date</div></div>
-</div>
-<div style="margin-top:12pt;font-size:6.5pt;color:#aaa;text-align:center;border-top:0.5pt solid #e5e7eb;padding-top:5pt;">This inspection report is prepared for loan documentation purposes only. Values are estimates based on field observation and are subject to change. &nbsp;·&nbsp; First Bank of Montana</div>
-</body></html>`);
-    W.document.close();W.focus();setTimeout(()=>W.print(),500);
-  };
+  const handlePDF=()=>{if(window.html2pdf){window.html2pdf().set({margin:[10,10,10,10],filename:`post-harvest-${(data.clientName||'report').replace(/\s+/g,'-')}-${data.inspDate||''}.pdf`,image:{type:'jpeg',quality:.92},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}}).from(printRef.current).save();}else window.print();};
 
   return React.createElement('div',{style:{maxWidth:1100,margin:'0 auto',padding:'20px 16px'}},
     React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,gap:10,flexWrap:'wrap'}},
@@ -2885,22 +2515,16 @@ function CustomerBalanceSheetForm({shareId}) {
       if (!Array.isArray(rows) || !rows.length) { setPinErr('Link not found or expired. (share_id: '+shareId+')'); return; }
       const row = rows[0];
       if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
-      const loadRowData = (r) => {
-        setShareRow(r);
-        const d = r.customer_draft || r.original_data || {};
-        setData({...d});
-        const bd = (r.customer_draft||r.original_data||{}).budgetData || {};
-        if(bd.budgetCrops?.length) setBudgetCrops(bd.budgetCrops);
-        if(bd.budgetLivestock?.length) setBudgetLivestock(bd.budgetLivestock);
-        if(bd.budgetMisc?.length) setBudgetMisc(bd.budgetMisc);
-        if(bd.budgetExpenses?.length) setBudgetExpenses(bd.budgetExpenses);
-      };
-      if(row.status==='reviewed'){
-        if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN. Please check your email.');return;}
-        loadRowData(row);setStage('reviewed');return;
-      }
+      if(row.status==='reviewed'){setStage('reviewed');return;}
       if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN. Please check your email.');return;}
-      loadRowData(row);
+      setShareRow(row);
+      const d = row.customer_draft || row.original_data || {};
+      setData({...d});
+      const bd = (row.customer_draft||row.original_data||{}).budgetData || {};
+      if(bd.budgetCrops?.length) setBudgetCrops(bd.budgetCrops);
+      if(bd.budgetLivestock?.length) setBudgetLivestock(bd.budgetLivestock);
+      if(bd.budgetMisc?.length) setBudgetMisc(bd.budgetMisc);
+      if(bd.budgetExpenses?.length) setBudgetExpenses(bd.budgetExpenses);
       setStage('form');
     } catch(e){setPinErr('Connection error: '+e.message);}
   };
@@ -2947,12 +2571,13 @@ function CustomerBalanceSheetForm({shareId}) {
     } catch(e){alert('Submit failed: '+e.message);}
     setSubmitting(false);
   };
-  // done and reviewed stages both render the read-only summary below (see renderSummary)
 
   const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
   const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
 
   if(stage==='expired') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>⏰</div><div style={{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}}>Link Expired</div><p style={{color:'#6b7280',fontSize:14}}>This balance sheet link has expired. Please contact your lender for a new link.</p></div></div>;
+  if(stage==='reviewed') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>✅</div><div style={{fontWeight:700,fontSize:18,color:'#15803d',marginBottom:8}}>Already Submitted</div><p style={{color:'#6b7280',fontSize:14}}>Your balance sheet has been received and reviewed by your lender. Thank you!</p></div></div>;
+  if(stage==='done') return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:56,marginBottom:12}}>✅</div><div style={{fontWeight:800,fontSize:22,color:'#15803d',marginBottom:8}}>Balance Sheet Submitted!</div><p style={{color:'#6b7280',fontSize:14,lineHeight:1.6}}>Your balance sheet has been sent to First Bank of Montana for review. Your lender will be in touch.</p></div></div>;
 
   if(stage==='pin') return (
     <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
@@ -2979,7 +2604,7 @@ function CustomerBalanceSheetForm({shareId}) {
   const farmProdTot = (data.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0);
   const lsMktTot = (data.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0);
   const cropInvTot = (data.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
-  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value)),0);
+  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+n(r.value),0);
   const reTot = (data.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const vehTot = (data.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
   const machTot = (data.machinery||[]).reduce((s,r)=>s+n(r.value),0);
@@ -3000,186 +2625,6 @@ function CustomerBalanceSheetForm({shareId}) {
   const remBtn=(k,i)=><button type="button" onClick={()=>remRow(k,i)} style={{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer',fontSize:14,flexShrink:0}}>×</button>;
   const addBtn=(k,tpl,label)=><button type="button" onClick={()=>addRow(k,tpl)} style={{marginTop:6,background:'#f5e8ea',color:'#6B0E1E',border:'1.5px dashed #6B0E1E',borderRadius:5,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}}>+ {label}</button>;
   const lbl=(text)=><div style={{fontSize:11,fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:3}}>{text}</div>;
-
-  // ── Read-only confirmation summary — used for the just-submitted and
-  // already-reviewed stages so the customer always has a copy of what
-  // they told the bank, without exposing the editable form again.
-  const ROSec = ({title,children}) => (
-    <div style={{marginBottom:16}}>
-      <div style={{fontSize:11,fontWeight:700,color:'#6B0E1E',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>{title}</div>
-      {children}
-    </div>
-  );
-  const ROLine = ({label,value}) => (
-    <div style={{display:'flex',justifyContent:'space-between',gap:10,padding:'3px 2px',fontSize:13.5,color:'#374151'}}>
-      <span>{label}</span><span style={{fontWeight:600,whiteSpace:'nowrap'}}>{value}</span>
-    </div>
-  );
-  const ROSubtotal = ({label,value}) => (
-    <div style={{display:'flex',justifyContent:'space-between',padding:'6px 2px 0',marginTop:4,borderTop:'1px dashed #ddd',fontSize:12.5,fontWeight:700,color:'#6B0E1E'}}>
-      <span>{label}</span><span>{value}</span>
-    </div>
-  );
-  const bCropTotRO = budgetCrops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
-  const bLsTotRO = budgetLivestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
-  const bMiscTotRO = budgetMisc.reduce((s,r)=>s+n(r.amount),0);
-  const bIncomeTotRO = bCropTotRO+bLsTotRO+bMiscTotRO;
-  const bExpTotRO = budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
-  const bNetRO = bIncomeTotRO-bExpTotRO;
-
-  const renderSummary = (justSubmitted) => (
-    <div style={pageStyle}>
-      <style>{`@media print{.fbmt-no-print{display:none !important}.fbmt-print-only{display:block !important}body{background:white !important}}`}</style>
-      <div className="fbmt-no-print" style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <span style={{fontSize:20}}>🏦</span>
-          <div>
-            <div style={{color:'white',fontWeight:700,fontSize:15}}>First Bank of Montana</div>
-            <div style={{color:'rgba(255,255,255,.6)',fontSize:11}}>{shareRow?.client_name||''} — Balance Sheet{budgetIncluded?' & Budget':''}</div>
-          </div>
-        </div>
-        <button onClick={()=>window.print()} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🖨️ Print / Save PDF</button>
-      </div>
-      <div className="fbmt-print-only" style={{display:'none',padding:'10px 0',textAlign:'center',fontWeight:700,fontSize:16,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',marginBottom:14}}>
-        First Bank of Montana — {shareRow?.client_name||''} — Balance Sheet{budgetIncluded?' & Budget':''}
-      </div>
-      <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 60px'}}>
-        {justSubmitted ? (
-          <div style={{background:'#e8f5ea',border:'1px solid #bbf7d0',borderRadius:10,padding:18,marginBottom:20,textAlign:'center'}}>
-            <div style={{fontSize:40,marginBottom:6}}>✅</div>
-            <div style={{fontWeight:800,fontSize:18,color:'#15803d'}}>{budgetIncluded?'Balance Sheet & Budget Submitted!':'Balance Sheet Submitted!'}</div>
-            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Sent to First Bank of Montana for review. Below is a read-only copy of what you submitted, for your records.</div>
-          </div>
-        ) : (
-          <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:14,marginBottom:20}}>
-            <div style={{fontWeight:700,color:'#2d5a8e',fontSize:14}}>✅ Already Submitted</div>
-            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Your lender has received and reviewed this. Below is a read-only copy of what was submitted.</div>
-          </div>
-
-        )}
-
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:16}}>
-          <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:13,padding:'6px 12px',borderRadius:6,letterSpacing:.5,textTransform:'uppercase',marginBottom:14}}>Assets</div>
-
-          <ROSec title="Cash & Bank Accounts">
-            <ROLine label="Glacier Bank / FBMT Balance" value={fmt(n(data.cashGlacier))}/>
-            {(data.cashOther||[]).map((r,i)=><ROLine key={i} label={r.institution||'—'} value={fmt(n(r.amount))}/>)}
-            <ROSubtotal label="Total Cash" value={fmt(cashTot)}/>
-          </ROSec>
-
-          {(data.farmProducts||[]).length>0 && <ROSec title="Farm Products on Hand">
-            {data.farmProducts.map((r,i)=><ROLine key={i} label={`${r.kind||'—'} — ${r.quantity||0} ${r.unit||'bu'} @ ${fmt(n(r.pricePerUnit))}`} value={fmt(n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100))}/>)}
-            <ROSubtotal label="Total" value={fmt(farmProdTot)}/>
-          </ROSec>}
-
-          {(data.livestockMarket||[]).length>0 && <ROSec title="Market Livestock">
-            {data.livestockMarket.map((r,i)=><ROLine key={i} label={`${r.number||0} head — ${r.kind||'—'}`} value={fmt(n(r.value))}/>)}
-            <ROSubtotal label="Total" value={fmt(lsMktTot)}/>
-          </ROSec>}
-
-          {(data.cropInvestment||[]).length>0 && <ROSec title="Growing Crops (Input Costs)">
-            {data.cropInvestment.map((r,i)=><ROLine key={i} label={`${r.cropType||'—'} — ${r.acres||0} ac @ ${fmt(n(r.valuePerAcre))}/ac`} value={fmt(n(r.acres)*n(r.valuePerAcre))}/>)}
-            <ROSubtotal label="Total" value={fmt(cropInvTot)}/>
-          </ROSec>}
-
-          {(data.breedingStock||[]).length>0 && <ROSec title="Breeding Stock">
-            {data.breedingStock.map((r,i)=><ROLine key={i} label={`${r.number||0} head — ${r.kind||'—'}`} value={fmt(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value))}/>)}
-            <ROSubtotal label="Total" value={fmt(breedTot)}/>
-          </ROSec>}
-
-          {(data.realEstate||[]).length>0 && <ROSec title="Real Estate">
-            {data.realEstate.map((r,i)=><ROLine key={i} label={`${r.acres||0} ac — ${r.description||r.reType||'—'} @ ${fmt(n(r.valuePerAcre))}/ac`} value={fmt(n(r.acres)*n(r.valuePerAcre))}/>)}
-            <ROSubtotal label="Total" value={fmt(reTot)}/>
-          </ROSec>}
-
-          {(data.vehicles||[]).length>0 && <ROSec title="Titled Vehicles">
-            {data.vehicles.map((r,i)=><ROLine key={i} label={`${r.year||''} ${r.make||'—'}`} value={fmt(n(r.value))}/>)}
-            <ROSubtotal label="Total" value={fmt(vehTot)}/>
-          </ROSec>}
-
-          {(data.machinery||[]).length>0 && <ROSec title="Machinery & Equipment">
-            {data.machinery.map((r,i)=><ROLine key={i} label={`${r.year||''} ${r.make||'—'}`} value={fmt(n(r.value))}/>)}
-            <ROSubtotal label="Total" value={fmt(machTot)}/>
-          </ROSec>}
-
-          {(data.otherAssets||[]).length>0 && <ROSec title="Other Assets">
-            {data.otherAssets.map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
-            <ROSubtotal label="Total" value={fmt(otherATot)}/>
-          </ROSec>}
-
-          <div style={{background:'#1a5c25',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,display:'flex',justifyContent:'space-between'}}>
-            <span>TOTAL ASSETS</span><span>{fmt(totalAssets)}</span>
-          </div>
-        </div>
-
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:16}}>
-          <div style={{background:'#4a0810',color:'white',fontWeight:700,fontSize:13,padding:'6px 12px',borderRadius:6,letterSpacing:.5,textTransform:'uppercase',marginBottom:14}}>Liabilities</div>
-
-          {(data.operatingNotes||[]).length>0 && <ROSec title="Operating Notes & Lines of Credit">
-            {data.operatingNotes.map((r,i)=><ROLine key={i} label={r.creditor||'—'} value={fmt(n(r.balance))}/>)}
-            <ROSubtotal label="Total" value={fmt(opNotesTot)}/>
-          </ROSec>}
-
-          {(data.intermediatDebt||[]).length>0 && <ROSec title="Term Debt / Equipment Loans">
-            {data.intermediatDebt.map((r,i)=><ROLine key={i} label={`${r.creditor||'—'}${r.security?' ('+r.security+')':''} — bal ${fmt(n(r.principal))}`} value={fmt(n(r.annualPmt))+'/yr'}/>)}
-            <ROSubtotal label="Annual Payments" value={fmt(termTot)}/>
-          </ROSec>}
-
-          {(data.reMortgages||[]).length>0 && <ROSec title="Real Estate Mortgages">
-            {data.reMortgages.map((r,i)=><ROLine key={i} label={r.lienHolder||'—'} value={fmt(n(r.principal))}/>)}
-            <ROSubtotal label="Total" value={fmt(reMortTot)}/>
-          </ROSec>}
-
-          <ROSec title="Taxes Due & Other Liabilities">
-            {taxTot>0 && <ROLine label="Income Taxes Due" value={fmt(taxTot)}/>}
-            {(data.otherLiabilities||[]).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.balance))}/>)}
-          </ROSec>
-
-          <div style={{background:'#7a1a1a',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,display:'flex',justifyContent:'space-between'}}>
-            <span>TOTAL LIABILITIES</span><span>{fmt(totalLiab)}</span>
-          </div>
-        </div>
-
-        <div style={{background:netWorth>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginBottom:24,display:'flex',justifyContent:'space-between',fontSize:16}}>
-          <span>NET WORTH</span><span>{fmt(netWorth)}</span>
-        </div>
-
-        {budgetIncluded && (
-          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:24}}>
-            <div style={{background:'#1a5c25',color:'white',fontWeight:700,fontSize:13,padding:'6px 12px',borderRadius:6,letterSpacing:.5,textTransform:'uppercase',marginBottom:14}}>🌾 Budget</div>
-
-            {budgetCrops.filter(r=>r.crop||r.acres).length>0 && <ROSec title="Crop Income">
-              {budgetCrops.filter(r=>r.crop||r.acres).map((r,i)=><ROLine key={i} label={`${r.crop||'—'} — ${r.acres||0} ${r.unit||'bu'} @ ${fmt(n(r.price))}, ${r.share||100}% share`} value={fmt(n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100))}/>)}
-            </ROSec>}
-
-            {budgetLivestock.filter(r=>r.type||r.head).length>0 && <ROSec title="Livestock Income">
-              {budgetLivestock.filter(r=>r.type||r.head).map((r,i)=><ROLine key={i} label={`${r.head||0} hd — ${r.type||'—'} @ ${r.lbs||0} lbs, ${fmt(n(r.price))}/lb`} value={fmt(n(r.head)*n(r.lbs)*n(r.price))}/>)}
-            </ROSec>}
-
-            {budgetMisc.filter(r=>r.description||r.amount).length>0 && <ROSec title="Miscellaneous Income">
-              {budgetMisc.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
-            </ROSec>}
-
-            <ROSubtotal label="Total Income" value={fmt(bIncomeTotRO)}/>
-
-            {budgetExpenses.filter(r=>r.description||r.amount).length>0 && <ROSec title="Expenses">
-              {budgetExpenses.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
-              <ROSubtotal label="Total Expenses" value={fmt(bExpTotRO)}/>
-            </ROSec>}
-
-            <div style={{background:bNetRO>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginTop:10,display:'flex',justifyContent:'space-between',fontSize:15}}>
-              <span>{bNetRO>=0?'PROJECTED NET INCOME':'PROJECTED NET LOSS'}</span><span>{fmt(Math.abs(bNetRO))}</span>
-            </div>
-          </div>
-        )}
-
-        <div style={{textAlign:'center',fontSize:11,color:'#9ca3af'}}>First Bank of Montana · This is a read-only copy for your records</div>
-      </div>
-    </div>
-  );
-
-  if(stage==='reviewed') return renderSummary(false);
-  if(stage==='done') return renderSummary(true);
 
   return (
     <div style={pageStyle}>
@@ -3481,6 +2926,7 @@ function CustomerBudgetForm({shareId}) {
       if(!rows.length){setPinErr('Link not found or expired.');return;}
       const row=rows[0];
       if(new Date(row.expires_at)<new Date()){setStage('expired');return;}
+      if(row.status==='reviewed'){setStage('reviewed');return;}
       if(String(row.pin).trim()!==pin.trim()){setPinErr('Incorrect PIN.');return;}
       setShareRow(row);setClientName(row.client_name||'');
       if(row.customer_draft){
@@ -3490,7 +2936,7 @@ function CustomerBudgetForm({shareId}) {
         if(d.budgetMisc)setMisc(d.budgetMisc);
         if(d.budgetExpenses)setExpenses(d.budgetExpenses);
       }
-      setStage(row.status==='reviewed'?'reviewed':'form');
+      setStage('form');
     }catch(e){setPinErr('Connection error: '+e.message);}
   };
 
@@ -3520,6 +2966,13 @@ function CustomerBudgetForm({shareId}) {
   };
   const remExp=(i)=>{const ne=expenses.filter((_,j)=>j!==i);setExpenses(ne);schedSave(crops,livestock,misc,ne);};
 
+  const cropTot=crops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
+  const lsTot=livestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+  const miscTot=misc.reduce((s,r)=>s+n(r.amount),0);
+  const totalIncome=cropTot+lsTot+miscTot;
+  const totalExpenses=expenses.reduce((s,r)=>s+n(r.amount),0);
+  const net=totalIncome-totalExpenses;
+
   const submit=async()=>{
     setSubmitting(true);
     try{
@@ -3533,14 +2986,9 @@ function CustomerBudgetForm({shareId}) {
   const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
   const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
 
-  const cropTot=crops.reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100),0);
-  const lsTot=livestock.reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
-  const miscTot=misc.reduce((s,r)=>s+n(r.amount),0);
-  const totalIncome=cropTot+lsTot+miscTot;
-  const totalExpenses=expenses.reduce((s,r)=>s+n(r.amount),0);
-  const net=totalIncome-totalExpenses;
-
   if(stage==='expired')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>⏰</div><div style={{fontWeight:700,fontSize:18,color:'#991b1b',marginBottom:8}}>Link Expired</div><p style={{color:'#6b7280',fontSize:14}}>This budget link has expired. Please contact your lender.</p></div></div>;
+  if(stage==='reviewed')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:48,marginBottom:12}}>✅</div><div style={{fontWeight:700,fontSize:18,color:'#15803d',marginBottom:8}}>Already Submitted</div><p style={{color:'#6b7280',fontSize:14}}>Your budget has been received. Thank you!</p></div></div>;
+  if(stage==='done')return <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}><div style={{...cardStyle,textAlign:'center'}}><div style={{fontSize:56,marginBottom:12}}>✅</div><div style={{fontWeight:800,fontSize:22,color:'#15803d',marginBottom:8}}>Budget Submitted!</div><p style={{color:'#6b7280',fontSize:14,lineHeight:1.6}}>Your budget has been sent to First Bank of Montana.</p></div></div>;
 
   if(stage==='pin')return(
     <div style={{...pageStyle,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
@@ -3558,76 +3006,6 @@ function CustomerBudgetForm({shareId}) {
       </div>
     </div>
   );
-
-  // ── Read-only confirmation summary — used for the just-submitted and
-  // already-reviewed stages so the customer keeps a copy of what they sent.
-  const ROLine = ({label,value}) => (
-    <div style={{display:'flex',justifyContent:'space-between',gap:10,padding:'3px 2px',fontSize:13.5,color:'#374151'}}>
-      <span>{label}</span><span style={{fontWeight:600,whiteSpace:'nowrap'}}>{value}</span>
-    </div>
-  );
-  const renderSummary = (justSubmitted) => (
-    <div style={pageStyle}>
-      <style>{`@media print{.fbmt-no-print{display:none !important}.fbmt-print-only{display:block !important}body{background:white !important}}`}</style>
-      <div className="fbmt-no-print" style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <span style={{fontSize:20}}>🌾</span>
-          <div><div style={{color:'white',fontWeight:700,fontSize:15}}>First Bank of Montana</div><div style={{color:'rgba(255,255,255,.6)',fontSize:11}}>{clientName} — Budget</div></div>
-        </div>
-        <button onClick={()=>window.print()} style={{background:'rgba(255,255,255,.15)',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🖨️ Print / Save PDF</button>
-      </div>
-      <div className="fbmt-print-only" style={{display:'none',padding:'10px 0',textAlign:'center',fontWeight:700,fontSize:16,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',marginBottom:14}}>
-        First Bank of Montana — {clientName} — Budget
-      </div>
-      <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 60px'}}>
-        {justSubmitted ? (
-          <div style={{background:'#e8f5ea',border:'1px solid #bbf7d0',borderRadius:10,padding:18,marginBottom:20,textAlign:'center'}}>
-            <div style={{fontSize:40,marginBottom:6}}>✅</div>
-            <div style={{fontWeight:800,fontSize:18,color:'#15803d'}}>Budget Submitted!</div>
-            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Sent to First Bank of Montana. Below is a read-only copy of what you submitted, for your records.</div>
-          </div>
-        ) : (
-          <div style={{background:'#f0f6ff',border:'1px solid #c0d8f0',borderRadius:10,padding:14,marginBottom:20}}>
-            <div style={{fontWeight:700,color:'#2d5a8e',fontSize:14}}>✅ Already Submitted</div>
-            <div style={{fontSize:13,color:'#555',marginTop:4,lineHeight:1.5}}>Your lender has received this. Below is a read-only copy of what was submitted.</div>
-          </div>
-        )}
-
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
-          {[['Total Income',totalIncome,'#1a5c25'],['Total Expenses',totalExpenses,'#7a1a1a'],[net>=0?'Net Income':'Net Loss',Math.abs(net),net>=0?'#1a5c25':'#7a1a1a']].map(([l,v,c])=>(
-            <div key={l} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
-              <div style={{fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:4}}>{l}</div>
-              <div style={{fontSize:16,fontWeight:700,color:c}}>{fmt(v)}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:18,marginBottom:16}}>
-          {crops.filter(r=>r.crop||r.acres).length>0 && <div style={{marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#1a5c25',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Crop Income</div>
-            {crops.filter(r=>r.crop||r.acres).map((r,i)=><ROLine key={i} label={`${r.crop||'—'} — ${r.acres||0} ${r.unit||'bu'} @ ${fmt(n(r.price))}, ${r.share||100}% share`} value={fmt(n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||100)/100))}/>)}
-          </div>}
-          {livestock.filter(r=>r.type||r.head).length>0 && <div style={{marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#1a5c25',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Livestock Income</div>
-            {livestock.filter(r=>r.type||r.head).map((r,i)=><ROLine key={i} label={`${r.head||0} hd — ${r.type||'—'} @ ${r.lbs||0} lbs, ${fmt(n(r.price))}/lb`} value={fmt(n(r.head)*n(r.lbs)*n(r.price))}/>)}
-          </div>}
-          {misc.filter(r=>r.description||r.amount).length>0 && <div style={{marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#1a5c25',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Miscellaneous Income</div>
-            {misc.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
-          </div>}
-          {expenses.filter(r=>r.description||r.amount).length>0 && <div>
-            <div style={{fontSize:11,fontWeight:700,color:'#7a1a1a',textTransform:'uppercase',letterSpacing:.4,marginBottom:6,borderBottom:'1px solid #eee',paddingBottom:4}}>Expenses</div>
-            {expenses.filter(r=>r.description||r.amount).map((r,i)=><ROLine key={i} label={r.description||'—'} value={fmt(n(r.amount))}/>)}
-          </div>}
-        </div>
-
-        <div style={{textAlign:'center',fontSize:11,color:'#9ca3af'}}>First Bank of Montana · This is a read-only copy for your records</div>
-      </div>
-    </div>
-  );
-
-  if(stage==='reviewed') return renderSummary(false);
-  if(stage==='done') return renderSummary(true);
 
   const inpStyle={border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,width:'100%',fontFamily:'inherit',outline:'none',boxSizing:'border-box'};
   const secHead=(color,title)=><div style={{background:color,color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase',marginBottom:0}}>{title}</div>;
@@ -3785,7 +3163,6 @@ function ExpenseListEditor({expenseList,setExpenseList,onClose}) {
 // ── Supabase storage layer ─────────────────────────────────────────────────────
 const SUPABASE_URL = (window.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
-const FBMT_FUNCTION_SECRET = window.FBMT_FUNCTION_SECRET || '';
 
 // Auth session — module-level so all storage calls pick it up automatically
 let currentSession = null;
@@ -3880,22 +3257,21 @@ function makeKey(clientName, asOfDate) {
 // into an undefined scope. Referenced by InspectionView and CustomerInspectForm.
 
 const STORAGE_PREFIX = "fbmt_bs:";
-// Scopes storage.list()/get() to a specific lender's records. Without this,
-// balance_sheets reads carried no user_id filter and could return ANY
-// lender's/customer's saved sheet in the whole table whose client_name
-// happened to match — e.g. a "linked entity" name lookup during CA package
-// printing could pull in a different customer's submission entirely.
-let ACTIVE_OWNER_ID = null;
 const FBMT_LOGO = "data:image/jpeg;base64,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";
 
 const storage = {
-  setOwner(id) { ACTIVE_OWNER_ID = id || null; },
   async list(prefix) {
     if (!isConfigured()) return { keys: [] };
+    // Scope every read to the logged-in user. Without this, the (permissive)
+    // RLS policy lets any authenticated session read every row in balance_sheets,
+    // which is what caused phantom entities to appear in the link-entity picker.
+    const uid = currentSession?.user?.id;
+    if (!uid) return { keys: [] };
     const clientPart = prefix.replace('fbmt_bs:', '').replace(/:$/, '').replace(/_/g, ' ');
-    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date&order=as_of_date.desc';
+    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date'
+      + '&user_id=eq.' + encodeURIComponent(uid)
+      + '&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
-    if (ACTIVE_OWNER_ID) url += '&user_id=eq.' + encodeURIComponent(ACTIVE_OWNER_ID);
     const resp = await fetch(url, { headers: supaHeaders() });
     if (!resp.ok) {
       const err = await resp.text();
@@ -3907,10 +3283,13 @@ const storage = {
   },
   async get(key) {
     if (!isConfigured()) return null;
+    const uid = currentSession?.user?.id;
+    if (!uid) return null;
     const { clientName, asOfDate } = parseKey(key);
-    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
-      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + '&limit=1';
-    if (ACTIVE_OWNER_ID) url += '&user_id=eq.' + encodeURIComponent(ACTIVE_OWNER_ID);
+    const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate
+      + '&user_id=eq.' + encodeURIComponent(uid)
+      + '&limit=1';
     const resp = await fetch(url, { headers: supaHeaders() });
     if (!resp.ok) return null;
     const rows = await resp.json();
@@ -3921,19 +3300,25 @@ const storage = {
     if (!isConfigured()) {
       throw new Error('Supabase not configured — edit public/config.js with your Project URL and anon key');
     }
+    const uid = currentSession?.user?.id;
+    if (!uid) throw new Error('Not signed in — cannot save.');
     const { clientName, asOfDate } = parseKey(key);
     const parsed = JSON.parse(value);
-    const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: currentSession?.user?.id || null };
+    const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: uid };
 
-    // Check if record already exists
+    // Check if THIS USER already has a record for this key. Scoping the check
+    // by user_id prevents silently overwriting another user's row that happens
+    // to share the same (client_name, as_of_date) — the UNIQUE constraint by
+    // itself doesn't prevent the PATCH from hitting somebody else's row.
+    const uidFilter = '&user_id=eq.' + encodeURIComponent(uid);
     const checkUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
-      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + '&limit=1';
+      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + uidFilter + '&limit=1';
     const checkResp = await fetch(checkUrl, { headers: supaHeaders() });
     const existing = checkResp.ok ? await checkResp.json() : [];
 
     let resp;
     if (existing.length > 0) {
-      // Record exists — update with PATCH
+      // Record exists (owned by this user) — update with PATCH, still scoped by user_id
       resp = await fetch(checkUrl, {
         method: 'PATCH',
         headers: supaHeaders(),
@@ -3955,9 +3340,12 @@ const storage = {
   },
   async delete(key) {
     if (!isConfigured()) return null;
+    const uid = currentSession?.user?.id;
+    if (!uid) return null;
     const { clientName, asOfDate } = parseKey(key);
     const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
-      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate;
+      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate
+      + '&user_id=eq.' + encodeURIComponent(uid);
     const resp = await fetch(url, { method: 'DELETE', headers: supaHeaders() });
     return resp.ok ? { key, deleted: true } : null;
   }
@@ -4061,17 +3449,17 @@ function BSCompareModal({review, onAccept, onDiscard}) {
     supplies:   (d.supplies||[]).reduce((s,r)=>s+nm(r.value),0),
     otherCur:   (d.otherCurrent||[]).reduce((s,r)=>s+nm(r.amount),0)+(d.federalPayments||[]).reduce((s,r)=>s+nm(r.amount),0),
     lsMkt:      (d.livestockMarket||[]).reduce((s,r)=>s+nm(r.value),0),
-    breeding:   (d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?nm(r.number)*nm(r.valuePerHead):nm(r.value)),0),
+    breeding:   (d.breedingStock||[]).reduce((s,r)=>s+nm(r.value),0),
     re:         (d.realEstate||[]).reduce((s,r)=>s+nm(r.acres)*nm(r.valuePerAcre),0),
     vehicles:   (d.vehicles||[]).reduce((s,r)=>s+nm(r.value),0),
     machinery:  (d.machinery||[]).reduce((s,r)=>s+nm(r.value),0),
     otherAssets:(d.otherAssets||[]).reduce((s,r)=>s+nm(r.amount),0),
     opNotes:    (d.operatingNotes||[]).reduce((s,r)=>s+nm(r.balance),0),
     acctsDue:   (d.accountsDue||[]).reduce((s,r)=>s+nm(r.amount),0),
-    intermed:   (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+nm(r.principal),0),
-    reCur:      (d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+nm(r.annualPmt),0),
-    reMort:     (d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+nm(r.principal),0),
-    otherLiab:  (d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+nm(r.amount),0),
+    intermed:   (d.intermediatDebt||[]).reduce((s,r)=>s+nm(r.principal),0),
+    reCur:      (d.reCurrent||[]).reduce((s,r)=>s+nm(r.annualPmt),0),
+    reMort:     (d.reMortgages||[]).reduce((s,r)=>s+nm(r.principal),0),
+    otherLiab:  (d.otherLiabilities||[]).reduce((s,r)=>s+nm(r.amount),0),
   });
   const O = calcBS(orig), C = calcBS(draft);
   const oTA = O.cash+O.farmProd+O.supplies+O.otherCur+O.lsMkt+O.breeding+O.re+O.vehicles+O.machinery+O.otherAssets;
@@ -4163,687 +3551,15 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
-
-// ─── ForcePasswordChange ─────────────────────────────────────────────────────
-function ForcePasswordChange({ session, onDone }) {
-  const [newPwd, setNewPwd] = React.useState('');
-  const [confirm, setConfirm] = React.useState('');
-  const [error, setError] = React.useState('');
-  const [loading, setLoading] = React.useState(false);
-  const handleChange = async () => {
-    if (newPwd.length < 8) { setError('Password must be at least 8 characters'); return; }
-    if (newPwd !== confirm) { setError('Passwords do not match'); return; }
-    setLoading(true); setError('');
-    try {
-      const r = await fetch(window.SUPABASE_URL + '/auth/v1/user', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'apikey': window.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
-        body: JSON.stringify({ password: newPwd })
-      });
-      if (!r.ok) throw new Error('Failed to update password');
-      await fetch(window.SUPABASE_URL + '/rest/v1/profiles?id=eq.' + session.user.id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'apikey': window.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ force_password_change: false })
-      });
-      onDone();
-    } catch(e) { setError(e.message); }
-    setLoading(false);
-  };
-  return (
-    <div style={{minHeight:'100vh',background:'#6B0E1E',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
-      <div style={{background:'white',borderRadius:14,padding:40,width:'min(420px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-        <div style={{textAlign:'center',marginBottom:24}}>
-          <div style={{fontSize:32,marginBottom:8}}>🔐</div>
-          <div style={{fontWeight:700,fontSize:20,color:'#6B0E1E'}}>Set Your Password</div>
-          <div style={{fontSize:13,color:'#888',marginTop:6}}>Your administrator set a temporary password. Please create a new one to continue.</div>
-        </div>
-        {error && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'10px 14px',marginBottom:14,fontSize:13,color:'#991b1b'}}>{error}</div>}
-        <div style={{marginBottom:12}}>
-          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>NEW PASSWORD</label>
-          <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="Minimum 8 characters"
-            style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}/>
-        </div>
-        <div style={{marginBottom:20}}>
-          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>CONFIRM PASSWORD</label>
-          <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="Re-enter new password"
-            onKeyDown={e=>e.key==='Enter'&&handleChange()}
-            style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}/>
-        </div>
-        <button onClick={handleChange} disabled={loading}
-          style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:11,fontWeight:700,fontSize:15,cursor:loading?'wait':'pointer',opacity:loading?.7:1,fontFamily:'inherit'}}>
-          {loading ? 'Saving...' : 'Set New Password & Continue'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── AdminScreen ─────────────────────────────────────────────────────────────
-function AdminScreen({ session, profile, onSignOut, onClose }) {
-  const [users, setUsers] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [showAdd, setShowAdd] = React.useState(false);
-  const [editUser, setEditUser] = React.useState(null);
-  const [resetUser, setResetUser] = React.useState(null);
-  const [newPwd, setNewPwd] = React.useState('');
-  const [form, setForm] = React.useState({ fullName:'', email:'', role:'lender', password:'' });
-  const [formError, setFormError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
-  const [msg, setMsg] = React.useState('');
-
-  const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
-  const adminCall = async (action, params) => {
-    const r = await fetch('/.netlify/functions/admin-user', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-fbmt-secret':window.FBMT_FUNCTION_SECRET||''},
-      body:JSON.stringify({action,...params})
-    });
-    return r.json();
-  };
-
-  const loadUsers = async () => {
-    setLoading(true);
-    try {
-      const r = await fetch(window.SUPABASE_URL+'/rest/v1/profiles?select=*&order=created_at.asc', {headers:hdr});
-      setUsers(await r.json());
-    } catch {}
-    setLoading(false);
-  };
-  React.useEffect(()=>{ loadUsers(); },[]);
-
-  const handleAddUser = async () => {
-    if (!form.fullName||!form.email||!form.password) { setFormError('All fields required'); return; }
-    if (form.password.length < 8) { setFormError('Password must be at least 8 characters'); return; }
-    setSaving(true); setFormError('');
-    const res = await adminCall('create_user', { fullName:form.fullName, email:form.email, role:form.role, password:form.password });
-    if (res.error) { setFormError(res.error); setSaving(false); return; }
-    setMsg('User created successfully'); setShowAdd(false); setForm({fullName:'',email:'',role:'lender',password:''});
-    await loadUsers(); setSaving(false);
-  };
-
-  const handleUpdateRole = async (userId, updates) => {
-    await adminCall('update_profile', { userId, updates });
-    await loadUsers(); setEditUser(null); setMsg('User updated');
-  };
-
-  const handleResetPassword = async () => {
-    if (newPwd.length < 8) { setFormError('Password must be at least 8 characters'); return; }
-    setSaving(true);
-    const res = await adminCall('reset_password', { userId: resetUser.id, password: newPwd });
-    if (res.error) { setFormError(res.error); setSaving(false); return; }
-    setMsg('Password reset — user will be prompted to change on next login');
-    setResetUser(null); setNewPwd(''); setSaving(false);
-  };
-
-  const roleColor = r => r==='admin'?'#6B0E1E':r==='ca'?'#1d4ed8':'#374151';
-  const inp = (val,onChange,ph,type='text') => (
-    <input type={type} value={val} onChange={e=>onChange(e.target.value)} placeholder={ph}
-      style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8}}/>
-  );
-
-  return (
-    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
-      {/* Header */}
-      <div style={{background:'#6B0E1E',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <div>
-          <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana — Admin</div>
-          <div style={{fontSize:12,opacity:.8}}>User Management</div>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <span style={{fontSize:13,opacity:.8}}>{profile?.full_name}</span>
-          {onClose && <button onClick={onClose} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>← Back to App</button>}
-          <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
-        </div>
-      </div>
-
-      <div style={{maxWidth:900,margin:'32px auto',padding:'0 24px'}}>
-        {msg && <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#166534'}}>{msg} <button onClick={()=>setMsg('')} style={{float:'right',background:'none',border:'none',cursor:'pointer',color:'#166534'}}>✕</button></div>}
-
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
-          <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
-          <button onClick={()=>{setShowAdd(true);setFormError('');}}
-            style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            + Add User
-          </button>
-        </div>
-
-        {loading ? <div style={{textAlign:'center',padding:40,color:'#888'}}>Loading users...</div> : (
-          <div style={{background:'white',borderRadius:10,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead>
-                <tr style={{background:'#1a1a1a',color:'white'}}>
-                  {['Name','Email','Role','Status','Actions'].map(h=>(
-                    <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,letterSpacing:'.5px'}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u,i)=>(
-                  <tr key={u.id} style={{borderBottom:'1px solid #f0f0f0',background:i%2===0?'white':'#fafafa'}}>
-                    <td style={{padding:'10px 16px',fontSize:13,fontWeight:600}}>{u.full_name}</td>
-                    <td style={{padding:'10px 16px',fontSize:13,color:'#555'}}>{u.email}</td>
-                    <td style={{padding:'10px 16px'}}>
-                      <span style={{background:roleColor(u.role),color:'white',borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700}}>
-                        {(u.role||'').toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{padding:'10px 16px'}}>
-                      <span style={{color:u.is_active!==false?'#15803d':'#dc2626',fontSize:12,fontWeight:600}}>
-                        {u.is_active!==false?'Active':'Inactive'}
-                      </span>
-                    </td>
-                    <td style={{padding:'10px 16px'}}>
-                      <div style={{display:'flex',gap:6}}>
-                        <button onClick={()=>{setEditUser({...u});setFormError('');}}
-                          style={{background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:'#1d4ed8',fontWeight:600}}>Edit</button>
-                        <button onClick={()=>{setResetUser(u);setNewPwd('');setFormError('');}}
-                          style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:'#c2410c',fontWeight:600}}>Reset Pwd</button>
-                        {u.id !== session.user.id && (
-                          <button onClick={()=>handleUpdateRole(u.id,{is_active:u.is_active===false})}
-                            style={{background:u.is_active!==false?'#fef2f2':'#f0fdf4',border:'1px solid '+(u.is_active!==false?'#fca5a5':'#86efac'),borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:u.is_active!==false?'#dc2626':'#15803d',fontWeight:600}}>
-                            {u.is_active!==false?'Deactivate':'Activate'}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Add User Modal */}
-      {showAdd && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
-          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-            <div style={{fontWeight:700,fontSize:17,marginBottom:20,color:'#1a1a1a'}}>Add New User</div>
-            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
-            {inp(form.fullName,v=>setForm(f=>({...f,fullName:v})),'Full Name')}
-            {inp(form.email,v=>setForm(f=>({...f,email:v})),'Email Address','email')}
-            {inp(form.password,v=>setForm(f=>({...f,password:v})),'Temporary Password (min 8 chars)','password')}
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
-              <select value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}
-                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
-                <option value="lender">Lender</option>
-                <option value="ca">Credit Analyst (CA)</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
-            <div style={{fontSize:11,color:'#888',marginBottom:16}}>User will be prompted to change their password on first login.</div>
-            <div style={{display:'flex',gap:10}}>
-              <button onClick={handleAddUser} disabled={saving}
-                style={{flex:1,background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:saving?'wait':'pointer',fontFamily:'inherit',opacity:saving?.7:1}}>
-                {saving?'Creating...':'Create User'}
-              </button>
-              <button onClick={()=>{setShowAdd(false);setFormError('');}}
-                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit User Modal */}
-      {editUser && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
-          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-            <div style={{fontWeight:700,fontSize:17,marginBottom:20}}>Edit User — {editUser.full_name}</div>
-            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
-            {inp(editUser.full_name,v=>setEditUser(u=>({...u,full_name:v})),'Full Name')}
-            {inp(editUser.email,v=>setEditUser(u=>({...u,email:v})),'Email')}
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
-              <select value={editUser.role} onChange={e=>setEditUser(u=>({...u,role:e.target.value}))}
-                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
-                <option value="lender">Lender</option>
-                <option value="ca">Credit Analyst (CA)</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
-            <div style={{display:'flex',gap:10}}>
-              <button onClick={()=>handleUpdateRole(editUser.id,{full_name:editUser.full_name,email:editUser.email,role:editUser.role})}
-                style={{flex:1,background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
-                Save Changes
-              </button>
-              <button onClick={()=>{setEditUser(null);setFormError('');}}
-                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Password Modal */}
-      {resetUser && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
-          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-            <div style={{fontWeight:700,fontSize:17,marginBottom:8}}>Reset Password</div>
-            <div style={{fontSize:13,color:'#555',marginBottom:20}}>Set a new temporary password for <strong>{resetUser.full_name}</strong>. They will be prompted to change it on next login.</div>
-            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
-            {inp(newPwd,setNewPwd,'New temporary password (min 8 chars)','password')}
-            <div style={{display:'flex',gap:10}}>
-              <button onClick={handleResetPassword} disabled={saving}
-                style={{flex:1,background:'#c2410c',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:saving?'wait':'pointer',fontFamily:'inherit',opacity:saving?.7:1}}>
-                {saving?'Resetting...':'Reset Password'}
-              </button>
-              <button onClick={()=>{setResetUser(null);setFormError('');}}
-                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── CAPortal ─────────────────────────────────────────────────────────────────
-function CAPortal({ session, profile, onSignOut, onOpen }) {
-  const [shares, setShares] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [openSheet, setOpenSheet] = React.useState(null); // {share, data}
-  const [editData, setEditData] = React.useState(null);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [submitMsg, setSubmitMsg] = React.useState('');
-  const [caEdits, setCaEdits] = React.useState({}); // shareId -> pending edit
-
-  const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
-
-  const loadShares = async () => {
-    setLoading(true);
-    try {
-      const r = await fetch(window.SUPABASE_URL+'/rest/v1/ca_shares?ca_user_id=eq.'+session.user.id+'&dismissed_by_ca=eq.false&select=*&order=shared_at.desc', {headers:hdr});
-      const data = await r.json();
-      setShares(Array.isArray(data) ? data : []);
-      // Load pending edits for these shares
-      if (data.length) {
-        const ids = data.map(s=>s.id).join(',');
-        const er = await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?ca_user_id=eq.'+session.user.id+'&status=eq.pending&select=*', {headers:hdr});
-        const edits = await er.json();
-        const editMap = {};
-        (edits||[]).forEach(e => { editMap[e.share_id] = e; });
-        setCaEdits(editMap);
-      }
-    } catch {}
-    setLoading(false);
-  };
-  React.useEffect(()=>{ loadShares(); },[]);
-
-  const dismissShare = async (shareId) => {
-    setShares(s=>s.filter(x=>x.id!==shareId));
-    await fetch(window.SUPABASE_URL+'/rest/v1/ca_shares?id=eq.'+shareId, {
-      method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
-      body: JSON.stringify({dismissed_by_ca:true})
-    });
-  };
-
-  const openForEdit = (share) => {
-    const data = share.sheet_data || {};
-    setEditData({...data});
-    setOpenSheet(share);
-    setSubmitMsg('');
-  };
-
-  const handleSubmitChanges = async () => {
-    if (!editData || !openSheet) return;
-    setSubmitting(true);
-    try {
-      // Check if there's already a pending edit — update it, otherwise insert
-      const existing = caEdits[openSheet.id];
-      if (existing) {
-        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {
-          method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
-          body: JSON.stringify({edited_data:editData, submitted_at:new Date().toISOString(), status:'pending'})
-        });
-      } else {
-        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits', {
-          method:'POST', headers:{...hdr,'Prefer':'return=minimal'},
-          body: JSON.stringify({
-            share_id: openSheet.id,
-            ca_user_id: session.user.id,
-            ca_name: profile?.full_name || session.user.email,
-            client_name: openSheet.client_name,
-            sheet_key: openSheet.sheet_key,
-            edited_data: editData,
-            status: 'pending'
-          })
-        });
-      }
-      setSubmitMsg('Changes submitted to lender for review.');
-      await loadShares();
-    } catch(e) { setSubmitMsg('Error: '+e.message); }
-    setSubmitting(false);
-  };
-
-  // Group shares by lender
-  const byLender = shares.reduce((acc,s) => {
-    const key = s.lender_name || 'Unknown Lender';
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(s);
-    return acc;
-  },{});
-
-  if (openSheet) {
-    return (
-      <CASheetView
-        share={openSheet}
-        data={editData}
-        setData={setEditData}
-        session={session}
-        profile={profile}
-        onBack={()=>{ setOpenSheet(null); setEditData(null); }}
-        onSubmit={handleSubmitChanges}
-        submitting={submitting}
-        submitMsg={submitMsg}
-        hasPendingEdit={!!caEdits[openSheet.id]}
-      />
-    );
-  }
-
-  return (
-    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
-      <div style={{background:'#6B0E1E',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <div>
-          <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana</div>
-          <div style={{fontSize:12,opacity:.8}}>Credit Analyst Portal — {profile?.full_name}</div>
-        </div>
-        <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
-      </div>
-
-      <div style={{maxWidth:800,margin:'32px auto',padding:'0 24px'}}>
-        {loading ? (
-          <div style={{textAlign:'center',padding:60,color:'#888'}}>Loading shared files...</div>
-        ) : shares.length === 0 ? (
-          <div style={{textAlign:'center',padding:60,color:'#888',background:'white',borderRadius:12,boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
-            <div style={{fontSize:40,marginBottom:12}}>📂</div>
-            <div style={{fontWeight:600,fontSize:16,marginBottom:8}}>No shared files yet</div>
-            <div style={{fontSize:13}}>Files shared with you by lenders will appear here.</div>
-          </div>
-        ) : (
-          Object.entries(byLender).map(([lender, lenderShares]) => (
-            <div key={lender} style={{marginBottom:28}}>
-              <div style={{fontWeight:700,fontSize:15,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',paddingBottom:6,marginBottom:12}}>
-                🏦 {lender}
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {lenderShares.map(share => (
-                  <div key={share.id} style={{background:'white',borderRadius:10,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'0 1px 4px rgba(0,0,0,.08)',border:'1px solid #e5e7eb'}}>
-                    <div style={{fontSize:24}}>📋</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a'}}>{share.client_name}</div>
-                      <div style={{fontSize:12,color:'#888',marginTop:2}}>
-                        Shared {new Date(share.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-                        {caEdits[share.id] && <span style={{marginLeft:8,background:'#fef3c7',color:'#92400e',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>Changes Pending Review</span>}
-                      </div>
-                    </div>
-                    <button onClick={()=> onOpen ? onOpen(share) : openForEdit(share)}
-                      style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'7px 16px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-                      Open
-                    </button>
-                    <button onClick={()=>{ if(window.confirm("Remove this file from your portal? This does not delete the lender original.")) dismissShare(share.id); }}
-                      style={{background:'none',border:'1px solid #f0c0c0',borderRadius:7,padding:'7px 12px',fontSize:12,cursor:'pointer',color:'#dc2626',fontFamily:'inherit'}}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── CASheetView ─────────────────────────────────────────────────────────────
-function CASheetView({ share, data, setData, session, profile, onBack, onSubmit, submitting, submitMsg, hasPendingEdit }) {
-  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-  const fmt = v => n(v)?'$'+Math.round(n(v)).toLocaleString():'—';
-
-  const set = (field, val) => setData(d=>({...d,[field]:val}));
-  const setArr = (field, i, key, val) => setData(d=>({...d,[field]:d[field].map((r,j)=>j===i?{...r,[key]:val}:r)}));
-
-  const sections = [
-    {label:'Cash',fields:[{label:'Glacier Bank',key:'cashGlacier',type:'num'}]},
-  ];
-
-  return (
-    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
-      <div style={{background:'#1d4ed8',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:16}}>
-        <div style={{display:'flex',alignItems:'center',gap:14}}>
-          <button onClick={onBack} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>← Back</button>
-          <div>
-            <div style={{fontWeight:800,fontSize:16}}>{share.client_name}</div>
-            <div style={{fontSize:11,opacity:.8}}>CA Edit Mode — changes go to lender for review</div>
-          </div>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          {submitMsg && <span style={{fontSize:12,background:'rgba(255,255,255,.15)',padding:'4px 10px',borderRadius:6}}>{submitMsg}</span>}
-          <button onClick={onSubmit} disabled={submitting}
-            style={{background:'#fbbf24',color:'#1a1a1a',border:'none',borderRadius:7,padding:'8px 20px',fontWeight:800,fontSize:14,cursor:submitting?'wait':'pointer',fontFamily:'inherit',opacity:submitting?.7:1}}>
-            {submitting?'Submitting...':(hasPendingEdit?'Resubmit Changes':'Submit Changes to Lender')}
-          </button>
-        </div>
-      </div>
-
-      <div style={{maxWidth:1000,margin:'24px auto',padding:'0 24px'}}>
-        <div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:'10px 16px',marginBottom:20,fontSize:13,color:'#1e40af'}}>
-          📝 You are reviewing <strong>{share.client_name}</strong> shared by <strong>{share.lender_name}</strong>. Edit any fields below and click <strong>Submit Changes to Lender</strong> when done. The lender will review your changes before they are saved.
-        </div>
-
-        {/* Balance Sheet Editor — simplified view of all main fields */}
-        <CABalanceSheetEditor data={data} setData={setData} />
-      </div>
-    </div>
-  );
-}
-
-// ─── CABalanceSheetEditor ────────────────────────────────────────────────────
-function CABalanceSheetEditor({ data, setData }) {
-  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-  const fmt = v => n(v)?'$'+Math.round(n(v)).toLocaleString():'';
-  const set = (k,v) => setData(d=>({...d,[k]:v}));
-  const setArr = (f,i,k,v) => setData(d=>({...d,[f]:d[f].map((r,j)=>j===i?{...r,[k]:v}:r)}));
-  const addRow = (f,empty) => setData(d=>({...d,[f]:[...(d[f]||[]),empty]}));
-  const removeRow = (f,i) => setData(d=>({...d,[f]:(d[f]||[]).filter((_,j)=>j!==i)}));
-
-  const inp = (val,onChange,ph='',prefix='') => (
-    <div style={{display:'flex',alignItems:'center',border:'1px solid #d1d5db',borderRadius:5,background:'white',overflow:'hidden',flex:1}}>
-      {prefix&&<span style={{padding:'5px 6px',background:'#f3f4f6',fontSize:12,color:'#666',borderRight:'1px solid #d1d5db'}}>{prefix}</span>}
-      <input type="text" value={val||''} onChange={e=>onChange(e.target.value)} placeholder={ph}
-        style={{flex:1,border:'none',padding:'5px 8px',fontSize:12,fontFamily:'inherit',outline:'none'}}/>
-    </div>
-  );
-  const numInp = (val,onChange,ph='') => inp(val,onChange,ph,'$');
-  const sec = (title) => <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:12,padding:'6px 12px',marginTop:16,marginBottom:6,borderRadius:5,letterSpacing:'.5px'}}>{title}</div>;
-  const row = (children) => <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:6}}>{children}</div>;
-  const lbl = (t) => <span style={{fontSize:11,color:'#555',width:160,flexShrink:0}}>{t}</span>;
-  const del = (onClick) => <button onClick={onClick} style={{background:'none',border:'1px solid #f0c0c0',borderRadius:4,padding:'3px 7px',fontSize:11,cursor:'pointer',color:'#dc2626',flexShrink:0}}>✕</button>;
-  const addBtn = (onClick,label='+ Add Row') => <button onClick={onClick} style={{background:'none',border:'1px dashed #ccc',borderRadius:5,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#555',fontFamily:'inherit',marginBottom:8}}>{label}</button>;
-
-  return (
-    <div style={{background:'white',borderRadius:10,padding:20,boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
-      {/* Client info */}
-      {sec('CLIENT INFORMATION')}
-      {row(<>{lbl('Client Name')}{inp(data.clientName,v=>set('clientName',v),'Client name')}</>)}
-      {row(<>{lbl('As of Date')}<input type="date" value={data.asOfDate||''} onChange={e=>set('asOfDate',e.target.value)} style={{border:'1px solid #d1d5db',borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit'}}/></>)}
-
-      {/* Current Assets */}
-      {sec('CURRENT ASSETS')}
-      {row(<>{lbl('Glacier Bank Cash')}{numInp(data.cashGlacier,v=>set('cashGlacier',v))}</>)}
-      {(data.cashOther||[]).map((r,i)=>row(<>{lbl(i===0?'Other Bank Accounts':'')}{inp(r.bank,v=>setArr('cashOther',i,'bank',v),'Bank name')}{numInp(r.amount,v=>setArr('cashOther',i,'amount',v))}{del(()=>removeRow('cashOther',i))}</>))}
-      {addBtn(()=>addRow('cashOther',{bank:'',amount:''}),'+ Add Bank Account')}
-
-      {(data.receivables||[]).map((r,i)=>row(<>{lbl(i===0?'Receivables':'')}{inp(r.description,v=>setArr('receivables',i,'description',v),'Description')}{numInp(r.amount,v=>setArr('receivables',i,'amount',v))}{del(()=>removeRow('receivables',i))}</>))}
-      {addBtn(()=>addRow('receivables',{description:'',amount:''}),'+ Add Receivable')}
-
-      {(data.farmProducts||[]).map((r,i)=>row(<>{lbl(i===0?'Grain/Farm Products':'')}{inp(r.kind,v=>setArr('farmProducts',i,'kind',v),'Kind')}{inp(r.quantity,v=>setArr('farmProducts',i,'quantity',v),'Qty')}{inp(r.unit,v=>setArr('farmProducts',i,'unit',v),'Unit')}{numInp(r.pricePerUnit,v=>setArr('farmProducts',i,'pricePerUnit',v))}{del(()=>removeRow('farmProducts',i))}</>))}
-      {addBtn(()=>addRow('farmProducts',{kind:'',quantity:'',unit:'bu',pricePerUnit:'',share:'100'}),'+ Add Farm Product')}
-
-      {/* Long-Term Assets */}
-      {sec('LONG-TERM ASSETS')}
-      {(data.realEstate||[]).map((r,i)=>row(<>{lbl(i===0?'Real Estate':'')}{inp(r.description,v=>setArr('realEstate',i,'description',v),'Description')}{inp(r.acres,v=>setArr('realEstate',i,'acres',v),'Acres')}{numInp(r.valuePerAcre,v=>setArr('realEstate',i,'valuePerAcre',v))}{del(()=>removeRow('realEstate',i))}</>))}
-      {addBtn(()=>addRow('realEstate',{description:'',acres:'',valuePerAcre:'',reType:'',legal:''}),'+ Add Real Estate')}
-
-      {(data.machinery||[]).map((r,i)=>row(<>{lbl(i===0?'Machinery':'')}{inp(r.year,v=>setArr('machinery',i,'year',v),'Year')}{inp(r.make,v=>setArr('machinery',i,'make',v),'Make/Model')}{numInp(r.value,v=>setArr('machinery',i,'value',v))}{del(()=>removeRow('machinery',i))}</>))}
-      {addBtn(()=>addRow('machinery',{year:'',make:'',size:'',serial:'',condition:'',value:''}),'+ Add Machinery')}
-
-      {(data.vehicles||[]).map((r,i)=>row(<>{lbl(i===0?'Vehicles':'')}{inp(r.year,v=>setArr('vehicles',i,'year',v),'Year')}{inp(r.make,v=>setArr('vehicles',i,'make',v),'Make/Model')}{numInp(r.value,v=>setArr('vehicles',i,'value',v))}{del(()=>removeRow('vehicles',i))}</>))}
-      {addBtn(()=>addRow('vehicles',{year:'',make:'',vin:'',condition:'',value:''}),'+ Add Vehicle')}
-
-      {/* Liabilities */}
-      {sec('LIABILITIES')}
-      {(data.operatingNotes||[]).map((r,i)=>row(<>{lbl(i===0?'Operating Notes':'')}{inp(r.creditor,v=>setArr('operatingNotes',i,'creditor',v),'Creditor')}{numInp(r.balance,v=>setArr('operatingNotes',i,'balance',v))}{del(()=>removeRow('operatingNotes',i))}</>))}
-      {addBtn(()=>addRow('operatingNotes',{creditor:'',balance:'',dueDate:''}),'+ Add Operating Note')}
-
-      {(data.intermediatDebt||[]).map((r,i)=>row(<>{lbl(i===0?'Term Debt':'')}{inp(r.creditor,v=>setArr('intermediatDebt',i,'creditor',v),'Creditor')}{inp(r.security,v=>setArr('intermediatDebt',i,'security',v),'Security')}{numInp(r.principal,v=>setArr('intermediatDebt',i,'principal',v))}{numInp(r.annualPmt,v=>setArr('intermediatDebt',i,'annualPmt',v))}{del(()=>removeRow('intermediatDebt',i))}</>))}
-      {addBtn(()=>addRow('intermediatDebt',{creditor:'',security:'',principal:'',rate:'',annualPmt:'',dueDate:''}),'+ Add Term Debt')}
-
-      {(data.reMortgages||[]).map((r,i)=>row(<>{lbl(i===0?'RE Mortgages':'')}{inp(r.lienHolder,v=>setArr('reMortgages',i,'lienHolder',v),'Lien Holder')}{numInp(r.principal,v=>setArr('reMortgages',i,'principal',v))}{inp(r.rate,v=>setArr('reMortgages',i,'rate',v),'Rate')}{del(()=>removeRow('reMortgages',i))}</>))}
-      {addBtn(()=>addRow('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''}),'+ Add RE Mortgage')}
-
-      {/* Notes */}
-      {sec('NOTES')}
-      {row(<>{lbl('Comments/Notes')}<textarea value={data.notes||''} onChange={e=>set('notes',e.target.value)} rows={3}
-        style={{flex:1,border:'1px solid #d1d5db',borderRadius:5,padding:'6px 8px',fontSize:12,fontFamily:'inherit',resize:'vertical'}}/></>)}
-    </div>
-  );
-}
-
-// ─── CAEditDiff ──────────────────────────────────────────────────────────────
-function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting }) {
-  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-  const fmtVal = v => {
-    if (v===null||v===undefined||v==='') return '—';
-    if (typeof v === 'object') return JSON.stringify(v);
-    const num = n(v);
-    if (num && String(v).match(/^[\d.,]+$/)) return '$'+Math.round(num).toLocaleString();
-    return String(v);
-  };
-
-  // Deep flat diff — recursively compare all fields
-  const diffs = [];
-  const flatCompare = (orig, edit, path='') => {
-    const allKeys = new Set([...Object.keys(orig||{}), ...Object.keys(edit||{})]);
-    allKeys.forEach(k => {
-      const oval = (orig||{})[k];
-      const eval_ = (edit||{})[k];
-      const fullPath = path ? path+'.'+k : k;
-      if (Array.isArray(oval)||Array.isArray(eval_)) {
-        const oa = oval||[], ea = eval_||[];
-        const maxLen = Math.max(oa.length, ea.length);
-        for (let i=0; i<maxLen; i++) {
-          if (typeof oa[i]==='object'||typeof ea[i]==='object') {
-            flatCompare(oa[i]||{}, ea[i]||{}, fullPath+'['+i+']');
-          } else {
-            const os = String(oa[i]||'').trim();
-            const es = String(ea[i]||'').trim();
-            if (os!==es) diffs.push({path:fullPath+'['+i+']', old:os, new:es});
-          }
-        }
-      } else if (typeof oval==='object'&&oval!==null||typeof eval_==='object'&&eval_!==null) {
-        flatCompare(oval||{}, eval_||{}, fullPath);
-      } else {
-        const os = String(oval||'').trim();
-        const es = String(eval_||'').trim();
-        if (os!==es && !(os===''&&es==='') && !fullPath.includes('_lastCA')) {
-          diffs.push({path:fullPath, old:os, new:es});
-        }
-      }
-    });
-  };
-  flatCompare(original, edited);
-
-  // Pretty-print field path
-  const prettyPath = p => p
-    .replace(/([A-Z])/g,' $1')
-    .replace(/\[(\d+)\]/g,' #'+((+`$1`)+1))
-    .replace(/^./,c=>c.toUpperCase())
-    .trim();
-
-  return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}>
-      <div style={{background:'white',borderRadius:12,width:'min(750px,100%)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
-        <div style={{padding:'18px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <div>
-            <div style={{fontWeight:800,fontSize:16,color:'#1a1a1a'}}>Review CA Changes — {clientName}</div>
-            <div style={{fontSize:12,color:'#888',marginTop:2}}>Submitted by {caName} · {diffs.length} change{diffs.length!==1?'s':''} detected</div>
-          </div>
-          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#888'}}>✕</button>
-        </div>
-
-        <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
-          {diffs.length === 0 ? (
-            <div style={{textAlign:'center',padding:40,color:'#888'}}>
-              <div style={{fontSize:32,marginBottom:8}}>🔍</div>
-              <div style={{fontWeight:600,marginBottom:8}}>No differences detected</div>
-              <div style={{fontSize:12,color:'#aaa'}}>The CA submission appears identical to the current sheet data. The CA may have submitted without making changes, or changes were already saved.</div>
-            </div>
-          ) : (
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead>
-                <tr style={{background:'#f3f4f6'}}>
-                  <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#374151',border:'1px solid #e5e7eb',width:'40%'}}>Field</th>
-                  <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#dc2626',border:'1px solid #e5e7eb',width:'30%'}}>Current Value</th>
-                  <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#15803d',border:'1px solid #e5e7eb',width:'30%'}}>CA Proposed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {diffs.map((d,i) => (
-                  <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
-                    <td style={{padding:'7px 12px',fontSize:11,border:'1px solid #e5e7eb',color:'#374151',fontFamily:'monospace'}}>{prettyPath(d.path)}</td>
-                    <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{fmtVal(d.old)}</td>
-                    <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{fmtVal(d.new)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div style={{padding:'16px 24px',borderTop:'1px solid #e5e7eb',display:'flex',gap:10,justifyContent:'flex-end'}}>
-          <button onClick={onReject}
-            style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            Reject Changes
-          </button>
-          {diffs.length > 0 && (
-            <button onClick={onAccept} disabled={accepting}
-              style={{background:'#15803d',color:'white',border:'none',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:accepting?'wait':'pointer',fontFamily:'inherit',opacity:accepting?.7:1}}>
-              {accepting?'Saving...':'Accept & Save to Sheet'}
-            </button>
-          )}
-          <button onClick={onClose}
-            style={{background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:7,padding:'9px 20px',fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
 
-
+  // ── Route customer links ─────────────────────────────────────────────────────
   const _params = new URLSearchParams(window.location.search);
   const _inspId = _params.get('id');
   const _bsId   = _params.get('bs');
   const _budId  = _params.get('budget');
-
-  // Clean URL after reading params so reloading doesn't re-trigger customer routes
-  if (_inspId || _bsId || _budId) {
-    window.history.replaceState({}, '', window.location.pathname);
-  }
-
   if (_inspId) return <CustomerInspectForm shareId={_inspId} />;
   if (_bsId)   return <CustomerBalanceSheetForm shareId={_bsId} />;
   if (_budId)  return <CustomerBudgetForm shareId={_budId} />;
@@ -4879,8 +3595,6 @@ export default function BalanceSheet() {
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [bsCompare, setBsCompare] = useState(null); // {review, orig, draft}
   const [activeTab, setActiveTab] = useState("balance");
-  const [activeBudget, setActiveBudget] = useState(0); // 0 = scenario 1, 1 = scenario 2
-  const [showBudget2Modal, setShowBudget2Modal] = useState(false);
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
   const [compInsight, setCompInsight] = useState("");
@@ -4899,58 +3613,9 @@ export default function BalanceSheet() {
   const [availableEntities, setAvailableEntities] = useState([]);
   const [pendingEntityName, setPendingEntityName] = useState('');
   const [pendingEntityDate, setPendingEntityDate] = useState('');
-  const [pendingOwnership, setPendingOwnership] = useState('100');
-  // CA sharing
-  const [caUsers, setCAUsers] = useState([]);
-  const [showShareCA, setShowShareCA] = useState(null); // sheet key being shared
-  const [sharingCA, setSharingCA] = useState(false);
-  const [selectedCAUser, setSelectedCAUser] = useState('');
-  const [pendingCAEdits, setPendingCAEdits] = useState([]);
-  const [showCADiff, setShowCADiff] = useState(null); // ca_edit record
-  const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
-  const [showAdminScreen, setShowAdminScreen] = useState(false);
-  const [profileLoading, setProfileLoading] = useState(true);
-  const [caOpenShare, setCaOpenShare] = useState(null);
-  const [showSharesPanel, setShowSharesPanel] = useState(false);
-  const [sharesData, setSharesData] = useState({caShares:[], bsShares:[], budgetShares:[], loading:false});
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
-
-  // ── Persist navigation state to sessionStorage ───────────────────────────────
-  useEffect(() => { if (screen !== 'home') sessionStorage.setItem('fbmt_screen', screen); }, [screen]);
-  useEffect(() => { sessionStorage.setItem('fbmt_step', step); }, [step]);
-  useEffect(() => { sessionStorage.setItem('fbmt_tab', activeTab); }, [activeTab]);
-
-  // ── Restore last position after auth loads ───────────────────────────────────
-  useEffect(() => {
-    if (!session?.access_token) return;
-    const savedScreen = sessionStorage.getItem('fbmt_screen');
-    const savedStep = Number(sessionStorage.getItem('fbmt_step')||0);
-    const savedTab = sessionStorage.getItem('fbmt_tab');
-    const savedKey = sessionStorage.getItem('fbmt_current_key');
-    // Only restore known lender screens — never restore customer-facing routes
-    const validScreens = ['wizard', 'home'];
-    if (!validScreens.includes(savedScreen)) {
-      sessionStorage.removeItem('fbmt_screen');
-      return;
-    }
-    if (savedScreen === 'wizard' && savedKey) {
-      storage.get(savedKey).then(item => {
-        if (item) {
-          try {
-            setData({...emptyData(), ...JSON.parse(item.value)});
-            setStep(savedStep);
-            if (savedTab) setActiveTab(savedTab);
-            setScreen('wizard');
-          } catch { sessionStorage.removeItem('fbmt_screen'); }
-        } else {
-          sessionStorage.removeItem('fbmt_screen');
-          sessionStorage.removeItem('fbmt_current_key');
-        }
-      }).catch(()=>{ sessionStorage.removeItem('fbmt_screen'); });
-    }
-  }, [session?.access_token]);
 
   useEffect(() => {
     const fl = document.createElement("link");
@@ -4965,18 +3630,14 @@ export default function BalanceSheet() {
 
   useEffect(() => {
     if (!session?.access_token) {
-      storage.setOwner(null);
       setUserFolders([]);
       setSavedSheets([]);
       setPendingReviews([]);
-      setProfile(null);
-      setProfileLoading(true);
       return;
     }
-    storage.setOwner(session?.user?.id || null);
     // Run everything in try/catch so nothing can silently kill it
     try {
-      supaGetProfile().then(p => { setProfile(p); setProfileLoading(false); }).catch(() => { setProfileLoading(false); });
+      supaGetProfile().then(p => setProfile(p)).catch(() => {});
     } catch(e) { console.warn('profile load error:', e); }
     try {
       const userId = session?.user?.id || 'default';
@@ -4986,12 +3647,7 @@ export default function BalanceSheet() {
     setTimeout(() => {
       loadSavedList();
       loadPendingReviews();
-      loadCAUsers();
-      loadPendingCAEdits();
     }, 100);
-    // Poll for new CA edits every 30 seconds
-    const caEditPoll = setInterval(() => loadPendingCAEdits(), 30000);
-    return () => clearInterval(caEditPoll);
   }, [session?.access_token]);
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
@@ -5163,11 +3819,10 @@ export default function BalanceSheet() {
       if (item) {
         const p = JSON.parse(item.value); delete p._savedAt;
         setData({ ...emptyData(), ...p }); setStep(0); setScreen("wizard");
-        sessionStorage.setItem('fbmt_current_key', key);
       }
     } catch {}
   };
-  const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); sessionStorage.removeItem('fbmt_current_key'); };
+  const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); };
 
   // ── Import helpers ─────────────────────────────────────────────────────────
   async function downloadTemplate() {
@@ -5249,9 +3904,9 @@ export default function BalanceSheet() {
 
         const response = await fetch('/.netlify/functions/analyze', {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-fbmt-secret": FBMT_FUNCTION_SECRET },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "claude-3-5-sonnet-20241022",
+            model: "claude-sonnet-4-6",
             max_tokens: 4000,
             messages: [{
               role: "user",
@@ -5291,10 +3946,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
           })
         });
 
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error("API " + response.status + ": " + errText.slice(0, 300));
-        }
+        if (!response.ok) throw new Error("API error: " + response.status);
         const result = await response.json();
         const text = result.content?.find(b=>b.type==="text")?.text || "";
         const clean = text.replace(/```json|```/g,"").trim();
@@ -5865,98 +4517,53 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const suppliesTotal = data.supplies.reduce((s,r)=>s+n(r.value),0);
   const otherCurTotal = data.otherCurrent.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentAssets = cashTotal+recTotal+fedPay+lsMktTotal+farmProdTotal+cropInv+suppliesTotal+otherCurTotal;
-  const breedingTotal = data.breedingStock.reduce((s,r)=>{
-    const perHead = n(r.valuePerHead||r.value);
-    const total = r.valuePerHead ? n(r.number)*perHead : n(r.value);
-    return s + total;
-  },0);
+  const breedingTotal = data.breedingStock.reduce((s,r)=>s+n(r.value),0);
   const reTotal = data.realEstate.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const reConTotal = data.reContracts.reduce((s,r)=>s+n(r.amount),0);
   const vehiclesVal = data.vehicles.reduce((s,r)=>s+n(r.value),0);
   const machVal = data.machinery.reduce((s,r)=>s+n(r.value),0);
   const otherAssetsTotal = data.otherAssets.reduce((s,r)=>s+n(r.amount),0);
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
-  const linkedEntityVal = normalizeLinked(data.linkedEntities).reduce((s,e)=>{
-    const nw = linkedEntityNWMap[e.name] || 0;
-    const pct = numVal(e.ownership||"100") || 100;
-    return s + nw * (pct/100);
-  },0);
+  const linkedEntityVal = Object.values(linkedEntityNWMap).reduce((s,v)=>s+v,0);
   const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
-  const opNotesTotal = data.operatingNotes.filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0);
-  const acctsDueTotal = data.accountsDue.filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
-  const intermedCurrentPortion = data.intermediatDebt.filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0);
-  const intermedLTPortion = data.intermediatDebt.filter(r=>r.creditor).reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
+  const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
+  const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
+  const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
+  const intermedLTPortion = data.intermediatDebt.reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
   const intermedTotal = intermedCurrentPortion; // alias used in summary display
-  const reCurrentTotal = data.reCurrent.filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0);
+  const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0);
   const taxesDueVal = n(data.taxesDue);
   const otherCLTotal = data.otherCurrentLiab.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
-  const reMortTotal = data.reMortgages.filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0);
-  const otherLiabTotal = data.otherLiabilities.filter(r=>r.description).reduce((s,r)=>s+n(r.balance),0);
+  const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0);
+  const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
   const totalLiabilities = totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal;
   const netWorth = totalAssets - totalLiabilities;
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
   // Budget calcs
-  // ── Active budget scenario data ────────────────────────────────────────────
-  const emptyBudget2 = () => ({
-    budgetCrops: [{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""}],
-    budgetLivestock: [{type:"",head:"",lbs:"",price:""}],
-    budgetMisc: [{description:"",amount:""}],
-    budgetExpenses: [{description:"",amount:"",prepaid:false}],
-    budgetInsuranceEnabled: false,
-    budgetProposedDebt: [],
-  });
-  const budgetViewData = activeBudget === 0 ? data : {
-    ...data,
-    budgetCrops: (data.budget2||{}).budgetCrops || emptyBudget2().budgetCrops,
-    budgetLivestock: (data.budget2||{}).budgetLivestock || emptyBudget2().budgetLivestock,
-    budgetMisc: (data.budget2||{}).budgetMisc || emptyBudget2().budgetMisc,
-    budgetExpenses: (data.budget2||{}).budgetExpenses || emptyBudget2().budgetExpenses,
-    budgetInsuranceEnabled: (data.budget2||{}).budgetInsuranceEnabled || false,
-    budgetProposedDebt: (data.budget2||{}).budgetProposedDebt || [],
-  };
-  const setBudgetViewArr = (field, i, key, val) => {
-    if (activeBudget === 0) { setArr(field, i, key, val); }
-    else { setData(d => { const b2={...(d.budget2||emptyBudget2())}; const arr=[...(b2[field]||[])]; arr[i]={...(arr[i]||{}),[key]:val}; b2[field]=arr; return {...d,budget2:b2}; }); }
-  };
-  const addBudgetViewRow = (field, empty) => {
-    if (activeBudget === 0) { addRow(field, empty); }
-    else { setData(d => { const b2={...(d.budget2||emptyBudget2())}; b2[field]=[...(b2[field]||[]),empty]; return {...d,budget2:b2}; }); }
-  };
-  const removeBudgetViewRow = (field, i) => {
-    if (activeBudget === 0) { removeRow(field, i); }
-    else { setData(d => { const b2={...(d.budget2||emptyBudget2())}; b2[field]=(b2[field]||[]).filter((_,j)=>j!==i); return {...d,budget2:b2}; }); }
-  };
-
-  const budgetCropTotal = budgetViewData.budgetCrops.reduce((s,r)=>{
-    let effectivePrice = r.price;
-    if (!r.contracted) {
-      const needle = (r.crop||'').toLowerCase().trim();
-      const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
-      const fuzzy = (!exact&&needle) ? commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))) : null;
-      const cp = exact || fuzzy;
-      if (cp) effectivePrice = cp.price;
-    }
+  const budgetCropTotal = data.budgetCrops.reduce((s,r)=>{
+    const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+    const effectivePrice = (cp ? cp.price : null) || r.price;
     return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
   },0);
   // Total guaranteed insurance value across all crop rows (acres × guar.yield × guar.price × share%)
-  const budgetInsuranceTotal = budgetViewData.budgetInsuranceEnabled ? budgetViewData.budgetCrops.reduce((s,r)=>{
+  const budgetInsuranceTotal = data.budgetInsuranceEnabled ? data.budgetCrops.reduce((s,r)=>{
     return s + n(r.acres)*n(r.insYield)*n(r.insPrice)*(n(r.share||"100")/100);
   },0) : 0;
-  const budgetLivestockTotal = budgetViewData.budgetLivestock.reduce((s,r)=>{
+  const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>{
     const needle = (r.type||'').toLowerCase().trim();
     const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
     const fuzzy = (!exact&&needle) ? commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))) : null;
     const ep = (exact||fuzzy) ? (exact||fuzzy).price : r.price;
     return s+n(r.head)*n(r.lbs)*n(ep);
   },0);
-  const budgetMiscTotal = budgetViewData.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
+  const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
   // Insurance scenario: crop income replaced by the insurance guarantee total
   const budgetTotalIncomeInsured = budgetInsuranceTotal + budgetLivestockTotal + budgetMiscTotal;
-  const budgetOperatingExpenses = budgetViewData.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
-  const budgetPrepaidTotal = budgetViewData.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  const budgetOperatingExpenses = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!r.corpPaid);
@@ -5998,22 +4605,22 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       ? (d.federalPayments||[]).reduce((s,r)=>s+m(r.amount),0)
       : m(d.federalPayments||"");
     const tc = cash+rec+fedP+ls+fp+ci+sup+oc;
-    const bs = (d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?m(r.number)*m(r.valuePerHead):m(r.value)),0);
+    const bs = (d.breedingStock||[]).reduce((s,r)=>s+m(r.value),0);
     const re = (d.realEstate||[]).reduce((s,r)=>s+m(r.acres)*m(r.valuePerAcre),0);
     const veh = (d.vehicles||[]).reduce((s,r)=>s+m(r.value),0);
     const mach = (d.machinery||[]).reduce((s,r)=>s+m(r.value),0);
     const oa = (d.otherAssets||[]).reduce((s,r)=>s+m(r.amount),0);
     const tlt = bs+re+(d.reContracts||[]).reduce((s,r)=>s+m(r.amount),0)+veh+mach+oa;
     const ta = tc+tlt;
-    const on = (d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.balance),0);
-    const ad = (d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.amount),0);
-    const id = (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.annualPmt),0);
-    const idLT = (d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
-    const rc = (d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+m(r.annualPmt),0);
+    const on = (d.operatingNotes||[]).reduce((s,r)=>s+m(r.balance),0);
+    const ad = (d.accountsDue||[]).reduce((s,r)=>s+m(r.amount),0);
+    const id = (d.intermediatDebt||[]).reduce((s,r)=>s+m(r.annualPmt),0);
+    const idLT = (d.intermediatDebt||[]).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
+    const rc = (d.reCurrent||[]).reduce((s,r)=>s+m(r.annualPmt),0);
     const ocl = (d.otherCurrentLiab||[]).reduce((s,r)=>s+m(r.amount),0);
     const tcl = on+ad+id+rc+m(d.taxesDue)+ocl;
-    const rm = (d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+m(r.principal),0);
-    const ol = (d.otherLiabilities||[]).filter(r=>r.description).reduce((s,r)=>s+m(r.balance),0);
+    const rm = (d.reMortgages||[]).reduce((s,r)=>s+m(r.principal),0);
+    const ol = (d.otherLiabilities||[]).reduce((s,r)=>s+m(r.balance),0);
     const tl = tcl+idLT+rm+ol;
     return {
       "Cash & Bank":cash, "Receivables":rec, "Federal Payments":m(d.federalPayments),
@@ -6079,7 +4686,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ date: p.asOfDate, totals: sheetTotals(p), raw: p });
+              sheets.push({ date: p.asOfDate, totals: sheetTotals(p) });
             }
           } catch {}
         }
@@ -6125,7 +4732,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
       const resp = await fetch(apiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-fbmt-secret": FBMT_FUNCTION_SECRET },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody)
       });
       if (!resp.ok) {
@@ -6318,13 +4925,14 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
   const loadPendingReviews = async () => {
     if (!isConfigured()) return;
-    if (!session?.user?.id) return;
+    const uid = currentSession?.user?.id;
+    if (!uid) { setPendingReviews([]); return; }
     setLoadingReviews(true);
-    const uid = session.user.id;
     try {
+      const uidFilter = '&user_id=eq.' + encodeURIComponent(uid);
       const [bsResp, budResp] = await Promise.all([
-        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?customer_draft=not.is.null&status=neq.dismissed&user_id=eq.'+uid+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/budget_shares?customer_draft=not.is.null&status=neq.dismissed&user_id=eq.'+uid+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?customer_draft=not.is.null&status=neq.dismissed'+uidFilter+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?customer_draft=not.is.null&status=neq.dismissed'+uidFilter+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
       ]);
       const bsRows = bsResp.ok ? await bsResp.json() : [];
       const budRows = budResp.ok ? await budResp.json() : [];
@@ -6354,162 +4962,6 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     } catch (e) {
       console.error('Failed to persist dismissal:', e);
     }
-  };
-
-  // ── CA Functions ────────────────────────────────────────────────────────────
-  const loadCAUsers = async () => {
-    try {
-      const r = await fetch(SUPABASE_URL+'/rest/v1/profiles?role=eq.ca&is_active=neq.false&select=id,full_name,email', {headers:supaHeaders()});
-      const d = await r.json();
-      setCAUsers(Array.isArray(d)?d:[]);
-    } catch(e) { console.error('loadCAUsers error:', e); }
-  };
-
-  const shareWithCA = async (sheetKey, caUserId) => {
-    if (!sheetKey||!caUserId) return;
-    setSharingCA(true);
-    try {
-      const item = await storage.get(sheetKey);
-      const sheetData = item ? JSON.parse(item.value) : {};
-      // Only pull budget fields from live `data` state when the sheet being
-      // shared is the one currently open in the editor — otherwise `data`
-      // may belong to a different customer (e.g. a submission you just
-      // reviewed) and would bleed into this share. Use the saved sheet's
-      // own budget snapshot in every other case.
-      const isCurrentlyOpenSheet = data.clientName && sheetData.clientName === data.clientName
-        && data.asOfDate === sheetData.asOfDate;
-      const fullData = isCurrentlyOpenSheet
-        ? {
-            ...sheetData,
-            budgetCrops: data.budgetCrops,
-            budgetLivestock: data.budgetLivestock,
-            budgetMisc: data.budgetMisc,
-            budgetExpenses: data.budgetExpenses,
-            budgetInsuranceEnabled: data.budgetInsuranceEnabled,
-            budgetProposedDebt: data.budgetProposedDebt,
-          }
-        : sheetData;
-      const sheet = savedSheets.find(s=>s.key===sheetKey);
-      await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
-        method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
-        body: JSON.stringify({
-          lender_user_id: session?.user?.id,
-          lender_name: profile?.full_name || session?.user?.email || 'First Bank of Montana',
-          ca_user_id: caUserId,
-          client_name: sheet?.clientName || sheetData.clientName || '',
-          sheet_key: sheetKey,
-          sheet_data: fullData
-        })
-      });
-      setShowShareCA(null); setSelectedCAUser('');
-      alert('Sheet shared with CA successfully.');
-    } catch(e) { alert('Error sharing: '+e.message); }
-    setSharingCA(false);
-  };
-
-  const loadPendingCAEdits = async () => {
-    if (!session?.user?.id) return;
-    try {
-      // Fetch lender's shares first, then get pending edits for those shares
-      const sharesResp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares?lender_user_id=eq.'+session.user.id+'&select=id', {headers:supaHeaders()});
-      const shares = sharesResp.ok ? await sharesResp.json() : [];
-      if (!shares.length) { setPendingCAEdits([]); return; }
-      const shareIds = shares.map(s=>s.id).join(',');
-      const r = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?status=eq.pending&share_id=in.('+shareIds+')&select=*&order=submitted_at.desc', {headers:supaHeaders()});
-      const edits = r.ok ? await r.json() : [];
-      setPendingCAEdits(Array.isArray(edits)?edits:[]);
-    } catch(e) { console.error('loadPendingCAEdits:', e); }
-  };
-
-  const acceptCAEdit = async (edit) => {
-    setAcceptingCAEdit(true);
-    try {
-      // Load lender's CURRENT version from storage
-      const currentItem = await storage.get(edit.sheet_key);
-      const currentData = currentItem ? JSON.parse(currentItem.value) : {};
-
-      // Load the original snapshot that was shared with the CA
-      const shareResp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares?id=eq.'+edit.share_id+'&select=sheet_data', {headers:supaHeaders()});
-      const shares = shareResp.ok ? await shareResp.json() : [];
-      const originalSnapshot = shares[0]?.sheet_data || {};
-
-      // 3-way merge: apply only fields CA actually changed vs original snapshot
-      // onto the lender's current data
-      const caEdited = edit.edited_data || {};
-      const mergedData = {...currentData};
-
-      const mergeValue = (key, orig, ca, current) => {
-        const origStr = JSON.stringify(orig);
-        const caStr = JSON.stringify(ca);
-        const currentStr = JSON.stringify(current);
-        if (caStr === origStr) return current; // CA didn't change this field — keep lender's current
-        if (currentStr === origStr) return ca;  // Lender didn't change it — use CA's version
-        // Both changed — CA wins (lender can always re-edit after accepting)
-        return ca;
-      };
-
-      // Merge all top-level fields
-      const allKeys = new Set([...Object.keys(originalSnapshot), ...Object.keys(caEdited), ...Object.keys(currentData)]);
-      allKeys.forEach(key => {
-        if (key.startsWith('_')) return; // skip internal fields
-        if (key in caEdited || key in originalSnapshot) {
-          mergedData[key] = mergeValue(key, originalSnapshot[key], caEdited[key], currentData[key]);
-        }
-      });
-
-      // Save merged result
-      await storage.set(edit.sheet_key, JSON.stringify({...mergedData, _lastCAEdit: new Date().toISOString(), _lastCAName: edit.ca_name}));
-
-      // Mark edit as accepted
-      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+edit.id, {
-        method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
-        body: JSON.stringify({status:'accepted'})
-      });
-      setPendingCAEdits(p=>p.filter(e=>e.id!==edit.id));
-      setShowCADiff(null);
-      await loadSavedList();
-      alert('CA changes merged with your latest version and saved.');
-    } catch(e) { alert('Error accepting: '+e.message); }
-    setAcceptingCAEdit(false);
-  };
-
-  const rejectCAEdit = async (editId) => {
-    await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+editId, {
-      method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
-      body: JSON.stringify({status:'rejected'})
-    });
-    setPendingCAEdits(p=>p.filter(e=>e.id!==editId));
-    setShowCADiff(null);
-  };
-
-  const loadSharesPanel = async () => {
-    setSharesData(s=>({...s,loading:true}));
-    try {
-      const [caResp, bsResp, budResp] = await Promise.all([
-        fetch(SUPABASE_URL+'/rest/v1/ca_shares?lender_user_id=eq.'+session?.user?.id+'&select=*,ca_edits(status,submitted_at)&order=shared_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?user_id=eq.'+session?.user?.id+'&select=share_id,client_name,as_of_date,created_at,status,expires_at&order=created_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/budget_shares?user_id=eq.'+session?.user?.id+'&select=share_id,client_name,as_of_date,created_at,status,expires_at&order=created_at.desc', {headers:supaHeaders()}),
-      ]);
-      const [caShares, bsShares, budgetShares] = await Promise.all([
-        caResp.ok?caResp.json():[],
-        bsResp.ok?bsResp.json():[],
-        budResp.ok?budResp.json():[],
-      ]);
-      // Load CA user names
-      const caUserIds = [...new Set((Array.isArray(caShares)?caShares:[]).map(s=>s.ca_user_id).filter(Boolean))];
-      let caUserMap = {};
-      if (caUserIds.length) {
-        const uResp = await fetch(SUPABASE_URL+'/rest/v1/profiles?id=in.('+caUserIds.join(',')+')&select=id,full_name,email', {headers:supaHeaders()});
-        const users = uResp.ok ? await uResp.json() : [];
-        users.forEach(u => { caUserMap[u.id] = u.full_name||u.email; });
-      }
-      setSharesData({
-        caShares: (Array.isArray(caShares)?caShares:[]).map(s=>({...s, caName: caUserMap[s.ca_user_id]||'Unknown'})),
-        bsShares: Array.isArray(bsShares)?bsShares:[],
-        budgetShares: Array.isArray(budgetShares)?budgetShares:[],
-        loading:false
-      });
-    } catch(e) { setSharesData(s=>({...s,loading:false})); }
   };
 
   const loadBSReview = async (review, saveDate) => {
@@ -6631,12 +5083,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     const entityBudgetPages = linkedData.map(d => {
       const insEnabled = !!d.budgetInsuranceEnabled;
       const bCrop=(d.budgetCrops||[]).reduce((s,r)=>{
-        const cp=!r.contracted?(()=>{
-        const needle=(r.crop||'').toLowerCase().trim();
-        const exact=needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
-        const fuzzy=(!exact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
-        return exact||fuzzy;
-      })():null;
+        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
         return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
       },0);
       const bInsTotal = insEnabled ? (d.budgetCrops||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100),0) : 0;
@@ -6655,12 +5102,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       const bNetInsured=bIncInsured-bExp-bDebt;
       if (bInc<=1&&bExp<=1) return ''; // no budget data
       const cropRows=(d.budgetCrops||[]).filter(r=>r.crop).map(r=>{
-        const cp=!r.contracted?(()=>{
-        const needle=(r.crop||'').toLowerCase().trim();
-        const exact=needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
-        const fuzzy=(!exact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
-        return exact||fuzzy;
-      })():null;
+        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
         const ep=n2(cp?cp.price:null)||n2(r.price);
         const rv=n2(r.acres)*n2(r.yieldPerAcre)*ep*(n2(r.share||'100')/100);
         const it=insEnabled?n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100):0;
@@ -6716,12 +5158,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     const blank = (arr, min) => { const r=[...arr]; while(r.length<min) r.push({}); return r; };
 
     const n = numVal;
-    const linkedEntityVal = Object.entries(linkedNW||{}).reduce((s,[name,nw])=>{
-      const entries = (d.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,ownership:"100"}:e);
-      const entry = entries.find(e=>e.name===name);
-      const pct = numVal((entry||{}).ownership||"100")||100;
-      return s + (Number(nw)||0)*(pct/100);
-    },0);
+    const linkedEntityVal = Object.values(linkedNW||{}).reduce((s,v)=>s+(Number(v)||0),0);
     const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
     const machVal = (d.machinery||[]).reduce((s,r)=>s+n(r.value),0);
     const totalCurrentAssets = n(d.cashGlacier)
@@ -6733,47 +5170,25 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       +(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
       +(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
-    const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+(r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value)),0)
+    const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
       +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0)
       +linkedEntityVal;
     const totalAssets = totalCurrentAssets + totalLTAssets;
-    const opNotesTot = (d.operatingNotes||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.balance),0)
-      +(d.accountsDue||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.amount),0);
+    const opNotesTot = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)
+      +(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
     const totalLiabilities = opNotesTot
       +(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0)
-      +(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
-      +(d.reMortgages||[]).filter(r=>r.lienHolder).reduce((s,r)=>s+n(r.principal),0)
+      +(d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0)
+      +(d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)
       +(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.taxesDue||[]).reduce((s,r)=>s+n(r.amount),0);
     const netWorth = totalAssets - totalLiabilities;
-    const totalCurrentLiab = opNotesTot
-      +(d.intermediatDebt||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
-      +(d.reCurrent||[]).filter(r=>r.creditor).reduce((s,r)=>s+n(r.annualPmt),0)
-      +n(d.taxesDue)
-      +(d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
-    const workingCapital = totalCurrentAssets - totalCurrentLiab;
-
-    // Count total data rows to determine font size — more rows = smaller font
-    const totalRows = [
-      d.cashOther||[], d.receivables||[], d.federalPayments||[], d.livestockMarket||[],
-      d.farmProducts||[], d.cropInvestment||[], d.supplies||[], d.otherCurrent||[],
-      d.breedingStock||[], d.realEstate||[], d.vehicles||[], d.machinery||[], d.otherAssets||[],
-      d.operatingNotes||[], d.accountsDue||[], d.intermediatDebt||[], d.reCurrent||[],
-      d.reMortgages||[], d.otherLiabilities||[]
-    ].reduce((s,arr)=>s+arr.filter(r=>Object.values(r).some(v=>v&&String(v).trim())).length, 0);
-
-    // Choose paper size based on content — legal for dense sheets, letter for sparse
-    const pageSize = totalRows < 30 ? 'letter' : 'legal';
-    const baseFontSize = 9;
-    const secFontSize = 8;
-    const colHeadSize = 9.5;
-    const rowMinHeight = 13;
+    const workingCapital = totalCurrentAssets - opNotesTot;
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
-@page{size:${pageSize} portrait;margin:.4in .45in;}
-body{font-family:Arial,sans-serif;font-size:${baseFontSize}pt;color:#000;margin:0;}
+body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:.45in .4in;}
 h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:4pt;}
 h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:8pt;}
 .logo-box{border:2pt solid #6B0E1E;padding:4pt 7pt;display:inline-block;text-align:center;font-weight:900;color:#6B0E1E;}
@@ -6781,9 +5196,9 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .name-row{border-bottom:1pt solid #000;padding-bottom:3pt;margin-bottom:5pt;font-weight:700;}
 .body{display:flex;gap:8pt;}
 .col{flex:1;}
-.col-head{background:#000;color:#fff;font-weight:700;font-size:${colHeadSize}pt;text-align:center;padding:2pt 4pt;display:flex;justify-content:space-between;}
-.sec{font-style:italic;font-size:${secFontSize}pt;margin:3pt 0 1pt;color:#333;}
-.row{display:flex;justify-content:space-between;min-height:${rowMinHeight}pt;border-bottom:.5pt dotted #ccc;padding:.5pt 2pt;}
+.col-head{background:#000;color:#fff;font-weight:700;font-size:8pt;text-align:center;padding:2pt 4pt;display:flex;justify-content:space-between;}
+.sec{font-style:italic;font-size:7pt;margin:3pt 0 1pt;color:#333;}
+.row{display:flex;justify-content:space-between;min-height:12pt;border-bottom:.5pt dotted #ccc;padding:.5pt 2pt;}
 .trow{display:flex;min-height:11pt;border-bottom:.5pt dotted #ccc;font-size:7pt;padding:.5pt 0;}
 .c1{flex:1.4;} .c2{flex:1;} .c3{flex:.8;text-align:right;} .c4{flex:.8;text-align:right;} .c5{flex:.9;text-align:right;font-weight:600;}
 .th{font-weight:700;font-size:6pt;text-transform:uppercase;border-bottom:1pt solid #000;margin-bottom:1pt;}
@@ -6793,18 +5208,17 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .sig{margin-top:10pt;border-top:1pt solid #000;padding-top:6pt;font-size:7pt;}
 .sig-row{display:flex;gap:20pt;margin-top:8pt;}
 .sig-line{flex:1;border-top:1pt solid #000;padding-top:2pt;}
-.page-footer{position:running(footer);font-size:7pt;color:#888;display:flex;justify-content:space-between;border-top:.5pt solid #ccc;padding-top:3pt;}
-@page{@bottom-center{content:element(footer);}}
-.page2{page-break-before:always;padding-top:.15in;}
-.sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding-bottom:2pt;margin-bottom:4pt;}
-.sched-table{width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:12pt;}
-.sched-table th{background:#1a1a1a;color:#fff;padding:4pt 6pt;text-align:left;font-size:7.5pt;font-weight:700;}
+.page2{page-break-before:always;padding-top:.2in;}
+.sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
+.sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
+.sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
 .sched-table th.r{text-align:right;}
-.sched-table td{padding:4pt 6pt;border-bottom:.5pt solid #e5e7eb;vertical-align:middle;}
+.sched-table td{padding:3pt 5pt;border-bottom:.5pt dotted #ccc;vertical-align:top;}
 .sched-table td.r{text-align:right;font-weight:600;}
-.sched-foot{display:flex;justify-content:flex-end;margin-top:2pt;margin-bottom:0;}
-.sched-total{background:#1a1a1a;color:#fff;padding:3pt 10pt;font-weight:700;font-size:8.5pt;}
-.sched-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3pt;border-bottom:1.5pt solid #6B0E1E;padding-bottom:3pt;}
+.sched-table tr:nth-child(even){background:#f8f8f8;}
+.sched-foot{display:flex;justify-content:flex-end;margin-top:4pt;}
+.sched-total{background:#000;color:#fff;padding:2pt 8pt;font-weight:700;font-size:8pt;}
+.sched-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4pt;}
 .sched-client{font-size:8pt;color:#555;}
 </style></head><body>
 ${withCover ? `
@@ -6838,21 +5252,14 @@ ${(d.supplies||[]).filter(r=>r.description||r.value).length>0?`<div class="sec">
 ${(d.otherCurrent||[]).filter(r=>r.description||r.amount).length>0?`<div class="sec">Other Current Assets:</div>${(d.otherCurrent||[]).filter(r=>r.description||r.amount).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
 <div class="subtot"><span>TOTAL CURRENT ASSETS:</span><span>${pFmt(totalCurrentAssets)||"$0"}</span></div>
 <div class="sec">Breeding Stock:</div>
-${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>{const tot=r.valuePerHead?n(r.number)*n(r.valuePerHead):n(r.value);return`<div class="trow"><span class="c1">${r.number||""} hd</span><span class="c2">${r.kind||""}</span><span class="c3">${r.valuePerHead?'$'+n(r.valuePerHead).toLocaleString()+'/hd':''}</span><span class="c5">${pFmt(tot)}</span></div>`;}).join("")}
+${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
 <div class="sec">Real Estate:</div>
 <div class="trow th"><span class="c1">Acres</span><span class="c2">Type</span><span class="c3">$/Acre</span><span class="c5">Total Value</span></div>
 ${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
 <div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
 <div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
 ${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).length>0?`<div class="sec">Other Assets:</div>${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
-${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>{
-  const entries=(d.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,ownership:"100"}:e);
-  const entry=entries.find(e=>e.name===name)||{};
-  const pct=numVal(entry.ownership||"100")||100;
-  const owned=(Number(nw)||0)*(pct/100);
-  return `<div class="row"><span>${name}${pct<100?` <span style="font-size:6pt;color:#888">(${pct}% of ${pFmt(nw)})</span>`:''}` +
-    `</span><span>${pFmt(owned)}</span></div>`;
-}).join("")}`:""}
+${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>`<div class="row"><span>${name}</span><span>${pFmt(nw)}</span></div>`).join("")}`:""}
 <div class="tot"><span>TOTAL ASSETS</span><span>${pFmt(totalAssets)||"$0"}</span></div>
 </div>
 <div class="col">
@@ -6891,65 +5298,43 @@ ${blank(d.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><span
 <!-- ═══ PAGE 2 — SCHEDULES ═══════════════════════════════════════════════ -->
 <div class="page2">
 <div class="hdr">
-  <div class="logo-box">
-    <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="height:46px;width:auto;display:block;"/>
-  </div>
-  <div style="flex:1;text-align:center;">
-    <div style="font-size:12pt;font-weight:800;text-decoration:underline;">Balance Sheet — Schedule of Vehicles &amp; Equipment</div>
-    <div style="font-size:8.5pt;font-weight:600;margin-top:2pt;">First Bank of Montana</div>
-  </div>
-  <div style="text-align:right;font-size:8pt;">
-    <div><strong>${d.clientName}</strong></div>
-    <div>As of: ${d.asOfDate}</div>
-    <div style="margin-top:2pt;font-size:7pt;color:#555;">Page 2 of 2</div>
+  <div class="logo-box"><img src=\"data:image/jpeg;base64,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\" alt=\"First Bank of Montana\" style=\"height:46px;width:auto;\"/></div>
+  <div style="flex:1;padding-left:16pt">
+    <div style="font-size:11pt;font-weight:700;text-decoration:underline;">Balance Sheet Supplement — Schedules</div>
+    <div style="font-size:8pt;margin-top:3pt;">Name: ${d.clientName} &nbsp;&nbsp; As of: ${d.asOfDate}</div>
   </div>
 </div>
-<div class="name-row" style="margin-bottom:10pt;border-bottom:2pt solid #000;"></div>
 
-<div class="sched-hdr">
-  <div class="sched-title">Titled Vehicles Schedule</div>
-  <div style="font-size:8pt;color:#555;">All licensed &amp; titled vehicles</div>
-</div>
+<div class="sched-title">Titled Vehicles Schedule</div>
 <table class="sched-table">
   <thead><tr>
-    <th style="width:7%">Year</th>
-    <th style="width:28%">Make / Model</th>
-    <th style="width:22%">VIN</th>
-    <th style="width:13%">Condition</th>
-    <th class="r" style="width:15%">Value</th>
+    <th style="width:8%">Year</th>
+    <th style="width:32%">Make and Model</th>
+    <th style="width:25%">VIN</th>
+    <th style="width:15%">Condition</th>
+    <th class="r" style="width:20%">Value</th>
   </tr></thead>
   <tbody>
-    ${(d.vehicles.filter(r=>r.year||r.make||r.value).length ? d.vehicles.filter(r=>r.year||r.make||r.value) : [{year:"",make:"",vin:"",condition:"",value:""}]).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f9f9f9'}"><td>${r.year||""}</td><td>${r.make||""}</td><td style="font-size:7pt;color:#444">${r.vin||""}</td><td style="color:${r.condition==="Excellent"?"#15803d":r.condition==="Good"?"#166534":r.condition==="Fair"?"#92400e":r.condition==="Poor"?"#991b1b":"#374151"};font-weight:600">${r.condition||""}</td><td class="r">${pFmt(r.value)||"—"}</td></tr>`).join("")}
+    ${(d.vehicles.length ? d.vehicles : [{year:"",make:"",vin:"",condition:"",value:""}]).map(r=>`<tr><td>${r.year||""}</td><td>${r.make||""}</td><td style="font-size:6.5pt">${r.vin||""}</td><td>${r.condition||""}</td><td class="r">${pFmt(r.value)}</td></tr>`).join("")}
   </tbody>
 </table>
 <div class="sched-foot"><div class="sched-total">TOTAL TITLED VEHICLES: ${pFmt(vehiclesVal)||"$0"}</div></div>
 
-<div class="sched-hdr" style="margin-top:16pt;">
-  <div class="sched-title">Farm Machinery &amp; Equipment Schedule</div>
-  <div style="font-size:8pt;color:#555;">All farm equipment &amp; machinery</div>
-</div>
+<div class="sched-title" style="margin-top:18pt">Farm Machinery and Equipment Schedule</div>
 <table class="sched-table">
   <thead><tr>
-    <th style="width:6%">Year</th>
-    <th style="width:28%">Make / Model</th>
-    <th style="width:10%">Size</th>
-    <th style="width:16%">Serial Number</th>
-    <th style="width:12%">Condition</th>
-    <th class="r" style="width:14%">Value</th>
+    <th style="width:7%">Year</th>
+    <th style="width:30%">Make and Model</th>
+    <th style="width:12%">Size</th>
+    <th style="width:18%">Serial Number</th>
+    <th style="width:13%">Condition</th>
+    <th class="r" style="width:20%">Value</th>
   </tr></thead>
   <tbody>
-    ${(d.machinery.filter(r=>r.year||r.make||r.value).length ? d.machinery.filter(r=>r.year||r.make||r.value) : [{year:"",make:"",size:"",serial:"",condition:"",value:""}]).map((r,i)=>`<tr style="background:${i%2===0?'white':'#f9f9f9'}"><td>${r.year||""}</td><td>${r.make||""}</td><td>${r.size||""}</td><td style="font-size:7pt;color:#444">${r.serial||""}</td><td style="color:${r.condition==="Excellent"?"#15803d":r.condition==="Good"?"#166534":r.condition==="Fair"?"#92400e":r.condition==="Poor"?"#991b1b":"#374151"};font-weight:600">${r.condition||""}</td><td class="r">${pFmt(r.value)||"—"}</td></tr>`).join("")}
+    ${(d.machinery.length ? d.machinery : [{year:"",make:"",size:"",serial:"",condition:"",value:""}]).map(r=>`<tr><td>${r.year||""}</td><td>${r.make||""}</td><td>${r.size||""}</td><td style="font-size:6.5pt">${r.serial||""}</td><td>${r.condition||""}</td><td class="r">${pFmt(r.value)}</td></tr>`).join("")}
   </tbody>
 </table>
 <div class="sched-foot"><div class="sched-total">TOTAL MACHINERY AND EQUIPMENT: ${pFmt(machVal)||"$0"}</div></div>
-
-<div class="sig" style="margin-top:20pt;">
-  <div style="font-size:7pt;color:#555;margin-bottom:8pt;">This schedule is a supplement to the Agricultural Balance Sheet prepared by First Bank of Montana. All values are estimated market values as of the date shown above.</div>
-  <div class="sig-row">
-    <div class="sig-line">Borrower Signature &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Date</div>
-    <div class="sig-line">Loan Officer &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Date</div>
-  </div>
-</div>
 </div>
 ${extraPages}
 </body></html>`;
@@ -6972,10 +5357,7 @@ ${extraPages}
     const netIncInsured = budgetTotalIncomeInsured - totalExp;
     const insEnabled = data.budgetInsuranceEnabled;
     const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
-      const needle=(r.crop||'').toLowerCase().trim();
-      const cpExact=!r.contracted?(needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null):null;
-      const cpFuzzy=(!r.contracted&&!cpExact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
-      const cp=cpExact||cpFuzzy;
+      const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
       const effectivePrice = r.contracted ? numVal(r.price) : (cp ? numVal(cp.price) : numVal(r.price));
       const rv = numVal(r.acres)*numVal(r.yieldPerAcre)*effectivePrice*(numVal(r.share||"100")/100);
       const insTotal = insEnabled ? numVal(r.acres)*numVal(r.insYield)*numVal(r.insPrice)*(numVal(r.share||"100")/100) : 0;
@@ -7001,7 +5383,7 @@ ${extraPages}
       "<tr style='"+(r.prepaid?"color:#15803d;":"")+"'><td>"+r.description+(r.prepaid?" <em>(pre-paid)</em>":"")+"</td><td class='r'"+(r.prepaid?" style='text-decoration:line-through;color:#15803d;'":"")+">"+(r.prepaid?"":"")+"$"+Math.round(numVal(r.amount)).toLocaleString()+"</td></tr>"
     ).join("");
     const prepaidTotal = data.budgetExpenses.filter(r=>r.prepaid&&numVal(r.amount)>0).reduce((s,r)=>s+numVal(r.amount),0);
-    const propDebtRows = (budgetViewData.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>
+    const propDebtRows = (data.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>
       "<tr><td>"+r.description+" <em style='color:#6B0E1E'>(proposed)</em></td><td class='r'>$"+Math.round(numVal(r.annualPmt)).toLocaleString()+"</td></tr>"
     ).join("");
     const debtPersonalRows = [...debtServiceTermsPersonal,...debtServiceREPersonal].map(r=>
@@ -7079,113 +5461,6 @@ ${extraPages}
     W.focus();
     setTimeout(()=>W.print(), 400);
   };
-
-  const handlePrintBudgetSummary = () => {
-    const W = window.open("","_blank","width=800,height=1000");
-    if (!W) return;
-    const corpPDTotal = corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0);
-    const totalExp = budgetTotalExpenses + corpPDTotal;
-    const netInc = budgetTotalIncome - totalExp;
-    const netIncInsured = budgetTotalIncomeInsured - totalExp;
-    const insEnabled = data.budgetInsuranceEnabled;
-    const f$ = v => v ? '$'+Math.round(numVal(v)).toLocaleString() : '—';
-    const tr = (label, val, bold=false, color='') =>
-      `<tr style="${bold?'font-weight:700;background:#f5f0f0;':''}border-top:${bold?'1.5pt solid #6B0E1E':'0'}">
-        <td style="padding:5pt 10pt;font-size:9pt;border-bottom:.5pt dotted #ddd;color:${color||'inherit'}">${label}</td>
-        <td style="padding:5pt 10pt;text-align:right;font-size:9pt;font-weight:${bold?700:600};border-bottom:.5pt dotted #ddd;color:${color||'inherit'}">${val}</td>
-      </tr>`;
-    const secHead = t => `<tr><td colspan="2" style="background:#6B0E1E;color:white;font-weight:700;font-size:9pt;padding:6pt 10pt;letter-spacing:.5px">${t}</td></tr>`;
-
-    // Crop rows
-    const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
-      const needle=(r.crop||'').toLowerCase().trim();
-      const exact=!r.contracted&&needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
-      const fuzzy=(!exact&&!r.contracted&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
-      const cp=exact||fuzzy;
-      const ep = r.contracted ? numVal(r.price) : (cp ? numVal(cp.price) : numVal(r.price));
-      const rv = numVal(r.acres)*numVal(r.yieldPerAcre)*ep*(numVal(r.share||"100")/100);
-      const insTotal = insEnabled ? numVal(r.acres)*numVal(r.insYield)*numVal(r.insPrice)*(numVal(r.share||"100")/100) : 0;
-      return tr(
-        `${r.crop} &nbsp;<span style="font-size:8pt;color:#666;font-weight:400">${r.acres} ac × ${r.yieldPerAcre} ${r.unit||'bu'} × $${ep.toFixed(2)}${r.share&&r.share!=='100'?' @ '+r.share+'%':''}</span>`,
-        `${f$(rv)}${insEnabled&&insTotal?' <span style="color:#15803d;font-size:8pt"> (ins: '+f$(insTotal)+')</span>':''}`
-      );
-    }).join('');
-
-    // Livestock rows
-    const lsRows = data.budgetLivestock.filter(r=>r.type||r.head).map(r=>{
-      const needle=(r.type||'').toLowerCase().trim();
-      const exact=needle?commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle):null;
-      const fuzzy=(!exact&&needle)?commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))):null;
-      const ep = numVal((exact||fuzzy)?.price || r.price);
-      const rv = numVal(r.head)*numVal(r.lbs)*ep;
-      return tr(`${r.type} &nbsp;<span style="font-size:8pt;color:#666;font-weight:400">${r.head} hd × ${r.lbs} lbs × $${ep.toFixed(2)}/lb</span>`, f$(rv));
-    }).join('');
-
-    // Misc income rows
-    const miscRows = data.budgetMisc.filter(r=>r.description&&numVal(r.amount)>0).map(r=>tr(r.description, f$(numVal(r.amount)))).join('');
-
-    // Debt rows
-    const debtRows = [
-      ...[...debtServiceTermsPersonal,...debtServiceREPersonal].map(r=>tr(`${r.creditor}${r.security?' / '+r.security:''}`, f$(numVal(r.annualPmt)))),
-      ...[...debtServiceTermsCorp,...debtServiceRECorp].map(r=>tr(`${r.creditor} <span style="color:#2d5a8e;font-size:8pt">(corp pays)</span>`, `<span style="color:#2d5a8e">${f$(numVal(r.annualPmt))}</span>`)),
-      ...(budgetViewData.budgetProposedDebt||[]).filter(r=>r.description&&numVal(r.annualPmt)>0).map(r=>tr(`${r.description} <span style="color:#6B0E1E;font-size:8pt">(proposed)</span>`, f$(numVal(r.annualPmt)))),
-    ].join('');
-
-    W.document.write(`<!DOCTYPE html><html><head><title>Budget Summary — ${data.clientName}</title>
-<style>
-@page{size:letter portrait;margin:.45in .5in;}
-body{font-family:Arial,sans-serif;font-size:9pt;color:#000;margin:0;}
-table{width:100%;border-collapse:collapse;}
-@media print{.np{display:none}}
-</style></head><body>
-<button class="np" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:7px 16px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
-
-<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10pt;border-bottom:2.5pt solid #6B0E1E;padding-bottom:8pt;">
-  <div>
-    <img src="${FBMT_LOGO}" alt="FBMT" style="height:44px;width:auto;display:block;margin-bottom:4pt"/>
-    <div style="font-size:14pt;font-weight:800;color:#1a1a1a">${data.clientName}</div>
-    <div style="font-size:9pt;color:#555">Budget Summary &nbsp;·&nbsp; First Bank of Montana</div>
-  </div>
-  <div style="text-align:right;font-size:8.5pt;color:#555">
-    <div>As of ${data.asOfDate||'—'}</div>
-    <div>Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
-  </div>
-</div>
-
-<table>
-  ${secHead('CROP INCOME')}
-  ${cropRows}
-  ${tr('Total Your Value', f$(budgetCropTotal), true)}
-  ${insEnabled ? tr('Total Insurance Value', f$(budgetInsuranceTotal), false, '#15803d') : ''}
-
-  ${lsRows ? secHead('LIVESTOCK INCOME') + lsRows + tr('Livestock Total', f$(budgetLivestockTotal), true) : ''}
-
-  ${miscRows ? secHead('MISCELLANEOUS INCOME') + miscRows : ''}
-
-  ${tr('TOTAL INCOME', f$(budgetTotalIncome), true)}
-
-  ${secHead('EXPENSES & DEBT SERVICE')}
-  ${tr('Total Operating Expenses', f$(budgetOperatingExpenses))}
-  ${debtRows}
-  ${corpPDTotal > 0 ? tr('Personal Debt', f$(corpPDTotal)) : ''}
-  ${tr('TOTAL EXPENSES + DEBT', f$(totalExp), true)}
-
-  ${secHead('MARGIN')}
-  <tr style="font-size:11pt;font-weight:800;background:${netInc>=0?'#e8f5ea':'#fce8e8'}">
-    <td style="padding:8pt 10pt;color:${netInc>=0?'#15803d':'#dc2626'}">${netInc>=0?'BORROWER MARGIN (Net Income)':'BORROWER MARGIN (Net Loss)'}</td>
-    <td style="padding:8pt 10pt;text-align:right;color:${netInc>=0?'#15803d':'#dc2626'}">${f$(Math.abs(netInc))}</td>
-  </tr>
-  ${insEnabled ? `<tr style="font-size:11pt;font-weight:800;background:${netIncInsured>=0?'#f0fdf4':'#fce8e8'};border:1.5pt solid #15803d">
-    <td style="padding:8pt 10pt;color:#15803d">🛡 ${netIncInsured>=0?'INSURANCE MARGIN (Net Income)':'INSURANCE MARGIN (Net Loss)'}</td>
-    <td style="padding:8pt 10pt;text-align:right;color:${netIncInsured>=0?'#15803d':'#dc2626'}">${f$(Math.abs(netIncInsured))}</td>
-  </tr>` : ''}
-</table>
-</body></html>`);
-    W.document.close();
-    W.focus();
-    setTimeout(()=>W.print(), 400);
-  };
-
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => {
@@ -7482,46 +5757,16 @@ table{width:100%;border-collapse:collapse;}
         <div className="step-content">
           <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding" />
           <p className="phase-badge">Intermediate and Long-Term Assets</p>
-          <div className="fp-header-row">
-            <span style={{width:20}}></span>
-            <span className="fp-col-label" style={{width:80}}>Head</span>
-            <span className="fp-col-label" style={{flex:1}}>Kind / Description</span>
-            <span className="fp-col-label" style={{width:120}}>Value/Head</span>
-            <span className="fp-col-label" style={{width:120}}>Total Value</span>
-            <span style={{width:32}}></span>
-          </div>
-          {data.breedingStock.map((r,i) => {
-            const total = numVal(r.number) * numVal(r.valuePerHead||r.value);
-            return (
-              <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`}>
-                <span className="row-num">{i+1}</span>
-                <div className="input-group" style={{width:80,flexShrink:0}}>
-                  <div className="input-wrap">
-                    <input type="text" value={r.number} placeholder="0"
-                      onChange={e=>setArr("breedingStock",i,"number",e.target.value.replace(/[^0-9]/g,""))} />
-                  </div>
-                </div>
-                <div className="input-group" style={{flex:1}}>
-                  <div className="input-wrap">
-                    <input type="text" value={r.kind} placeholder="e.g., Bred Heifers, Angus Cows"
-                      onChange={e=>setArr("breedingStock",i,"kind",e.target.value)} />
-                  </div>
-                </div>
-                <div className="input-group" style={{width:120,flexShrink:0}}>
-                  <div className="input-wrap">
-                    <span className="prefix">$</span>
-                    <input type="text" value={r.valuePerHead||r.value||""} placeholder="0"
-                      onChange={e=>setArr("breedingStock",i,"valuePerHead",e.target.value.replace(/[^0-9.]/g,""))} />
-                  </div>
-                </div>
-                <div style={{width:120,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:8,fontWeight:700,fontSize:".9rem",color:total>0?"#1a1a1a":"#ccc"}}>
-                  {total>0 ? fmt(total) : "—"}
-                </div>
-                <button className="remove-btn" style={{width:32}} onClick={()=>removeRow("breedingStock",i)}>x</button>
-              </div>
-            );
-          })}
-          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",valuePerHead:"",value:""})}>+ Add Breeding Stock</button>
+          {data.breedingStock.map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`breedingStock-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Number" value={r.number} onChange={v=>setArr("breedingStock",i,"number",v)} placeholder="# head" />
+              <TxtInp label="Kind" value={r.kind} onChange={v=>setArr("breedingStock",i,"kind",v)} placeholder="e.g., Angus cows" />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("breedingStock",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",value:""})}>+ Add Breeding Stock</button>
           <div className="subtotal-row"><span>Total Breeding Stock</span><strong>{fmt(breedingTotal)}</strong></div>
         </div>
       );
@@ -7945,14 +6190,7 @@ table{width:100%;border-collapse:collapse;}
                       <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
                       <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
                         {entry.date ? `As of ${entry.date}` : "Latest available"}
-                        {linkedEntityNWMap[entry.name] !== undefined && (() => {
-                          const nw = linkedEntityNWMap[entry.name];
-                          const pct = numVal(entry.ownership||"100")||100;
-                          const owned = nw * pct/100;
-                          return pct < 100
-                            ? ` — ${pct}% of ${fmt(nw)} = ${fmt(owned)}`
-                            : ` — Net Worth: ${fmt(nw)}`;
-                        })()}
+                        {linkedEntityNWMap[entry.name] !== undefined && ` — Net Worth: ${fmt(linkedEntityNWMap[entry.name])}`}
                       </div>
                     </div>
                     <button
@@ -7974,7 +6212,8 @@ table{width:100%;border-collapse:collapse;}
                 <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                   <select
                     value={pendingEntityName}
-                    onChange={e=>{setPendingEntityName(e.target.value);setPendingEntityDate('');setPendingOwnership('100');}}                    style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
+                    onChange={e=>{setPendingEntityName(e.target.value);setPendingEntityDate('');}}
+                    style={{border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 12px",fontSize:".88rem",fontFamily:"inherit",background:"white",color:"#1a1a1a",cursor:"pointer"}}>
                     <option value="">+ Select entity to link...</option>
                     {availableEntities.map(name => (
                       <option key={name} value={name}>{name}</option>
@@ -7993,21 +6232,11 @@ table{width:100%;border-collapse:collapse;}
                     ) : null;
                   })()}
                   {pendingEntityName && pendingEntityDate && (
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:".8rem",color:"#555",whiteSpace:"nowrap"}}>% Owned:</span>
-                      <input type="text" value={pendingOwnership||"100"}
-                        onChange={e=>setPendingOwnership(e.target.value.replace(/[^0-9.]/g,""))}
-                        style={{width:64,border:"1.5px solid #c0d8f0",borderRadius:6,padding:"6px 8px",fontSize:".85rem",fontFamily:"inherit",textAlign:"center"}}/>
-                      <span style={{fontSize:".8rem",color:"#555"}}>%</span>
-                    </div>
-                  )}
-                  {pendingEntityName && pendingEntityDate && (
                     <button
                       onClick={()=>{
-                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate,ownership:pendingOwnership||"100"}]);
+                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate}]);
                         setPendingEntityName('');
                         setPendingEntityDate('');
-                        setPendingOwnership('100');
                       }}
                       style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontSize:".85rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                       Link
@@ -8025,41 +6254,11 @@ table{width:100%;border-collapse:collapse;}
               <input type="date" className="text-input" style={{maxWidth:160}} value={data.asOfDate}
                 onChange={e=>set("asOfDate",e.target.value)} />
             </div>
-            {caOpenShare ? (
-              <>
-                <button className="btn btn-save" onClick={async()=>{
-                  setSaveStatus('saving');
-                  try {
-                    const hdr2 = {...supaHeaders(),'Prefer':'return=minimal'};
-                    // Check if a pending edit already exists for this share
-                    const checkResp = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?share_id=eq.'+caOpenShare.id+'&status=eq.pending&select=id', {headers:supaHeaders()});
-                    const existing = checkResp.ok ? await checkResp.json() : [];
-                    if (existing.length > 0) {
-                      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing[0].id, {method:'PATCH',headers:hdr2,body:JSON.stringify({edited_data:data,submitted_at:new Date().toISOString(),status:'pending'})});
-                    } else {
-                      await fetch(SUPABASE_URL+'/rest/v1/ca_edits', {method:'POST',headers:hdr2,body:JSON.stringify({share_id:caOpenShare.id,ca_user_id:session?.user?.id,ca_name:profile?.full_name||session?.user?.email,client_name:caOpenShare.client_name,sheet_key:caOpenShare.sheet_key,edited_data:data,status:'pending'})});
-                    }
-                    setSaveStatus('saved');
-                    setTimeout(()=>setSaveStatus(null),3000);
-                  } catch(e) {
-                    setSaveStatus('error');
-                    console.error('Submit CA changes error:', e.message);
-                    setTimeout(()=>setSaveStatus(null),3000);
-                  }
-                }}>
-                  {saveStatus==='saving'?'Submitting...':saveStatus==='saved'?'✓ Submitted to Lender':saveStatus==='error'?'Error — try again':'Submit Changes to Lender'}
-                </button>
-                <button className="btn btn-secondary" onClick={()=>{storage.setOwner(session?.user?.id || null);setCaOpenShare(null);setData(emptyData());}}>← Back to Portal</button>
-              </>
-            ) : (
-              <>
-                <button className="btn btn-save" onClick={saveSheet}
-                  disabled={!data.clientName || saveStatus === "saving"}>
-                  {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
-                </button>
-                <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
-              </>
-            )}
+            <button className="btn btn-save" onClick={saveSheet}
+              disabled={!data.clientName || saveStatus === "saving"}>
+              {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
+            </button>
+            <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
             {data.clientName && (
               <button onClick={()=>{ setSharePreType('bs'); setShowSharePre(true); }}
                 style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
@@ -8113,40 +6312,6 @@ table{width:100%;border-collapse:collapse;}
     );
   }
 
-  // ── Role-based routing ───────────────────────────────────────────────────────
-  const handleSignOut = async () => {
-    sessionStorage.removeItem('fbmt_screen');
-    sessionStorage.removeItem('fbmt_step');
-    sessionStorage.removeItem('fbmt_tab');
-    sessionStorage.removeItem('fbmt_current_key');
-    await supaLogout(); setSession(null); setProfile(null); setProfileLoading(true);
-  };
-
-  // Wait for profile to load before routing — prevents CA briefly seeing lender screen
-  if (profileLoading && session) {
-    return (
-      <div style={{minHeight:'100vh',background:'#6B0E1E',display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{color:'white',fontSize:14,opacity:.8}}>Loading...</div>
-      </div>
-    );
-  }
-
-  if (profile?.force_password_change) return <ForcePasswordChange session={session} onDone={()=>supaGetProfile().then(p=>setProfile(p))} />;
-  if (profile?.role === 'ca') {
-    if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
-      onOpen={(share) => {
-        const sheetData = share.sheet_data || {};
-        storage.setOwner(share.lender_user_id || null);
-        setData({...emptyData(), ...sheetData});
-        setCaOpenShare(share);
-        setScreen('wizard');
-        setStep(0);
-      }}
-    />;
-    // CA has opened a sheet — fall through to full app below in CA mode
-  }
-  if (showAdminScreen) return <AdminScreen session={session} profile={profile} onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)} />;
-
   if (screen === "home") {
     return (
       <div className="app">
@@ -8158,10 +6323,6 @@ table{width:100%;border-collapse:collapse;}
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
-              <button onClick={()=>{setShowSharesPanel(true);loadSharesPanel();}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>📋 Shares</button>
-              {profile?.role==="admin" && (
-                <button onClick={()=>setShowAdminScreen(true)} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",color:"white",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",fontWeight:600}}>⚙ Users</button>
-              )}
               <button onClick={async()=>{await supaLogout();setSession(null);setProfile(null);}} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>Sign Out</button>
             </div>
           </div>
@@ -8304,41 +6465,6 @@ table{width:100%;border-collapse:collapse;}
           )}
 
           {/* ── Pending Reviews ── */}
-          {(pendingCAEdits.length > 0 || profile?.role === 'admin' || profile?.role === 'lender') && (
-            <div style={{background:"white",borderRadius:10,padding:"14px 18px",marginBottom:16,border:"1px solid "+(pendingCAEdits.length>0?"#93c5fd":"#e5e7eb"),boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:pendingCAEdits.length>0?12:0}}>
-                <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>CA Changes</div>
-                {pendingCAEdits.length>0 && <div style={{background:"#1d4ed8",color:"white",borderRadius:999,padding:"1px 8px",fontSize:".75rem",fontWeight:700}}>{pendingCAEdits.length} Pending</div>}
-                {pendingCAEdits.length===0 && <span style={{fontSize:".78rem",color:"#888"}}>No pending changes</span>}
-                <button onClick={loadPendingCAEdits} style={{marginLeft:"auto",background:"#f0f6ff",border:"1px solid #93c5fd",borderRadius:5,padding:"3px 10px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit"}}>↻ Refresh</button>
-              </div>
-              {pendingCAEdits.map(edit=>(
-                <div key={edit.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"#f0f6ff",borderRadius:8,marginBottom:8,border:"1px solid #bfdbfe"}}>
-                  <span style={{fontSize:"1.2rem"}}>📝</span>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:600,fontSize:".88rem"}}>{edit.client_name}</div>
-                    <div style={{fontSize:".78rem",color:"#555"}}>Changes by {edit.ca_name} · {new Date(edit.submitted_at).toLocaleDateString()}</div>
-                  </div>
-                  <button onClick={async()=>{
-                    // Load original sheet data for diff
-                    try {
-                      const item = await storage.get(edit.sheet_key);
-                      const orig = item ? JSON.parse(item.value) : {};
-                      setShowCADiff({...edit, original: orig});
-                    } catch { setShowCADiff({...edit, original:{}}); }
-                  }}
-                    style={{background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:"6px 14px",fontWeight:700,fontSize:".8rem",cursor:"pointer",fontFamily:"inherit"}}>
-                    Review Changes
-                  </button>
-                  <button onClick={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(edit.id); }}
-                    style={{background:"none",border:"1px solid #f0c0c0",borderRadius:6,padding:"6px 10px",fontSize:".8rem",cursor:"pointer",color:"#dc2626",fontFamily:"inherit"}}>
-                    Reject
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
           {pendingReviews.length > 0 && (
             <div style={{marginBottom:28}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
@@ -8383,165 +6509,6 @@ table{width:100%;border-collapse:collapse;}
           )}
 
           {bsCompare && <BSCompareModal review={bsCompare} onAccept={acceptCustomerBS} onDiscard={()=>setBsCompare(null)} />}
-
-          {/* Share with CA Modal */}
-          {showShareCA && (
-            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-              <div style={{background:"white",borderRadius:12,padding:28,width:"min(400px,90%)",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
-                <div style={{fontWeight:700,fontSize:16,marginBottom:6}}>Share with Credit Analyst</div>
-                <div style={{fontSize:13,color:"#555",marginBottom:18}}>Select a CA to share this balance sheet with. They will be able to view, edit, and submit changes back to you.</div>
-                <select value={selectedCAUser} onChange={e=>setSelectedCAUser(e.target.value)}
-                  style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"9px 12px",fontSize:14,fontFamily:"inherit",marginBottom:16,boxSizing:"border-box"}}>
-                  <option value="">Select a Credit Analyst...</option>
-                  {caUsers.map(u=>(
-                    <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
-                  ))}
-                </select>
-                {caUsers.length === 0 && (
-                  <div style={{fontSize:12,color:"#888",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                    No CA users found.
-                    <button onClick={loadCAUsers} style={{background:"#f0f6ff",border:"1px solid #93c5fd",borderRadius:4,padding:"3px 10px",fontSize:12,cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit"}}>Refresh</button>
-                  </div>
-                )}
-                <div style={{display:"flex",gap:10}}>
-                  <button onClick={()=>shareWithCA(showShareCA, selectedCAUser)} disabled={!selectedCAUser||sharingCA}
-                    style={{flex:1,background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:(!selectedCAUser||sharingCA)?"not-allowed":"pointer",fontFamily:"inherit",opacity:(!selectedCAUser||sharingCA)?.7:1}}>
-                    {sharingCA?"Sharing...":"Share"}
-                  </button>
-                  <button onClick={()=>{setShowShareCA(null);setSelectedCAUser('');}}
-                    style={{flex:1,background:"#f3f4f6",color:"#374151",border:"1px solid #d1d5db",borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Shares Panel */}
-          {showSharesPanel && (
-            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",zIndex:1000}}>
-              <div style={{background:"white",width:"min(600px,95%)",height:"100vh",overflowY:"auto",boxShadow:"-4px 0 24px rgba(0,0,0,.15)",display:"flex",flexDirection:"column"}}>
-                <div style={{background:"#6B0E1E",color:"white",padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-                  <div style={{fontWeight:700,fontSize:16}}>📋 Shared Balance Sheets</div>
-                  <button onClick={()=>setShowSharesPanel(false)} style={{background:"none",border:"none",color:"white",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
-                </div>
-
-                {sharesData.loading ? (
-                  <div style={{padding:40,textAlign:"center",color:"#888"}}>Loading shares...</div>
-                ) : (
-                  <div style={{flex:1,overflowY:"auto",padding:20}}>
-
-                    {/* CA Shares */}
-                    {sharesData.caShares.length > 0 && (
-                      <div style={{marginBottom:24}}>
-                        <div style={{fontWeight:700,fontSize:14,color:"#1d4ed8",borderBottom:"2px solid #bfdbfe",paddingBottom:6,marginBottom:12}}>
-                          Shared with Credit Analysts
-                        </div>
-                        {sharesData.caShares.map(s=>{
-                          const edits = s.ca_edits||[];
-                          const pending = edits.filter(e=>e.status==='pending').length;
-                          const accepted = edits.filter(e=>e.status==='accepted').length;
-                          return (
-                            <div key={s.id} style={{background:"#f0f6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                                <div>
-                                  <div style={{fontWeight:600,fontSize:13}}>{s.client_name}</div>
-                                  <div style={{fontSize:12,color:"#555",marginTop:2}}>
-                                    Shared with <strong>{s.caName}</strong> · {new Date(s.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-                                  </div>
-                                </div>
-                                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-                                  {pending > 0 && <span style={{background:"#fef3c7",color:"#92400e",borderRadius:999,padding:"2px 8px",fontSize:11,fontWeight:700}}>⏳ {pending} Pending</span>}
-                                  {accepted > 0 && <span style={{background:"#dcfce7",color:"#15803d",borderRadius:999,padding:"2px 8px",fontSize:11,fontWeight:700}}>✓ {accepted} Accepted</span>}
-                                  {!pending && !accepted && edits.length === 0 && <span style={{color:"#aaa",fontSize:11}}>No edits yet</span>}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Customer BS Shares */}
-                    {sharesData.bsShares.length > 0 && (
-                      <div style={{marginBottom:24}}>
-                        <div style={{fontWeight:700,fontSize:14,color:"#2d5a8e",borderBottom:"2px solid #c0d8f0",paddingBottom:6,marginBottom:12}}>
-                          Balance Sheets Shared with Customers
-                        </div>
-                        {sharesData.bsShares.map(s=>(
-                          <div key={s.share_id} style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <div>
-                                <div style={{fontWeight:600,fontSize:13}}>{s.client_name}</div>
-                                <div style={{fontSize:12,color:"#555",marginTop:2}}>
-                                  {s.as_of_date&&`As of ${s.as_of_date} · `}Shared {new Date(s.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-                                  {s.expires_at && ` · Expires ${new Date(s.expires_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}`}
-                                </div>
-                              </div>
-                              <span style={{
-                                background:s.status==='pending'?'#fef3c7':s.status==='saved'?'#dcfce7':'#f3f4f6',
-                                color:s.status==='pending'?'#92400e':s.status==='saved'?'#15803d':'#6b7280',
-                                borderRadius:999,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0
-                              }}>{s.status||'sent'}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Customer Budget Shares */}
-                    {sharesData.budgetShares.length > 0 && (
-                      <div style={{marginBottom:24}}>
-                        <div style={{fontWeight:700,fontSize:14,color:"#1B4332",borderBottom:"2px solid #bbf7d0",paddingBottom:6,marginBottom:12}}>
-                          Budgets Shared with Customers
-                        </div>
-                        {sharesData.budgetShares.map(s=>(
-                          <div key={s.share_id} style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <div>
-                                <div style={{fontWeight:600,fontSize:13}}>{s.client_name}</div>
-                                <div style={{fontSize:12,color:"#555",marginTop:2}}>
-                                  {s.as_of_date&&`As of ${s.as_of_date} · `}Shared {new Date(s.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-                                  {s.expires_at && ` · Expires ${new Date(s.expires_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}`}
-                                </div>
-                              </div>
-                              <span style={{
-                                background:s.status==='pending'?'#fef3c7':s.status==='saved'?'#dcfce7':'#f3f4f6',
-                                color:s.status==='pending'?'#92400e':s.status==='saved'?'#15803d':'#6b7280',
-                                borderRadius:999,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0
-                              }}>{s.status||'sent'}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {sharesData.caShares.length===0 && sharesData.bsShares.length===0 && sharesData.budgetShares.length===0 && (
-                      <div style={{textAlign:"center",padding:60,color:"#888"}}>
-                        <div style={{fontSize:40,marginBottom:12}}>📤</div>
-                        <div style={{fontWeight:600,marginBottom:8}}>No shares yet</div>
-                        <div style={{fontSize:13}}>Balance sheets shared with CAs or customers will appear here.</div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* CA Edit Diff Modal */}
-          {showCADiff && (
-            <CAEditDiff
-              original={showCADiff.original||{}}
-              edited={showCADiff.edited_data||{}}
-              caName={showCADiff.ca_name}
-              clientName={showCADiff.client_name}
-              accepting={acceptingCAEdit}
-              onAccept={()=>acceptCAEdit(showCADiff)}
-              onReject={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(showCADiff.id); }}
-              onClose={()=>setShowCADiff(null)}
-            />
-          )}
 
           <div className="home-section-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <span>
@@ -8760,18 +6727,6 @@ table{width:100%;border-collapse:collapse;}
                                 onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}>
                                 Move
                               </button>
-                              {caUsers.length > 0 && (
-                                <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
-                                  onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}>
-                                  Share CA
-                                </button>
-                              )}
-                              {caUsers.length === 0 && profile?.role==='admin' && (
-                                <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
-                                  onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}>
-                                  Share CA
-                                </button>
-                              )}
                               <button className="sheet-delete" onClick={e=>deleteSheet(s.key,e)}>Delete</button>
                             </div>
                           ))}
@@ -8791,12 +6746,8 @@ table{width:100%;border-collapse:collapse;}
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
-      {caOpenShare && (
-        <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13}}>
-          <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Changes will be submitted to lender for review</span>
-          <button onClick={()=>{storage.setOwner(session?.user?.id || null);setCaOpenShare(null);setData(emptyData());}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'3px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>← Back to Portal</button>
-        </div>
-      )}
+
+      {/* ── Balance Sheet Splitter Modal ── */}
       {showSplitter && <BSSplitter
         data={data} setData={setData}
         splitSelected={splitSelected} setSplitSelected={setSplitSelected}
@@ -9035,69 +6986,6 @@ table{width:100%;border-collapse:collapse;}
 
       {activeTab === "budget" && (
         <div className="budget-page">
-          {/* Scenario selector */}
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",background:"#f8f8f8",borderBottom:"1px solid #e5e7eb"}}>
-            <span style={{fontSize:".8rem",fontWeight:600,color:"#555"}}>Budget Scenario:</span>
-            <button onClick={()=>setActiveBudget(0)}
-              style={{background:activeBudget===0?"#6B0E1E":"white",color:activeBudget===0?"white":"#374151",border:"1px solid "+(activeBudget===0?"#6B0E1E":"#d1d5db"),borderRadius:6,padding:"4px 14px",fontWeight:activeBudget===0?700:400,fontSize:".82rem",cursor:"pointer",fontFamily:"inherit"}}>
-              {data.budget1Name||"Scenario 1"}
-            </button>
-            {data.budget2 ? (
-              <button onClick={()=>setActiveBudget(1)}
-                style={{background:activeBudget===1?"#6B0E1E":"white",color:activeBudget===1?"white":"#374151",border:"1px solid "+(activeBudget===1?"#6B0E1E":"#d1d5db"),borderRadius:6,padding:"4px 14px",fontWeight:activeBudget===1?700:400,fontSize:".82rem",cursor:"pointer",fontFamily:"inherit"}}>
-                {(data.budget2||{}).budget2Name||"Scenario 2"}
-              </button>
-            ) : (
-              <button onClick={()=>setShowBudget2Modal(true)}
-                style={{background:"none",border:"1.5px dashed #9ca3af",color:"#6b7280",borderRadius:6,padding:"4px 14px",fontSize:".82rem",cursor:"pointer",fontFamily:"inherit"}}>
-                + Add Budget Scenario
-              </button>
-            )}
-            {data.budget2 && activeBudget===1 && (
-              <button onClick={()=>{if(window.confirm("Remove Scenario 2?")) {setData(d=>{const d2={...d};delete d2.budget2;return d2;});setActiveBudget(0);}}}
-                style={{marginLeft:"auto",background:"none",border:"1px solid #fca5a5",color:"#dc2626",borderRadius:5,padding:"3px 10px",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
-                Remove Scenario 2
-              </button>
-            )}
-          </div>
-
-          {/* Add Budget 2 Modal */}
-          {showBudget2Modal && (
-            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-              <div style={{background:"white",borderRadius:12,padding:32,width:"min(400px,90%)",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
-                <div style={{fontWeight:700,fontSize:17,marginBottom:8}}>Add Budget Scenario 2</div>
-                <div style={{fontSize:13,color:"#555",marginBottom:20}}>Would you like to start with a copy of Scenario 1 or start fresh?</div>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  <button onClick={()=>{
-                    setData(d=>({...d,budget2:{
-                      budgetCrops:[...d.budgetCrops.map(r=>({...r}))],
-                      budgetLivestock:[...d.budgetLivestock.map(r=>({...r}))],
-                      budgetMisc:[...d.budgetMisc.map(r=>({...r}))],
-                      budgetExpenses:[...d.budgetExpenses.map(r=>({...r}))],
-                      budgetInsuranceEnabled:d.budgetInsuranceEnabled,
-                      budgetProposedDebt:[...(d.budgetProposedDebt||[]).map(r=>({...r}))],
-                      budget2Name:"Scenario 2"
-                    }}));
-                    setActiveBudget(1);setShowBudget2Modal(false);
-                  }} style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"11px 20px",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
-                    📋 Copy from Scenario 1
-                  </button>
-                  <button onClick={()=>{
-                    const eb=emptyBudget2();
-                    setData(d=>({...d,budget2:{...eb,budget2Name:"Scenario 2"}}));
-                    setActiveBudget(1);setShowBudget2Modal(false);
-                  }} style={{background:"#374151",color:"white",border:"none",borderRadius:7,padding:"11px 20px",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
-                    🆕 Start Fresh
-                  </button>
-                  <button onClick={()=>setShowBudget2Modal(false)}
-                    style={{background:"#f3f4f6",color:"#374151",border:"1px solid #d1d5db",borderRadius:7,padding:"11px 20px",fontWeight:600,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="budget-top-bar">
             <div className="budget-client">{data.clientName || "Client Budget"} — {data.asOfDate}</div>
             <div className="budget-top-totals">
@@ -9117,10 +7005,6 @@ table{width:100%;border-collapse:collapse;}
               style={{fontSize:".85rem"}}>
               Print Budget
             </button>
-            <button className="btn btn-secondary" onClick={handlePrintBudgetSummary}
-              style={{fontSize:".85rem",background:"#374151",color:"white",border:"none"}}>
-              Print Summary
-            </button>
             {profile?.role === 'admin' && (
               <button onClick={()=>setShowPriceList(true)}
                 style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
@@ -9137,10 +7021,14 @@ table{width:100%;border-collapse:collapse;}
               style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               🔗 Share with Customer
             </button>
+            <button className="btn btn-secondary" onClick={()=>setShowShareBudget(true)}
+              style={{fontSize:".85rem",background:"#1B4332",color:"white",border:"none"}}>
+              📧 Share with Customer
+            </button>
           </div>
           <div className="budget-body">
             <BudgetView
-              data={budgetViewData}
+              data={data}
               budgetCropTotal={budgetCropTotal}
               budgetInsuranceTotal={budgetInsuranceTotal}
               budgetTotalIncomeInsured={budgetTotalIncomeInsured}
@@ -9165,9 +7053,9 @@ table{width:100%;border-collapse:collapse;}
               corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
-              setArr={setBudgetViewArr}
-              removeRow={removeBudgetViewRow}
-              addRow={addBudgetViewRow}
+              setArr={setArr}
+              removeRow={removeRow}
+              addRow={addRow}
               lookupPrice={lookupPrice}
               commodityPrices={commodityPrices}
               expenseList={expenseList}
