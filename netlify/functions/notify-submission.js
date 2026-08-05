@@ -1,7 +1,7 @@
 // netlify/functions/notify-submission.js
-// Sends email via Resend when a customer submits a form
+// Sends email via Resend when a customer submits a form, or when a CA proposes edits.
 // Uses RESEND_API_KEY env var (already set in Netlify dashboard)
-// Uses NOTIFY_EMAIL env var — set to your email address in Netlify
+// Uses NOTIFY_EMAIL env var — fallback recipient when the request doesn't include lenderEmail
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -9,7 +9,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { type, clientName, shareId, submittedAt, lenderEmail } = JSON.parse(event.body || '{}');
+    const { type, clientName, shareId, submittedAt, lenderEmail, caName } = JSON.parse(event.body || '{}');
     const RESEND_API_KEY = process.env.RESEND_API_KEY;
     const NOTIFY_EMAIL   = lenderEmail || process.env.NOTIFY_EMAIL || 'chris@1stbmt.com';
     const FROM_EMAIL     = 'notifications@agrilogixsolutions.com';
@@ -23,11 +23,32 @@ exports.handler = async (event) => {
       balance_sheet: 'Balance Sheet',
       budget:        'Budget',
       inspection:    'Ag Inspection',
+      ca_edit:       'CA Edit',
     }[type] || 'Form';
+
+    // Two different email templates: customer submissions vs. CA edits.
+    const isCaEdit = type === 'ca_edit';
+
+    const heading  = isCaEdit ? 'CA Changes Submitted for Review' : 'Customer Submission Received';
+    const icon     = isCaEdit ? '📝' : '📬';
+    const subject  = isCaEdit
+      ? `📝 ${caName || 'A CA'} submitted edits to ${clientName || 'a client'}`
+      : `📬 ${clientName || 'Customer'} submitted their ${typeLabel}`;
+    const bodyText = isCaEdit
+      ? `<strong>${caName || 'A credit analyst'}</strong> submitted proposed edits to <strong>${clientName || 'a client\'s'}</strong> balance sheet. Open the app to review and accept or reject the changes.`
+      : `<strong>${clientName || 'A customer'}</strong> has submitted their <strong>${typeLabel}</strong> and it is ready for your review.`;
 
     const submittedStr = submittedAt
       ? new Date(submittedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
       : new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+
+    const detailRows = [
+      { l: 'Client',    v: clientName || '—' },
+      { l: 'Type',      v: typeLabel },
+      isCaEdit ? { l: 'Submitted by', v: caName || '—' } : null,
+      { l: 'Submitted', v: submittedStr },
+      { l: 'Share ID',  v: shareId || '—', mono: true },
+    ].filter(Boolean);
 
     const html = `
       <!DOCTYPE html>
@@ -40,17 +61,16 @@ exports.handler = async (event) => {
             <div style="color:rgba(255,255,255,.7);font-size:12px;margin-top:4px;letter-spacing:2px;text-transform:uppercase;">Agricultural Financial Tools</div>
           </div>
           <div style="padding:28px 32px;">
-            <div style="font-size:32px;text-align:center;margin-bottom:12px;">📬</div>
-            <h2 style="margin:0 0 16px;color:#1a1a1a;font-size:20px;text-align:center;">Customer Submission Received</h2>
+            <div style="font-size:32px;text-align:center;margin-bottom:12px;">${icon}</div>
+            <h2 style="margin:0 0 16px;color:#1a1a1a;font-size:20px;text-align:center;">${heading}</h2>
             <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 20px;">
-              <strong>${clientName || 'A customer'}</strong> has submitted their <strong>${typeLabel}</strong> and it is ready for your review.
+              ${bodyText}
             </p>
             <div style="background:#f5e8ea;border-radius:8px;padding:16px;margin-bottom:24px;">
               <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                <tr><td style="color:#888;padding:4px 0;">Client</td><td style="font-weight:600;color:#1a1a1a;text-align:right;">${clientName || '—'}</td></tr>
-                <tr><td style="color:#888;padding:4px 0;">Type</td><td style="font-weight:600;color:#1a1a1a;text-align:right;">${typeLabel}</td></tr>
-                <tr><td style="color:#888;padding:4px 0;">Submitted</td><td style="font-weight:600;color:#1a1a1a;text-align:right;">${submittedStr}</td></tr>
-                <tr><td style="color:#888;padding:4px 0;">Share ID</td><td style="font-weight:600;color:#1a1a1a;text-align:right;font-family:monospace;font-size:12px;">${shareId || '—'}</td></tr>
+                ${detailRows.map(r=>`
+                  <tr><td style="color:#888;padding:4px 0;">${r.l}</td><td style="font-weight:600;color:#1a1a1a;text-align:right;${r.mono?'font-family:monospace;font-size:12px;':''}">${r.v}</td></tr>
+                `).join('')}
               </table>
             </div>
             <div style="text-align:center;">
@@ -76,7 +96,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         from: `First Bank of Montana <${FROM_EMAIL}>`,
         to:   [NOTIFY_EMAIL],
-        subject: `📬 ${clientName || 'Customer'} submitted their ${typeLabel}`,
+        subject,
         html,
       }),
     });
