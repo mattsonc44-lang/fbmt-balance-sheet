@@ -1148,8 +1148,13 @@ function ComparisonView({
   );
 
   const allYears = compSheets.map(s => s.date);
-  const activeYears = selectedYears || allYears.slice(-3);
+  // Default: all sheets selected. User can uncheck to narrow the comparison.
+  const activeYears = selectedYears || allYears;
   const sheets = compSheets.filter(s => activeYears.includes(s.date));
+  if (sheets.length < 2) {
+    // User deselected too many — force at least 2 by falling back to all.
+    // (Shouldn't happen in normal use because we block the toggle below.)
+  }
   const years = sheets.map(s => s.date);
   const latest = sheets[sheets.length - 1];
   const prior  = sheets[sheets.length - 2];
@@ -1255,25 +1260,52 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
   return (
     <div className="comp-wrap">
 
-      {/* ── Year selector ── */}
-      {allYears.length > 3 && (
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,flexWrap:'wrap'}}>
-          <span style={{fontSize:13,color:'#555',fontWeight:600}}>Comparing:</span>
-          {allYears.map(y => (
-            <button key={y} onClick={() => {
-              const sel = activeYears.includes(y)
-                ? activeYears.filter(x => x !== y)
-                : [...activeYears, y].sort();
-              if (sel.length >= 2) setSelectedYears(sel);
-            }} style={{padding:'4px 12px',borderRadius:20,border:'1.5px solid',cursor:'pointer',fontSize:13,fontWeight:600,
-              background: activeYears.includes(y) ? '#6B0E1E' : 'white',
-              color:       activeYears.includes(y) ? 'white'   : '#6B0E1E',
-              borderColor: '#6B0E1E'}}>
-              {y}
+      {/* ── Sheet selector — always visible ── */}
+      <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:'12px 16px',marginBottom:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8,flexWrap:'wrap'}}>
+          <span style={{fontSize:13,color:'#374151',fontWeight:700}}>Compare which sheets?</span>
+          <span style={{fontSize:12,color:'#888'}}>{activeYears.length} of {allYears.length} selected</span>
+          <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+            <button onClick={()=>setSelectedYears(allYears)}
+              style={{padding:'3px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',fontSize:12,cursor:'pointer',color:'#374151',fontFamily:'inherit'}}>
+              Select all
             </button>
-          ))}
+            {allYears.length > 3 && (
+              <button onClick={()=>setSelectedYears(allYears.slice(-3))}
+                style={{padding:'3px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',fontSize:12,cursor:'pointer',color:'#374151',fontFamily:'inherit'}}>
+                Latest 3
+              </button>
+            )}
+            <button onClick={()=>setSelectedYears(allYears.slice(-2))}
+              style={{padding:'3px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',fontSize:12,cursor:'pointer',color:'#374151',fontFamily:'inherit'}}>
+              Latest 2
+            </button>
+          </div>
         </div>
-      )}
+        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+          {allYears.map(y => {
+            const on = activeYears.includes(y);
+            const wouldBeLast = on && activeYears.length <= 2;
+            return (
+              <button key={y}
+                title={wouldBeLast ? 'At least 2 sheets are required for a comparison.' : ''}
+                onClick={() => {
+                  const sel = on
+                    ? activeYears.filter(x => x !== y)
+                    : [...activeYears, y].sort();
+                  if (sel.length >= 2) setSelectedYears(sel);
+                }}
+                style={{padding:'4px 12px',borderRadius:20,border:'1.5px solid',cursor:wouldBeLast?'not-allowed':'pointer',fontSize:13,fontWeight:600,
+                  background: on ? '#6B0E1E' : 'white',
+                  color:       on ? 'white'   : '#6B0E1E',
+                  borderColor: '#6B0E1E',
+                  opacity: wouldBeLast ? .6 : 1}}>
+                {on ? '✓ ' : ''}{y}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* ── Summary cards ── */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12,marginBottom:20}}>
