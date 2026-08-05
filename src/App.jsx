@@ -3719,11 +3719,14 @@ function BSCompareModal({review, onAccept, onDiscard}) {
 function ClientDashboard({
   clientName, savedSheets, pendingReviews, pendingCAEdits,
   session, sheetTotals,
-  onBack, onOpenSheet, onNewSheet, onOpenComparison, onOpenImport, onOpenAgInspection,
+  onBack, onOpenSheet, onOpenClient, onNewSheet, onOpenComparison, onOpenImport, onOpenAgInspection,
   onOpenReview, onOpenCADiff, onShareCA,
 }) {
   const [loadingSheets, setLoadingSheets] = React.useState(true);
   const [sheetSummaries, setSheetSummaries] = React.useState([]); // [{key, asOfDate, totals, issues}]
+  const [linkedForward, setLinkedForward] = React.useState([]);   // [{name, date, nw|null, hasSheet}]
+  const [linkedReverse, setLinkedReverse] = React.useState([]);   // [{clientName, nw}]
+  const [linkedLoading, setLinkedLoading] = React.useState(true);
   const [notes, setNotes] = React.useState('');
   const [renewalDate, setRenewalDate] = React.useState('');
   const [customerEmail, setCustomerEmail] = React.useState('');
@@ -3771,6 +3774,77 @@ function ClientDashboard({
     })();
     return () => { cancelled = true; };
   }, [thisClientSheets.map(s=>s.key).join('|')]); // eslint-disable-line
+
+  // Load linked entities — both forward (from this client's latest sheet) and reverse
+  // (other clients whose latest sheet lists this one). One pass over saved sheets.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLinkedLoading(true);
+      // Forward: read the latest sheet for this client to get its linkedEntities.
+      const latestForClient = thisClientSheets[thisClientSheets.length - 1];
+      let forwardList = [];
+      if (latestForClient) {
+        try {
+          const item = await storage.get(latestForClient.key);
+          if (item) {
+            const p = JSON.parse(item.value);
+            const raw = Array.isArray(p.linkedEntities) ? p.linkedEntities : [];
+            const norm = raw.map(e => typeof e === 'string' ? { name: e, date: null } : e);
+            for (const entry of norm) {
+              const entitySheets = savedSheets
+                .filter(s => s.clientName === entry.name)
+                .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
+              const targetKey = entry.date
+                ? entitySheets.find(s => s.asOfDate === entry.date)?.key
+                : entitySheets[0]?.key;
+              if (targetKey) {
+                try {
+                  const it = await storage.get(targetKey);
+                  if (it) {
+                    const pe = JSON.parse(it.value);
+                    forwardList.push({ name: entry.name, date: entry.date, nw: sheetTotals(pe)['NET WORTH'] || 0, hasSheet: true });
+                  }
+                } catch { forwardList.push({ name: entry.name, date: entry.date, nw: null, hasSheet: true }); }
+              } else {
+                forwardList.push({ name: entry.name, date: entry.date, nw: null, hasSheet: false });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // Reverse: scan every OTHER client's latest sheet.
+      const otherClients = Array.from(new Set(
+        savedSheets.map(s => s.clientName).filter(c => c && c !== clientName)
+      ));
+      const reverseList = [];
+      for (const other of otherClients) {
+        const otherSheets = savedSheets
+          .filter(s => s.clientName === other)
+          .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
+        const latestKey = otherSheets[0]?.key;
+        if (!latestKey) continue;
+        try {
+          const it = await storage.get(latestKey);
+          if (!it) continue;
+          const p = JSON.parse(it.value);
+          const raw = Array.isArray(p.linkedEntities) ? p.linkedEntities : [];
+          const names = raw.map(e => typeof e === 'string' ? e : e.name);
+          if (names.includes(clientName)) {
+            reverseList.push({ clientName: other, nw: sheetTotals(p)['NET WORTH'] || 0 });
+          }
+        } catch {}
+      }
+
+      if (!cancelled) {
+        setLinkedForward(forwardList);
+        setLinkedReverse(reverseList);
+        setLinkedLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clientName, thisClientSheets.map(s=>s.key).join('|'), savedSheets.length]); // eslint-disable-line
 
   // Load notes + renewal fields.
   React.useEffect(() => {
@@ -4004,6 +4078,71 @@ function ClientDashboard({
             )}
           </div>
         </div>
+
+        {/* Linked entities — only render if we have any forward or reverse links */}
+        {(linkedForward.length > 0 || linkedReverse.length > 0) && (
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:10,textTransform:'uppercase',letterSpacing:.3,display:'flex',alignItems:'center',gap:8}}>
+              <span>Linked entities</span>
+              {linkedLoading && <span style={{fontSize:11,color:'#888',fontWeight:400,textTransform:'none',letterSpacing:0}}>loading…</span>}
+            </div>
+
+            {linkedForward.length > 0 && (
+              <div style={{marginBottom: linkedReverse.length > 0 ? 12 : 0}}>
+                <div style={{fontSize:11,fontWeight:600,color:'#374151',marginBottom:6}}>
+                  {clientName} is invested in
+                  <span style={{color:'#888',fontWeight:400,marginLeft:6}}>
+                    · Total: {fmtBig(linkedForward.reduce((s,e)=>s+(e.nw||0),0))}
+                  </span>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {linkedForward.map((e,i) => (
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#f5f3ef',border:'1px solid #e5e0d5',borderRadius:7}}>
+                      <span style={{fontSize:16}}>🏢</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600}}>{e.name}</div>
+                        <div style={{fontSize:11,color:'#555'}}>
+                          {e.hasSheet
+                            ? <>Net worth {fmtBig(e.nw||0)}{e.date ? ` (as of ${e.date})` : ''}</>
+                            : <span style={{color:'#c2410c'}}>No balance sheet on file for this entity yet</span>}
+                        </div>
+                      </div>
+                      {e.hasSheet ? (
+                        <button onClick={()=>onOpenClient && onOpenClient(e.name)}
+                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #d1c9b8',background:'white',color:'#5a4a2b',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
+                          Open dashboard →
+                        </button>
+                      ) : (
+                        <span style={{fontSize:11,color:'#888'}}>No sheet</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {linkedReverse.length > 0 && (
+              <div>
+                <div style={{fontSize:11,fontWeight:600,color:'#374151',marginBottom:6}}>Linked from</div>
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {linkedReverse.map((e,i) => (
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:7}}>
+                      <span style={{fontSize:16}}>👤</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600}}>{e.clientName}</div>
+                        <div style={{fontSize:11,color:'#555'}}>Owner / linked from · Net worth {fmtBig(e.nw||0)}</div>
+                      </div>
+                      <button onClick={()=>onOpenClient && onOpenClient(e.clientName)}
+                        style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #bfdbfe',background:'white',color:'#1d4ed8',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
+                        Open dashboard →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Saved sheets strip */}
         <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
@@ -7691,6 +7830,7 @@ ${extraPages}
       session={session}
       sheetTotals={sheetTotals}
       onBack={() => setDashboardClient(null)}
+      onOpenClient={(name) => setDashboardClient(name)}
       onOpenSheet={(key) => { setDashboardClient(null); loadSheet(key); }}
       onNewSheet={() => {
         setDashboardClient(null);
