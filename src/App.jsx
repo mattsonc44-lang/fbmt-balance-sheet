@@ -392,6 +392,109 @@ function saveCommodityPrices(prices) {
 const numVal = v => Number(String(v||"").replace(/[^0-9.-]/g,""))||0;
 const fmt = v => { const n = numVal(v); return n ? "$"+n.toLocaleString("en-US",{maximumFractionDigits:0}) : ""; };
 
+// ── Data-quality validation ────────────────────────────────────────────────────
+// Returns an array of {severity, code, message, section?}.
+// severity: 'error' blocks save; 'warning' asks for confirmation; 'info' is FYI only.
+function validateSheet(d) {
+  const issues = [];
+  if (!d) return issues;
+
+  // Errors — block save
+  if (!d.clientName || !String(d.clientName).trim()) {
+    issues.push({ severity:'error', code:'no_client', message:'Client name is required.' });
+  }
+  if (!d.asOfDate) {
+    issues.push({ severity:'error', code:'no_date', message:'As-of date is required.' });
+  }
+
+  // Row-level warnings — amount without description, or description without amount.
+  // (Description-without-amount is common and noisy, so we only flag amount-without-description.)
+  const arrayChecks = [
+    ['cashOther',        'institution', 'amount',       'Other bank accounts'],
+    ['receivables',      'description', 'amount',       'Receivables'],
+    ['farmProducts',     'kind',        'pricePerUnit', 'Farm products'],
+    ['cropInvestment',   'cropType',    'valuePerAcre', 'Crop investment'],
+    ['livestockMarket',  'kind',        'value',        'Market livestock'],
+    ['breedingStock',    'kind',        'value',        'Breeding stock'],
+    ['realEstate',       'description', 'valuePerAcre', 'Real estate'],
+    ['machinery',        'make',        'value',        'Machinery'],
+    ['vehicles',         'make',        'value',        'Vehicles'],
+    ['otherAssets',      'description', 'amount',       'Other assets'],
+    ['operatingNotes',   'creditor',    'balance',      'Operating notes'],
+    ['accountsDue',      'creditor',    'amount',       'Accounts due'],
+    ['intermediatDebt',  'creditor',    'principal',    'Term debt'],
+    ['reMortgages',      'lienHolder',  'principal',    'RE mortgages'],
+    ['otherLiabilities', 'description', 'balance',      'Other liabilities'],
+    ['supplies',         'description', 'value',        'Supplies'],
+    ['otherCurrent',     'description', 'amount',       'Other current assets'],
+    ['otherCurrentLiab', 'description', 'amount',       'Other current liabilities'],
+  ];
+  for (const [field, nameKey, valKey, section] of arrayChecks) {
+    const rows = d[field] || [];
+    rows.forEach((r, i) => {
+      const hasVal  = numVal(r[valKey]) > 0;
+      const hasName = String(r[nameKey]||'').trim().length > 0;
+      if (hasVal && !hasName) {
+        issues.push({
+          severity: 'warning', code: 'missing_name',
+          message: `${section} row ${i+1}: $${numVal(r[valKey]).toLocaleString()} entered with no ${nameKey}.`,
+          section
+        });
+      }
+      // Negative in fields that should never be negative
+      if (numVal(r[valKey]) < 0) {
+        issues.push({
+          severity: 'warning', code: 'negative_value',
+          message: `${section} row ${i+1}: negative value ($${numVal(r[valKey]).toLocaleString()}).`,
+          section
+        });
+      }
+    });
+  }
+
+  // Sheet-level: everything zero (probably forgot to enter data)
+  const allZeroTotals =
+    numVal(d.cashGlacier) === 0 &&
+    (d.cashOther||[]).every(r=>numVal(r.amount)===0) &&
+    (d.receivables||[]).every(r=>numVal(r.amount)===0) &&
+    (d.farmProducts||[]).every(r=>numVal(r.pricePerUnit)===0) &&
+    (d.realEstate||[]).every(r=>numVal(r.valuePerAcre)===0) &&
+    (d.machinery||[]).every(r=>numVal(r.value)===0) &&
+    (d.operatingNotes||[]).every(r=>numVal(r.balance)===0);
+  if (allZeroTotals) {
+    issues.push({
+      severity: 'warning', code: 'empty_sheet',
+      message: 'No assets or liabilities entered on this sheet — is that intentional?'
+    });
+  }
+
+  return issues;
+}
+
+// Big year-over-year swings on major totals. Prior is the previous sheet's totals object.
+function validateAgainstPrior(currentTotals, priorTotals, priorDate) {
+  const issues = [];
+  if (!currentTotals || !priorTotals) return issues;
+  const bigSwing = (label) => {
+    const cur = currentTotals[label] || 0;
+    const prev = priorTotals[label] || 0;
+    if (Math.abs(prev) < 1000) return null; // don't flag % swings on near-zero baselines
+    const pct = ((cur - prev) / Math.abs(prev)) * 100;
+    if (Math.abs(pct) >= 50) return pct;
+    return null;
+  };
+  for (const label of ['TOTAL ASSETS','TOTAL LIABILITIES','NET WORTH']) {
+    const pct = bigSwing(label);
+    if (pct !== null) {
+      issues.push({
+        severity: 'info', code: 'yoy_swing',
+        message: `${label} changed ${pct>0?'+':''}${pct.toFixed(0)}% vs ${priorDate} — verify this isn't a typo.`
+      });
+    }
+  }
+  return issues;
+}
+
 // ── Commodity Typeahead Dropdown ───────────────────────────────────────────────
 function CommodityDropdown({ value, onChange, commodityPrices, category, placeholder }) {
   const [open, setOpen] = React.useState(false);
@@ -1286,9 +1389,16 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
           {allYears.map(y => {
             const on = activeYears.includes(y);
             const wouldBeLast = on && activeYears.length <= 2;
+            const sheetForY = compSheets.find(s => s.date === y);
+            const issueCount = (sheetForY?.issues || []).length;
+            const tooltip = wouldBeLast
+              ? 'At least 2 sheets are required for a comparison.'
+              : issueCount
+                ? `${issueCount} data-quality note${issueCount>1?'s':''} on this sheet`
+                : '';
             return (
               <button key={y}
-                title={wouldBeLast ? 'At least 2 sheets are required for a comparison.' : ''}
+                title={tooltip}
                 onClick={() => {
                   const sel = on
                     ? activeYears.filter(x => x !== y)
@@ -1300,11 +1410,30 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
                   color:       on ? 'white'   : '#6B0E1E',
                   borderColor: '#6B0E1E',
                   opacity: wouldBeLast ? .6 : 1}}>
-                {on ? '✓ ' : ''}{y}
+                {on ? '✓ ' : ''}{y}{issueCount ? ' ⚠' : ''}
               </button>
             );
           })}
         </div>
+
+        {/* Data-quality notes for selected sheets */}
+        {(() => {
+          const flagged = compSheets
+            .filter(s => activeYears.includes(s.date) && (s.issues||[]).length > 0);
+          if (!flagged.length) return null;
+          return (
+            <div style={{marginTop:10,background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:8,padding:'8px 12px'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#92400e',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>
+                Data quality notes
+              </div>
+              {flagged.map(s => (
+                <div key={s.date} style={{fontSize:12,color:'#78350f',lineHeight:1.5,marginBottom:4}}>
+                  <strong>{s.date}:</strong> {s.issues.map(i=>i.message).join(' · ')}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Summary cards ── */}
@@ -4287,6 +4416,7 @@ export default function BalanceSheet() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [caOpenShare, setCaOpenShare] = useState(null);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
+  const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -4456,25 +4586,35 @@ export default function BalanceSheet() {
   const [importDate, setImportDate] = useState(new Date().toISOString().slice(0,10));
   const [importDragging, setImportDragging] = useState(false);
 
-  const saveSheet = async () => {
-    if (!data.clientName) return;
+  // Continue-the-save closure, factored out so the validation modal can call it after user confirms.
+  const proceedWithSave = async () => {
     const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
-    // Check if already exists
     try {
       const existing = await storage.get(key);
       if (existing) {
         const p = JSON.parse(existing.value);
-        // If it has a folder already, just confirm overwrite without folder picker
         if (p.folderPath && p.folderPath.length > 0) {
           setConfirmSave({ key, label: data.clientName + " — " + data.asOfDate });
           return;
         }
       }
     } catch {}
-    // Show folder picker
     setPendingSaveKey(key);
     setSelectedFolderPath(data.folderPath && data.folderPath.length > 0 ? [...data.folderPath] : []);
     setShowSaveFolderPicker(true);
+  };
+
+  const saveSheet = async () => {
+    if (!data.clientName) return;
+    const issues = validateSheet(data);
+    const errors   = issues.filter(i=>i.severity==='error');
+    const warnings = issues.filter(i=>i.severity==='warning');
+    if (errors.length || warnings.length) {
+      // Show the validation modal — user must acknowledge before we continue.
+      setSaveValidation({ issues, canProceed: errors.length === 0 });
+      return;
+    }
+    await proceedWithSave();
   };
 
   const doSave = async (key, folderPathOverride) => {
@@ -5366,11 +5506,20 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ date: p.asOfDate, totals: sheetTotals(p) });
+              const totals = sheetTotals(p);
+              // Only flag warnings on saved sheets (info-level is noisy retroactively;
+              // errors would have blocked the save).
+              const issues = validateSheet(p).filter(i => i.severity === 'warning');
+              sheets.push({ date: p.asOfDate, totals, issues });
             }
           } catch {}
         }
         sheets.sort((a,b) => a.date.localeCompare(b.date));
+        // Second pass: add YoY-swing info issues comparing each sheet to its predecessor.
+        for (let i = 1; i < sheets.length; i++) {
+          const swings = validateAgainstPrior(sheets[i].totals, sheets[i-1].totals, sheets[i-1].date);
+          sheets[i].issues = [...(sheets[i].issues||[]), ...swings];
+        }
         setCompSheets(sheets);
       } else { setCompSheets([]); }
     } catch {}
@@ -7754,6 +7903,58 @@ ${extraPages}
                 }}>
                 Save Here
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Data Quality Modal ── */}
+      {saveValidation && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1002,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"white",borderRadius:12,width:"min(560px,100%)",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+            <div style={{padding:"18px 24px",borderBottom:"1px solid #e5e7eb"}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#1a1a1a"}}>
+                {saveValidation.canProceed ? "Review before saving" : "Cannot save yet"}
+              </div>
+              <div style={{fontSize:12,color:"#888",marginTop:2}}>
+                {saveValidation.canProceed
+                  ? "These look like they might need attention. You can save anyway if they're intentional."
+                  : "Fix the errors below, then try Save again."}
+              </div>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"14px 24px"}}>
+              {['error','warning','info'].map(sev => {
+                const items = saveValidation.issues.filter(i=>i.severity===sev);
+                if (!items.length) return null;
+                const cfg = sev==='error'   ? {label:'Errors',   bg:'#fef2f2', bd:'#fca5a5', color:'#991b1b', icon:'✖'} :
+                            sev==='warning' ? {label:'Warnings', bg:'#fef3c7', bd:'#fcd34d', color:'#92400e', icon:'⚠'} :
+                                              {label:'Notes',    bg:'#f0f6ff', bd:'#bfdbfe', color:'#1e40af', icon:'ℹ'};
+                return (
+                  <div key={sev} style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:cfg.color,textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>{cfg.label} ({items.length})</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                      {items.map((it,i)=>(
+                        <div key={i} style={{background:cfg.bg,border:'1px solid '+cfg.bd,borderRadius:7,padding:'8px 12px',fontSize:13,color:cfg.color,display:'flex',gap:8}}>
+                          <span style={{fontWeight:800}}>{cfg.icon}</span>
+                          <span>{it.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{padding:"14px 24px",borderTop:"1px solid #e5e7eb",display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setSaveValidation(null)}
+                style={{background:"#f3f4f6",color:"#374151",border:"1px solid #d1d5db",borderRadius:7,padding:"9px 20px",fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+                {saveValidation.canProceed ? 'Go back and fix' : 'Close'}
+              </button>
+              {saveValidation.canProceed && (
+                <button onClick={()=>{ setSaveValidation(null); proceedWithSave(); }}
+                  style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"9px 20px",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+                  Save anyway
+                </button>
+              )}
             </div>
           </div>
         </div>
