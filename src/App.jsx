@@ -4061,6 +4061,20 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
           })
         });
       }
+      // Fire-and-forget email to the lender who owns this share.
+      try {
+        await fetch('/.netlify/functions/notify-submission', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            type: 'ca_edit',
+            clientName: openSheet.client_name,
+            shareId: openSheet.id,
+            submittedAt: new Date().toISOString(),
+            lenderEmail: openSheet.lender_email || '',
+            caName: profile?.full_name || session.user.email,
+          }),
+        });
+      } catch {}
       setSubmitMsg('Changes submitted to lender for review.');
       await loadShares();
     } catch(e) { setSubmitMsg('Error: '+e.message); }
@@ -5784,6 +5798,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
         body: JSON.stringify({
           lender_user_id: session?.user?.id,
           lender_name: profile?.full_name || session?.user?.email || 'First Bank of Montana',
+          lender_email: session?.user?.email || '',
           ca_user_id: caUserId,
           client_name: sheet?.clientName || sheetData.clientName || '',
           sheet_key: sheetKey,
@@ -7275,6 +7290,14 @@ ${extraPages}
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
+              {(pendingReviews.length + pendingCAEdits.length) > 0 && (
+                <a href="#pending-items"
+                  onClick={e=>{e.preventDefault();document.getElementById('pending-items')?.scrollIntoView({behavior:'smooth',block:'start'});}}
+                  title={`${pendingReviews.length} customer + ${pendingCAEdits.length} CA pending`}
+                  style={{background:"#fbbf24",color:"#1a1a1a",borderRadius:999,padding:"3px 10px",fontSize:".78rem",fontWeight:700,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:4,cursor:"pointer"}}>
+                  🔔 {pendingReviews.length + pendingCAEdits.length}
+                </a>
+              )}
               {profile?.role === "admin" && (
                 <button onClick={()=>setShowAdminScreen(true)}
                   style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",color:"white",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",fontWeight:600}}>
@@ -7421,6 +7444,8 @@ ${extraPages}
               </div>
             </div>
           )}
+
+          <div id="pending-items" style={{scrollMarginTop:80}} />
 
           {/* ── Pending CA Changes ── */}
           {pendingCAEdits.length > 0 && (
@@ -7995,6 +8020,13 @@ ${extraPages}
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
           {data.clientName && <span style={{opacity:.8,fontSize:".85rem"}}>{data.clientName}</span>}
           {session?.user?.email && <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
+          {(pendingReviews.length + pendingCAEdits.length) > 0 && (
+            <button onClick={()=>setScreen("home")}
+              title={`${pendingReviews.length} customer + ${pendingCAEdits.length} CA pending — click to view`}
+              style={{background:"#fbbf24",color:"#1a1a1a",border:"none",borderRadius:999,padding:"3px 10px",fontSize:".72rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              🔔 {pendingReviews.length + pendingCAEdits.length}
+            </button>
+          )}
           {profile?.role === "admin" && (
             <button onClick={()=>{setScreen("home");setShowAdminScreen(true);}}
               style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.35)",color:"white",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit",fontWeight:600}}>
