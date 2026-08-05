@@ -3713,6 +3713,322 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
+// ─── ClientDashboard ─────────────────────────────────────────────────────────
+// One-page overview for a single client: KPI cards, net-worth trend, pending items
+// filtered to this client, all saved as-of-dates as tiles, per-client notes.
+function ClientDashboard({
+  clientName, savedSheets, pendingReviews, pendingCAEdits,
+  session, sheetTotals,
+  onBack, onOpenSheet, onNewSheet, onOpenComparison, onOpenImport, onOpenAgInspection,
+  onOpenReview, onOpenCADiff, onShareCA,
+}) {
+  const [loadingSheets, setLoadingSheets] = React.useState(true);
+  const [sheetSummaries, setSheetSummaries] = React.useState([]); // [{key, asOfDate, totals, issues}]
+  const [notes, setNotes] = React.useState('');
+  const [notesLoaded, setNotesLoaded] = React.useState(false);
+  const [notesStatus, setNotesStatus] = React.useState(''); // 'saving' | 'saved' | ''
+  const saveTimer = React.useRef(null);
+
+  // Filter to just this client's sheets, in date order.
+  const thisClientSheets = React.useMemo(() =>
+    savedSheets
+      .filter(s => s.clientName === clientName)
+      .sort((a,b) => a.asOfDate.localeCompare(b.asOfDate)),
+    [savedSheets, clientName]
+  );
+
+  // Filter pending items to this client.
+  const clientPendingReviews = pendingReviews.filter(r => r.client_name === clientName);
+  const clientPendingCAEdits = pendingCAEdits.filter(e => e.client_name === clientName);
+  const totalPending = clientPendingReviews.length + clientPendingCAEdits.length;
+
+  // Load full sheet data for each as-of-date so we can compute totals + quality issues.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingSheets(true);
+      const summaries = [];
+      for (const s of thisClientSheets) {
+        try {
+          const item = await storage.get(s.key);
+          if (item) {
+            const p = JSON.parse(item.value);
+            const totals = sheetTotals(p);
+            const issues = validateSheet(p).filter(i => i.severity === 'warning');
+            summaries.push({ key:s.key, asOfDate:s.asOfDate, totals, issues, savedAt:s.savedAt });
+          }
+        } catch {}
+      }
+      // YoY-swing info between consecutive summaries
+      for (let i = 1; i < summaries.length; i++) {
+        const swings = validateAgainstPrior(summaries[i].totals, summaries[i-1].totals, summaries[i-1].asOfDate);
+        summaries[i].issues = [...(summaries[i].issues||[]), ...swings];
+      }
+      if (!cancelled) { setSheetSummaries(summaries); setLoadingSheets(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [thisClientSheets.map(s=>s.key).join('|')]); // eslint-disable-line
+
+  // Load notes.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setNotesLoaded(false);
+      try {
+        const uid = session?.user?.id;
+        if (!uid) return;
+        const url = SUPABASE_URL + '/rest/v1/client_notes?user_id=eq.' + encodeURIComponent(uid)
+          + '&client_name=eq.' + encodeURIComponent(clientName) + '&select=notes';
+        const r = await fetch(url, { headers: supaHeaders() });
+        const rows = await r.json();
+        if (!cancelled) setNotes(rows?.[0]?.notes || '');
+      } catch {}
+      if (!cancelled) setNotesLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [clientName, session?.user?.id]);
+
+  // Debounced save on notes edit.
+  const handleNotesChange = (v) => {
+    setNotes(v);
+    setNotesStatus('saving');
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const uid = session?.user?.id;
+        if (!uid) return;
+        await fetch(SUPABASE_URL + '/rest/v1/client_notes?on_conflict=user_id,client_name', {
+          method: 'POST',
+          headers: { ...supaHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ user_id: uid, client_name: clientName, notes: v, updated_at: new Date().toISOString() }),
+        });
+        setNotesStatus('saved');
+        setTimeout(() => setNotesStatus(''), 1500);
+      } catch { setNotesStatus(''); }
+    }, 800);
+  };
+
+  const latest = sheetSummaries[sheetSummaries.length - 1];
+  const prior  = sheetSummaries[sheetSummaries.length - 2];
+  const fmtBig = v => {
+    const abs = Math.abs(v);
+    if (abs >= 1e6) return (v>=0?'$':'-$') + (abs/1e6).toFixed(2) + 'M';
+    if (abs >= 1e3) return (v>=0?'$':'-$') + Math.round(abs/1e3) + 'K';
+    return (v>=0?'$':'-$') + Math.round(abs).toLocaleString();
+  };
+  const changeStr = (cur, prev) => {
+    const diff = cur - prev;
+    const pct = prev !== 0 ? (diff/Math.abs(prev)*100).toFixed(1) : null;
+    return { diff, pct, sign: diff>0?'+':'' };
+  };
+  const kpi = (label, key, goodDir) => {
+    if (!latest) return null;
+    const cur = latest.totals[key] || 0;
+    const prev = prior ? (prior.totals[key] || 0) : 0;
+    const { diff, pct, sign } = changeStr(cur, prev);
+    const trending = diff === 0 ? 'flat' : (diff > 0 ? 'up' : 'down');
+    const isGood = goodDir === 'up' ? trending==='up' : trending==='down';
+    const bg = !prior ? '#f5f5f5' : (isGood ? '#eaf3de' : trending==='flat' ? '#f5f5f5' : '#fcebeb');
+    const fg = !prior ? '#374151' : (isGood ? '#3B6D11' : trending==='flat' ? '#374151' : '#A32D2D');
+    return (
+      <div style={{background:bg,borderRadius:8,padding:12}}>
+        <div style={{fontSize:10,fontWeight:700,color:fg,textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>{label}</div>
+        <div style={{fontSize:20,fontWeight:700,color:'#1a1a1a'}}>{fmtBig(cur)}</div>
+        <div style={{fontSize:11,color:fg,marginTop:2}}>
+          {prior
+            ? <>{trending==='up'?'↑ ':trending==='down'?'↓ ':'→ '}{sign}{fmtBig(diff)}{pct!==null?` (${sign}${pct}%)`:''}</>
+            : <>Only one sheet on file</>}
+        </div>
+      </div>
+    );
+  };
+
+  const nwVals = sheetSummaries.map(s => s.totals['NET WORTH'] || 0);
+  const chartMax = Math.max(...nwVals.map(Math.abs), 1) * 1.15;
+
+  return (
+    <div className="app">
+      <div style={{background:'#6B0E1E',color:'white',padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <button onClick={onBack}
+            style={{background:'transparent',border:'none',color:'rgba(255,255,255,.75)',fontSize:12,cursor:'pointer',fontFamily:'inherit',padding:0,marginBottom:2,display:'flex',alignItems:'center',gap:4}}>
+            ← All clients
+          </button>
+          <div style={{fontSize:18,fontWeight:700}}>{clientName}</div>
+          <div style={{fontSize:11,opacity:.75,marginTop:2}}>
+            {thisClientSheets.length} balance sheet{thisClientSheets.length!==1?'s':''} on file
+            {latest && ' · Last saved ' + latest.asOfDate}
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {totalPending > 0 && (
+            <span style={{background:'#fbbf24',color:'#1a1a1a',borderRadius:999,padding:'3px 10px',fontSize:12,fontWeight:700}}>
+              🔔 {totalPending} pending
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div style={{maxWidth:960,margin:'20px auto',padding:'0 20px'}}>
+
+        {loadingSheets ? (
+          <div style={{textAlign:'center',padding:60,color:'#888'}}>Loading dashboard…</div>
+        ) : !latest ? (
+          <div style={{textAlign:'center',padding:60,color:'#888',background:'white',borderRadius:12,border:'1px solid #e5e7eb'}}>
+            <div style={{fontSize:40,marginBottom:12}}>📋</div>
+            <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>No saved sheets yet for {clientName}</div>
+            <button onClick={onNewSheet}
+              style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginTop:8}}>
+              + New Balance Sheet
+            </button>
+          </div>
+        ) : (
+        <>
+
+        {/* KPI cards */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
+          {kpi('Net worth',        'NET WORTH',         'up')}
+          {kpi('Total assets',     'TOTAL ASSETS',      'up')}
+          {kpi('Total liabilities','TOTAL LIABILITIES', 'down')}
+          {kpi('Working capital',  'WORKING CAPITAL',   'up')}
+        </div>
+
+        {/* Trend chart + pending items */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:10,textTransform:'uppercase',letterSpacing:.3}}>Net worth trend</div>
+            {sheetSummaries.length < 2 ? (
+              <div style={{padding:'20px 0',fontSize:12,color:'#888',textAlign:'center'}}>Save a second sheet to see a trend.</div>
+            ) : (
+              <svg viewBox={`0 0 ${sheetSummaries.length * 55 + 20} 130`} style={{width:'100%',height:'auto'}}>
+                <line x1="0" y1="100" x2={sheetSummaries.length * 55 + 20} y2="100" stroke="#e5e7eb" strokeWidth="1"/>
+                {sheetSummaries.map((s, i) => {
+                  const v = s.totals['NET WORTH'] || 0;
+                  const h = Math.abs(v)/chartMax*85;
+                  const x = 10 + i * 55;
+                  const y = v >= 0 ? 100 - h : 100;
+                  const fill = v >= 0 ? '#3B6D11' : '#A32D2D';
+                  return (
+                    <g key={s.key}>
+                      <rect x={x} y={y} width="40" height={Math.max(h,2)} fill={fill} rx="3" opacity={i===sheetSummaries.length-1?1:.7}/>
+                      <text x={x+20} y={y-4} textAnchor="middle" fontSize="9" fill={fill} fontWeight="700">{fmtBig(v)}</text>
+                      <text x={x+20} y="118" textAnchor="middle" fontSize="9" fill="#555">{s.asOfDate.slice(0,4)}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
+          </div>
+
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:10,textTransform:'uppercase',letterSpacing:.3,display:'flex',alignItems:'center',gap:6}}>
+              <span>Pending for this client</span>
+              {totalPending > 0 && <span style={{background:'#fbbf24',color:'#78350f',fontSize:10,padding:'1px 6px',borderRadius:999,fontWeight:700}}>{totalPending}</span>}
+            </div>
+            {totalPending === 0 ? (
+              <div style={{fontSize:12,color:'#888',padding:'12px 0'}}>Nothing waiting on you.</div>
+            ) : (
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {clientPendingCAEdits.map(edit => (
+                  <div key={edit.id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:7}}>
+                    <span style={{fontSize:16}}>📝</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600}}>CA edit — {edit.ca_name}</div>
+                      <div style={{fontSize:11,color:'#555'}}>{edit.submitted_at?new Date(edit.submitted_at).toLocaleDateString():'—'}</div>
+                    </div>
+                    <button onClick={()=>onOpenCADiff(edit)}
+                      style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid #bfdbfe',background:'white',color:'#1d4ed8',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>Review</button>
+                  </div>
+                ))}
+                {clientPendingReviews.map(review => (
+                  <div key={review.share_id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'#f0fdf4',border:'1px solid #86efac',borderRadius:7}}>
+                    <span style={{fontSize:16}}>{review.type==='balance_sheet'?'📋':'🌾'}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600}}>Customer submitted {review.type==='balance_sheet'?'balance sheet':'budget'}</div>
+                      <div style={{fontSize:11,color:'#555'}}>{review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}</div>
+                    </div>
+                    <button onClick={()=>onOpenReview(review)}
+                      style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid #86efac',background:'white',color:'#15803d',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>Review</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Saved sheets strip */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3}}>Saved balance sheets ({sheetSummaries.length})</div>
+            {sheetSummaries.length >= 2 && (
+              <button onClick={onOpenComparison}
+                style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
+                📊 Compare all
+              </button>
+            )}
+          </div>
+          <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:4}}>
+            {sheetSummaries.map((s,i) => {
+              const isLatest = i === sheetSummaries.length - 1;
+              const hasIssues = (s.issues||[]).length > 0;
+              const nw = s.totals['NET WORTH'] || 0;
+              return (
+                <button key={s.key} onClick={()=>onOpenSheet(s.key)}
+                  title={hasIssues ? s.issues.map(iss=>iss.message).join(' · ') : `Open ${s.asOfDate}`}
+                  style={{minWidth:110,textAlign:'center',cursor:'pointer',fontFamily:'inherit',
+                    background: hasIssues ? '#fef3c7' : 'white',
+                    border: isLatest ? '2px solid #6B0E1E' : ('1px solid ' + (hasIssues ? '#fcd34d' : '#e5e7eb')),
+                    borderRadius:8, padding:'10px 12px'}}>
+                  <div style={{fontSize:11,color:isLatest?'#6B0E1E':hasIssues?'#92400e':'#555',fontWeight:isLatest?700:400}}>
+                    {s.asOfDate}{isLatest?' · latest':''}{hasIssues?' ⚠':''}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,marginTop:3,color:isLatest?'#6B0E1E':'#1a1a1a'}}>{fmtBig(nw)}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Notes + quick actions */}
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:12}}>
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3}}>Notes</div>
+              {notesStatus && <span style={{fontSize:11,color:'#888'}}>{notesStatus==='saving'?'Saving…':'✓ Saved'}</span>}
+            </div>
+            <textarea value={notes} onChange={e=>handleNotesChange(e.target.value)} disabled={!notesLoaded}
+              placeholder="Renewal dates, follow-ups, context that isn't a field on the balance sheet…"
+              rows={6}
+              style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.5}}/>
+          </div>
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:8,textTransform:'uppercase',letterSpacing:.3}}>Quick actions</div>
+            <div style={{display:'grid',gap:6}}>
+              <button onClick={onNewSheet}
+                style={{fontSize:12,padding:'7px 10px',borderRadius:6,border:'1px solid #e5e7eb',background:'white',textAlign:'left',cursor:'pointer',fontFamily:'inherit'}}>
+                ➕  New balance sheet
+              </button>
+              <button onClick={onOpenImport}
+                style={{fontSize:12,padding:'7px 10px',borderRadius:6,border:'1px solid #e5e7eb',background:'white',textAlign:'left',cursor:'pointer',fontFamily:'inherit'}}>
+                📥  Import from Excel
+              </button>
+              {latest && (
+                <button onClick={()=>onShareCA(latest.key)}
+                  style={{fontSize:12,padding:'7px 10px',borderRadius:6,border:'1px solid #bfdbfe',background:'#f0f6ff',textAlign:'left',cursor:'pointer',fontFamily:'inherit',color:'#1d4ed8',fontWeight:600}}>
+                  🔗  Share with CA
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ForcePasswordChange ─────────────────────────────────────────────────────
 function ForcePasswordChange({ session, onDone }) {
   const [newPwd, setNewPwd] = React.useState('');
@@ -4430,6 +4746,7 @@ export default function BalanceSheet() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [caOpenShare, setCaOpenShare] = useState(null);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
+  const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
   const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
@@ -7279,6 +7596,46 @@ ${extraPages}
       onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)} />;
   }
 
+  // Per-client dashboard — opened by clicking a client folder on the home screen.
+  if (dashboardClient && screen === "home") {
+    return <ClientDashboard
+      clientName={dashboardClient}
+      savedSheets={savedSheets}
+      pendingReviews={pendingReviews}
+      pendingCAEdits={pendingCAEdits}
+      session={session}
+      sheetTotals={sheetTotals}
+      onBack={() => setDashboardClient(null)}
+      onOpenSheet={(key) => { setDashboardClient(null); loadSheet(key); }}
+      onNewSheet={() => {
+        setDashboardClient(null);
+        setData({ ...emptyData(), clientName: dashboardClient });
+        setStep(0); setScreen("wizard");
+      }}
+      onOpenComparison={() => {
+        // Preload the client's latest sheet, jump to Comparison tab.
+        const latest = savedSheets
+          .filter(s=>s.clientName===dashboardClient)
+          .sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
+        if (latest) { setDashboardClient(null); loadSheet(latest.key); setActiveTab("compare"); setTimeout(()=>loadComparisonSheets(),100); }
+      }}
+      onOpenImport={() => { setDashboardClient(null); setImportData(null); setImportError(""); setShowImport(true); }}
+      onOpenReview={(review) => {
+        setDashboardClient(null);
+        setBsCompare({ review, orig: review.original_data||{}, draft: review.customer_draft||{} });
+      }}
+      onOpenCADiff={async (edit) => {
+        setDashboardClient(null);
+        try {
+          const item = await storage.get(edit.sheet_key);
+          const orig = item ? JSON.parse(item.value) : {};
+          setShowCADiff({...edit, original: orig});
+        } catch { setShowCADiff({...edit, original:{}}); }
+      }}
+      onShareCA={(sheetKey) => { setDashboardClient(null); loadCAUsers(); setShowShareCA(sheetKey); setSelectedCAUser(''); }}
+    />;
+  }
+
   if (screen === "home") {
     return (
       <div className="app">
@@ -7713,9 +8070,14 @@ ${extraPages}
                           return fp.length >= path.length && fp.slice(0,path.length).join("|") === path.join("|");
                         });
                         const latestInFolder = allSheetsInFolder.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
+                        // If this folder contains sheets from exactly one client, clicking the header body opens that client's dashboard.
+                        const uniqueClients = Array.from(new Set(allSheetsInFolder.map(s=>s.clientName).filter(Boolean)));
+                        const dashboardTarget = uniqueClients.length === 1 ? uniqueClients[0] : null;
                         return (
                           <div key={fKey} className="client-folder" style={{marginLeft: depth * 20 + "px", marginBottom:6}}>
-                            <div className="client-folder-header" onClick={()=>toggleFolder(fKey)}>
+                            <div className="client-folder-header"
+                              onClick={()=> dashboardTarget ? setDashboardClient(dashboardTarget) : toggleFolder(fKey)}
+                              title={dashboardTarget ? `Open dashboard for ${dashboardTarget}` : 'Toggle folder'}>
                               <div className="client-folder-left" style={{flex:1,minWidth:0}}>
                                 <span className="folder-icon">{fOpen ? "📂" : "📁"}</span>
                                 {editingFolder && JSON.stringify(editingFolder.path)===JSON.stringify(path) ? (
@@ -7764,7 +8126,12 @@ ${extraPages}
                                     )}
                                   </span>
                                 )}
-                                <span className="folder-chevron">{fOpen ? "▲" : "▼"}</span>
+                                <button className="folder-chevron"
+                                  onClick={e=>{e.stopPropagation();toggleFolder(fKey);}}
+                                  title={fOpen ? 'Collapse folder' : 'Expand folder'}
+                                  style={{background:'none',border:'none',cursor:'pointer',padding:'2px 6px',fontSize:'.85rem',color:'#888',fontFamily:'inherit'}}>
+                                  {fOpen ? "▲" : "▼"}
+                                </button>
                               </div>
                             </div>
                             {fOpen && renderFolderLevel(path, 1)}
@@ -7779,7 +8146,15 @@ ${extraPages}
                               onClick={()=>loadSheet(s.key)}>
                               <div className="sheet-icon" style={{fontSize:"1.2rem"}}>📋</div>
                               <div className="sheet-info">
-                                <div style={{fontSize:".9rem",fontWeight:700,color:"#1a1a1a"}}>{s.clientName}</div>
+                                <div style={{fontSize:".9rem",fontWeight:700,color:"#1a1a1a"}}>
+                                  <a href="#" onClick={e=>{e.preventDefault();e.stopPropagation();setDashboardClient(s.clientName);}}
+                                    title="Open client dashboard"
+                                    style={{color:'#1a1a1a',textDecoration:'none',borderBottom:'1px dotted transparent'}}
+                                    onMouseEnter={e=>e.currentTarget.style.borderBottomColor='#6B0E1E'}
+                                    onMouseLeave={e=>e.currentTarget.style.borderBottomColor='transparent'}>
+                                    {s.clientName}
+                                  </a>
+                                </div>
                                 <div className="sheet-date">As of {s.asOfDate}</div>
                                 {s.savedAt && <div className="sheet-meta">Saved {new Date(s.savedAt).toLocaleDateString()}</div>}
                               </div>
