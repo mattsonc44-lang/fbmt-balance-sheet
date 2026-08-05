@@ -3584,6 +3584,285 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
+// ─── ForcePasswordChange ─────────────────────────────────────────────────────
+function ForcePasswordChange({ session, onDone }) {
+  const [newPwd, setNewPwd] = React.useState('');
+  const [confirm, setConfirm] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const handleChange = async () => {
+    if (newPwd.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (newPwd !== confirm) { setError('Passwords do not match'); return; }
+    setLoading(true); setError('');
+    try {
+      const r = await fetch(window.SUPABASE_URL + '/auth/v1/user', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'apikey': window.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+        body: JSON.stringify({ password: newPwd })
+      });
+      if (!r.ok) throw new Error('Failed to update password');
+      await fetch(window.SUPABASE_URL + '/rest/v1/profiles?id=eq.' + session.user.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'apikey': window.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ force_password_change: false })
+      });
+      onDone();
+    } catch(e) { setError(e.message); }
+    setLoading(false);
+  };
+  return (
+    <div style={{minHeight:'100vh',background:'#6B0E1E',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{background:'white',borderRadius:14,padding:40,width:'min(420px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+        <div style={{textAlign:'center',marginBottom:24}}>
+          <div style={{fontSize:32,marginBottom:8}}>🔐</div>
+          <div style={{fontWeight:700,fontSize:20,color:'#6B0E1E'}}>Set Your Password</div>
+          <div style={{fontSize:13,color:'#888',marginTop:6}}>Your administrator set a temporary password. Please create a new one to continue.</div>
+        </div>
+        {error && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'10px 14px',marginBottom:14,fontSize:13,color:'#991b1b'}}>{error}</div>}
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>NEW PASSWORD</label>
+          <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="Minimum 8 characters"
+            style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}/>
+        </div>
+        <div style={{marginBottom:20}}>
+          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>CONFIRM PASSWORD</label>
+          <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="Re-enter new password"
+            onKeyDown={e=>e.key==='Enter'&&handleChange()}
+            style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'9px 12px',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}/>
+        </div>
+        <button onClick={handleChange} disabled={loading}
+          style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:11,fontWeight:700,fontSize:15,cursor:loading?'wait':'pointer',opacity:loading?.7:1,fontFamily:'inherit'}}>
+          {loading ? 'Saving...' : 'Set New Password & Continue'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── AdminScreen ─────────────────────────────────────────────────────────────
+function AdminScreen({ session, profile, onSignOut, onClose }) {
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [showAdd, setShowAdd] = React.useState(false);
+  const [editUser, setEditUser] = React.useState(null);
+  const [resetUser, setResetUser] = React.useState(null);
+  const [newPwd, setNewPwd] = React.useState('');
+  const [form, setForm] = React.useState({ fullName:'', email:'', role:'user', password:'' });
+  const [formError, setFormError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+
+  const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
+  const adminCall = async (action, params) => {
+    const r = await fetch('/.netlify/functions/admin-user', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-fbmt-secret':window.FBMT_FUNCTION_SECRET||''},
+      body:JSON.stringify({action,...params})
+    });
+    return r.json();
+  };
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(window.SUPABASE_URL+'/rest/v1/profiles?select=*&order=created_at.asc', {headers:hdr});
+      setUsers(await r.json());
+    } catch {}
+    setLoading(false);
+  };
+  React.useEffect(()=>{ loadUsers(); },[]);
+
+  const handleAddUser = async () => {
+    if (!form.fullName||!form.email||!form.password) { setFormError('All fields required'); return; }
+    if (form.password.length < 8) { setFormError('Password must be at least 8 characters'); return; }
+    setSaving(true); setFormError('');
+    const res = await adminCall('create_user', { fullName:form.fullName, email:form.email, role:form.role, password:form.password });
+    if (res.error) { setFormError(res.error); setSaving(false); return; }
+    setMsg('User created successfully'); setShowAdd(false); setForm({fullName:'',email:'',role:'user',password:''});
+    await loadUsers(); setSaving(false);
+  };
+
+  const handleUpdateRole = async (userId, updates) => {
+    await adminCall('update_profile', { userId, updates });
+    await loadUsers(); setEditUser(null); setMsg('User updated');
+  };
+
+  const handleResetPassword = async () => {
+    if (newPwd.length < 8) { setFormError('Password must be at least 8 characters'); return; }
+    setSaving(true);
+    const res = await adminCall('reset_password', { userId: resetUser.id, password: newPwd });
+    if (res.error) { setFormError(res.error); setSaving(false); return; }
+    setMsg('Password reset — user will be prompted to change on next login');
+    setResetUser(null); setNewPwd(''); setSaving(false);
+  };
+
+  const roleColor = r => r==='admin'?'#6B0E1E':r==='ca'?'#1d4ed8':'#374151';
+  const inp = (val,onChange,ph,type='text') => (
+    <input type={type} value={val} onChange={e=>onChange(e.target.value)} placeholder={ph}
+      style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8}}/>
+  );
+
+  return (
+    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
+      <div style={{background:'#6B0E1E',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana — Admin</div>
+          <div style={{fontSize:12,opacity:.8}}>User Management</div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <span style={{fontSize:13,opacity:.8}}>{profile?.full_name}</span>
+          {onClose && <button onClick={onClose} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>← Back to App</button>}
+          <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:900,margin:'32px auto',padding:'0 24px'}}>
+        {msg && <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#166534'}}>{msg} <button onClick={()=>setMsg('')} style={{float:'right',background:'none',border:'none',cursor:'pointer',color:'#166534'}}>✕</button></div>}
+
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
+          <button onClick={()=>{setShowAdd(true);setFormError('');}}
+            style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            + Add User
+          </button>
+        </div>
+
+        {loading ? <div style={{textAlign:'center',padding:40,color:'#888'}}>Loading users...</div> : (
+          <div style={{background:'white',borderRadius:10,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'#1a1a1a',color:'white'}}>
+                  {['Name','Email','Role','Status','Actions'].map(h=>(
+                    <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,letterSpacing:'.5px'}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u,i)=>(
+                  <tr key={u.id} style={{borderBottom:'1px solid #f0f0f0',background:i%2===0?'white':'#fafafa'}}>
+                    <td style={{padding:'10px 16px',fontSize:13,fontWeight:600}}>{u.full_name}</td>
+                    <td style={{padding:'10px 16px',fontSize:13,color:'#555'}}>{u.email}</td>
+                    <td style={{padding:'10px 16px'}}>
+                      <span style={{background:roleColor(u.role),color:'white',borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700}}>
+                        {(u.role||'').toUpperCase()}
+                      </span>
+                    </td>
+                    <td style={{padding:'10px 16px'}}>
+                      <span style={{color:u.is_active!==false?'#15803d':'#dc2626',fontSize:12,fontWeight:600}}>
+                        {u.is_active!==false?'Active':'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{padding:'10px 16px'}}>
+                      <div style={{display:'flex',gap:6}}>
+                        <button onClick={()=>{setEditUser({...u});setFormError('');}}
+                          style={{background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:'#1d4ed8',fontWeight:600}}>Edit</button>
+                        <button onClick={()=>{setResetUser(u);setNewPwd('');setFormError('');}}
+                          style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:'#c2410c',fontWeight:600}}>Reset Pwd</button>
+                        {u.id !== session.user.id && (
+                          <button onClick={()=>handleUpdateRole(u.id,{is_active:u.is_active===false})}
+                            style={{background:u.is_active!==false?'#fef2f2':'#f0fdf4',border:'1px solid '+(u.is_active!==false?'#fca5a5':'#86efac'),borderRadius:5,padding:'4px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit',color:u.is_active!==false?'#dc2626':'#15803d',fontWeight:600}}>
+                            {u.is_active!==false?'Deactivate':'Activate'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Add User Modal */}
+      {showAdd && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:20,color:'#1a1a1a'}}>Add New User</div>
+            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
+            {inp(form.fullName,v=>setForm(f=>({...f,fullName:v})),'Full Name')}
+            {inp(form.email,v=>setForm(f=>({...f,email:v})),'Email Address','email')}
+            {inp(form.password,v=>setForm(f=>({...f,password:v})),'Temporary Password (min 8 chars)','password')}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
+              <select value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}
+                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
+                <option value="user">Lender / User</option>
+                <option value="ca">Credit Analyst (CA)</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div style={{fontSize:11,color:'#888',marginBottom:16}}>User will be prompted to change their password on first login.</div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={handleAddUser} disabled={saving}
+                style={{flex:1,background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:saving?'wait':'pointer',fontFamily:'inherit',opacity:saving?.7:1}}>
+                {saving?'Creating...':'Create User'}
+              </button>
+              <button onClick={()=>{setShowAdd(false);setFormError('');}}
+                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {editUser && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:20}}>Edit User — {editUser.full_name}</div>
+            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
+            {inp(editUser.full_name,v=>setEditUser(u=>({...u,full_name:v})),'Full Name')}
+            {inp(editUser.email,v=>setEditUser(u=>({...u,email:v})),'Email')}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
+              <select value={editUser.role||'user'} onChange={e=>setEditUser(u=>({...u,role:e.target.value}))}
+                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
+                <option value="user">Lender / User</option>
+                <option value="ca">Credit Analyst (CA)</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>handleUpdateRole(editUser.id,{full_name:editUser.full_name,email:editUser.email,role:editUser.role})}
+                style={{flex:1,background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Save Changes
+              </button>
+              <button onClick={()=>{setEditUser(null);setFormError('');}}
+                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {resetUser && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:8}}>Reset Password</div>
+            <div style={{fontSize:13,color:'#555',marginBottom:20}}>Set a new temporary password for <strong>{resetUser.full_name}</strong>. They will be prompted to change it on next login.</div>
+            {formError && <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',marginBottom:12,fontSize:12,color:'#991b1b'}}>{formError}</div>}
+            {inp(newPwd,setNewPwd,'New temporary password (min 8 chars)','password')}
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={handleResetPassword} disabled={saving}
+                style={{flex:1,background:'#c2410c',color:'white',border:'none',borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:saving?'wait':'pointer',fontFamily:'inherit',opacity:saving?.7:1}}>
+                {saving?'Resetting...':'Reset Password'}
+              </button>
+              <button onClick={()=>{setResetUser(null);setFormError('');}}
+                style={{flex:1,background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── CAPortal ─────────────────────────────────────────────────────────────────
 function CAPortal({ session, profile, onSignOut, onOpen }) {
   const [shares, setShares] = React.useState([]);
@@ -4007,6 +4286,7 @@ export default function BalanceSheet() {
   const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [caOpenShare, setCaOpenShare] = useState(null);
+  const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -6798,7 +7078,7 @@ ${extraPages}
   const handleSignOut = async () => {
     await supaLogout();
     setSession(null); setProfile(null); setProfileLoading(true);
-    setCaOpenShare(null); setScreen("home"); setData(emptyData());
+    setCaOpenShare(null); setShowAdminScreen(false); setScreen("home"); setData(emptyData());
   };
 
   // Wait for profile to load before routing — prevents CA briefly seeing lender screen
@@ -6808,6 +7088,12 @@ ${extraPages}
         <div style={{color:'white',fontSize:14,opacity:.8}}>Loading...</div>
       </div>
     );
+  }
+
+  // Force password change on first login (admin created the account with a temp password)
+  if (profile?.force_password_change) {
+    return <ForcePasswordChange session={session}
+      onDone={()=>supaGetProfile().then(p=>setProfile(p)).catch(()=>{})} />;
   }
 
   if (profile?.role === 'ca') {
@@ -6823,6 +7109,12 @@ ${extraPages}
     // CA has opened a sheet — fall through to full app below in CA mode
   }
 
+  // Admin Users screen — admin-only, opened via the "⚙ Users" button on the home top
+  if (showAdminScreen && profile?.role === 'admin') {
+    return <AdminScreen session={session} profile={profile}
+      onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)} />;
+  }
+
   if (screen === "home") {
     return (
       <div className="app">
@@ -6834,7 +7126,13 @@ ${extraPages}
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
-              <button onClick={async()=>{await supaLogout();setSession(null);setProfile(null);}} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>Sign Out</button>
+              {profile?.role === "admin" && (
+                <button onClick={()=>setShowAdminScreen(true)}
+                  style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",color:"white",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",fontWeight:600}}>
+                  ⚙ Users
+                </button>
+              )}
+              <button onClick={handleSignOut} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>Sign Out</button>
             </div>
           </div>
         </div>
@@ -7496,7 +7794,13 @@ ${extraPages}
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
           {data.clientName && <span style={{opacity:.8,fontSize:".85rem"}}>{data.clientName}</span>}
           {session?.user?.email && <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
-          <button onClick={async()=>{await supaLogout();setSession(null);setProfile(null);setScreen("home");setData(emptyData());}} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",color:"rgba(255,255,255,.8)",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit"}}>Sign Out</button>
+          {profile?.role === "admin" && (
+            <button onClick={()=>{setScreen("home");setShowAdminScreen(true);}}
+              style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.35)",color:"white",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit",fontWeight:600}}>
+              ⚙ Users
+            </button>
+          )}
+          <button onClick={handleSignOut} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",color:"rgba(255,255,255,.8)",borderRadius:5,padding:"4px 10px",cursor:"pointer",fontSize:".75rem",fontFamily:"inherit"}}>Sign Out</button>
         </div>
       </div>
 
