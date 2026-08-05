@@ -3725,6 +3725,9 @@ function ClientDashboard({
   const [loadingSheets, setLoadingSheets] = React.useState(true);
   const [sheetSummaries, setSheetSummaries] = React.useState([]); // [{key, asOfDate, totals, issues}]
   const [notes, setNotes] = React.useState('');
+  const [renewalDate, setRenewalDate] = React.useState('');
+  const [customerEmail, setCustomerEmail] = React.useState('');
+  const [renewalSentAt, setRenewalSentAt] = React.useState(null);
   const [notesLoaded, setNotesLoaded] = React.useState(false);
   const [notesStatus, setNotesStatus] = React.useState(''); // 'saving' | 'saved' | ''
   const saveTimer = React.useRef(null);
@@ -3769,7 +3772,7 @@ function ClientDashboard({
     return () => { cancelled = true; };
   }, [thisClientSheets.map(s=>s.key).join('|')]); // eslint-disable-line
 
-  // Load notes.
+  // Load notes + renewal fields.
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -3778,35 +3781,81 @@ function ClientDashboard({
         const uid = session?.user?.id;
         if (!uid) return;
         const url = SUPABASE_URL + '/rest/v1/client_notes?user_id=eq.' + encodeURIComponent(uid)
-          + '&client_name=eq.' + encodeURIComponent(clientName) + '&select=notes';
+          + '&client_name=eq.' + encodeURIComponent(clientName)
+          + '&select=notes,renewal_date,customer_email,renewal_reminder_sent_at';
         const r = await fetch(url, { headers: supaHeaders() });
         const rows = await r.json();
-        if (!cancelled) setNotes(rows?.[0]?.notes || '');
+        if (!cancelled) {
+          const row = rows?.[0] || {};
+          setNotes(row.notes || '');
+          setRenewalDate(row.renewal_date || '');
+          setCustomerEmail(row.customer_email || '');
+          setRenewalSentAt(row.renewal_reminder_sent_at || null);
+        }
       } catch {}
       if (!cancelled) setNotesLoaded(true);
     })();
     return () => { cancelled = true; };
   }, [clientName, session?.user?.id]);
 
-  // Debounced save on notes edit.
-  const handleNotesChange = (v) => {
-    setNotes(v);
+  // Debounced save — writes any changed field back to the same client_notes row.
+  const saveNow = async (patch) => {
     setNotesStatus('saving');
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      try {
-        const uid = session?.user?.id;
-        if (!uid) return;
-        await fetch(SUPABASE_URL + '/rest/v1/client_notes?on_conflict=user_id,client_name', {
-          method: 'POST',
-          headers: { ...supaHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify({ user_id: uid, client_name: clientName, notes: v, updated_at: new Date().toISOString() }),
-        });
-        setNotesStatus('saved');
-        setTimeout(() => setNotesStatus(''), 1500);
-      } catch { setNotesStatus(''); }
-    }, 800);
+    try {
+      const uid = session?.user?.id;
+      if (!uid) return;
+      await fetch(SUPABASE_URL + '/rest/v1/client_notes?on_conflict=user_id,client_name', {
+        method: 'POST',
+        headers: { ...supaHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({
+          user_id: uid,
+          client_name: clientName,
+          notes,
+          renewal_date: renewalDate || null,
+          customer_email: customerEmail || null,
+          updated_at: new Date().toISOString(),
+          ...patch,
+        }),
+      });
+      setNotesStatus('saved');
+      setTimeout(() => setNotesStatus(''), 1500);
+    } catch { setNotesStatus(''); }
   };
+
+  const scheduleSave = (patch) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveNow(patch), 800);
+  };
+  const handleNotesChange = (v) => { setNotes(v); scheduleSave({ notes: v }); };
+  const handleRenewalDateChange = (v) => {
+    setRenewalDate(v);
+    // Editing the date clears any previous "sent" marker so the next window fires again.
+    setRenewalSentAt(null);
+    scheduleSave({ renewal_date: v || null, renewal_reminder_sent_at: null });
+  };
+  const handleCustomerEmailChange = (v) => { setCustomerEmail(v); scheduleSave({ customer_email: v || null }); };
+
+  // Derived: when the reminder will fire, or when it already did.
+  const renewalMeta = React.useMemo(() => {
+    if (!renewalDate) return { label: 'No renewal date set.', kind: 'muted' };
+    const today = new Date();
+    const r = new Date(renewalDate + 'T00:00:00Z');
+    const reminderDay = new Date(r); reminderDay.setUTCDate(reminderDay.getUTCDate() - 45);
+    const daysToReminder = Math.round((reminderDay - today) / 86400000);
+    const daysToRenewal  = Math.round((r - today) / 86400000);
+    if (renewalSentAt) {
+      const when = new Date(renewalSentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return { label: `✓ Reminder sent ${when}. Renewal is ${daysToRenewal >= 0 ? `in ${daysToRenewal} day${daysToRenewal!==1?'s':''}` : `${Math.abs(daysToRenewal)} day${Math.abs(daysToRenewal)!==1?'s':''} overdue`}.`, kind: 'success' };
+    }
+    if (daysToReminder > 0) {
+      const d = reminderDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return { label: `Reminder will fire on ${d} (${daysToReminder} day${daysToReminder!==1?'s':''} from now).`, kind: 'info' };
+    }
+    if (daysToRenewal >= 0) {
+      return { label: `Inside the 45-day window — reminder will send on the next daily run.`, kind: 'warning' };
+    }
+    return { label: `Renewal date is in the past — set a new one to schedule the next reminder.`, kind: 'warning' };
+  }, [renewalDate, renewalSentAt]);
 
   const latest = sheetSummaries[sheetSummaries.length - 1];
   const prior  = sheetSummaries[sheetSummaries.length - 2];
@@ -3987,6 +4036,42 @@ function ClientDashboard({
               );
             })}
           </div>
+        </div>
+
+        {/* Renewal card — one row spanning full width */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3}}>Renewal reminder</div>
+            {notesStatus && <span style={{fontSize:11,color:'#888'}}>{notesStatus==='saving'?'Saving…':'✓ Saved'}</span>}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:8}}>
+            <div>
+              <label style={{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>RENEWAL DATE</label>
+              <input type="date" value={renewalDate||''} onChange={e=>handleRenewalDateChange(e.target.value)} disabled={!notesLoaded}
+                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>CUSTOMER EMAIL</label>
+              <input type="email" value={customerEmail||''} onChange={e=>handleCustomerEmailChange(e.target.value)} disabled={!notesLoaded}
+                placeholder="customer@example.com"
+                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
+            </div>
+          </div>
+          {(() => {
+            const bg = renewalMeta.kind==='success' ? '#f0fdf4'
+                     : renewalMeta.kind==='warning' ? '#fef3c7'
+                     : renewalMeta.kind==='info'    ? '#f0f6ff'
+                     : '#f5f5f5';
+            const fg = renewalMeta.kind==='success' ? '#166534'
+                     : renewalMeta.kind==='warning' ? '#92400e'
+                     : renewalMeta.kind==='info'    ? '#1e40af'
+                     : '#6b7280';
+            return (
+              <div style={{background:bg,color:fg,fontSize:12,padding:'6px 10px',borderRadius:6,lineHeight:1.5}}>
+                {renewalMeta.label} At T-45 days, the customer and lender each get an email with a pre-filled share link + PIN for last year's balance sheet + budget.
+              </div>
+            );
+          })()}
         </div>
 
         {/* Notes + quick actions */}
