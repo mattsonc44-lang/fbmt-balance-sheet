@@ -3727,6 +3727,13 @@ function ClientDashboard({
   const [linkedForward, setLinkedForward] = React.useState([]);   // [{name, date, nw|null, hasSheet}]
   const [linkedReverse, setLinkedReverse] = React.useState([]);   // [{clientName, nw}]
   const [linkedLoading, setLinkedLoading] = React.useState(true);
+  // Credit memo
+  const [latestMemo, setLatestMemo] = React.useState(null);       // {id, content, based_on_as_of_date, edited, created_at, updated_at}
+  const [memoHistory, setMemoHistory] = React.useState([]);       // prior versions
+  const [memoStatus, setMemoStatus] = React.useState('');         // 'generating' | 'saving' | 'saved' | 'error:...' | ''
+  const [memoDraft, setMemoDraft] = React.useState('');           // local edit buffer
+  const [showMemoHistory, setShowMemoHistory] = React.useState(false);
+  const memoSaveTimer = React.useRef(null);
   const [notes, setNotes] = React.useState('');
   const [renewalDate, setRenewalDate] = React.useState('');
   const [customerEmail, setCustomerEmail] = React.useState('');
@@ -3908,6 +3915,193 @@ function ClientDashboard({
     scheduleSave({ renewal_date: v || null, renewal_reminder_sent_at: null });
   };
   const handleCustomerEmailChange = (v) => { setCustomerEmail(v); scheduleSave({ customer_email: v || null }); };
+
+  // ── Credit memo ──────────────────────────────────────────────────────────
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const uid = session?.user?.id;
+        if (!uid) return;
+        const url = SUPABASE_URL + '/rest/v1/credit_memos?user_id=eq.' + encodeURIComponent(uid)
+          + '&client_name=eq.' + encodeURIComponent(clientName)
+          + '&select=*&order=created_at.desc';
+        const r = await fetch(url, { headers: supaHeaders() });
+        const rows = await r.json();
+        if (cancelled) return;
+        if (Array.isArray(rows) && rows.length) {
+          setLatestMemo(rows[0]);
+          setMemoDraft(rows[0].content);
+          setMemoHistory(rows.slice(1));
+        } else {
+          setLatestMemo(null); setMemoDraft(''); setMemoHistory([]);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [clientName, session?.user?.id]);
+
+  const buildMemoPrompt = (sheet, prior) => {
+    const n = v => Number(String(v||"").replace(/[^0-9.-]/g,""))||0;
+    const money = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
+    const t = sheetTotals(sheet);
+    const p = prior ? sheetTotals(prior) : null;
+    const ta  = t['TOTAL ASSETS'] || 0;
+    const tl  = t['TOTAL LIABILITIES'] || 0;
+    const tca = t['Total Current Assets'] || 0;
+    const tcl = t['Total Current Liab'] || 0;
+    const wc  = tca - tcl;
+    const currentRatio = tcl > 0 ? (tca/tcl).toFixed(2) : 'n/a';
+    const debtAsset    = ta  > 0 ? ((tl/ta)*100).toFixed(1)+'%' : 'n/a';
+    const equity       = ta  > 0 ? (((ta-tl)/ta)*100).toFixed(1)+'%' : 'n/a';
+
+    // Budget/cash flow
+    const budgetCrops     = (sheet.budgetCrops||[]).reduce((s,r)=>s+n(r.acres)*n(r.yieldPerAcre)*n(r.price)*(n(r.share||"100")/100),0);
+    const budgetLivestock = (sheet.budgetLivestock||[]).reduce((s,r)=>s+n(r.head)*n(r.lbs)*n(r.price),0);
+    const budgetMisc      = (sheet.budgetMisc||[]).reduce((s,r)=>s+n(r.amount),0);
+    const budgetIncome    = budgetCrops + budgetLivestock + budgetMisc;
+    const budgetOpEx      = (sheet.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+    const debtServiceTerm = (sheet.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const debtServiceRE   = (sheet.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const debtServiceNew  = (sheet.budgetProposedDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const totalDebtSvc    = debtServiceTerm + debtServiceRE + debtServiceNew;
+    const netCashFlow     = budgetIncome - budgetOpEx - totalDebtSvc;
+    const dscr = totalDebtSvc > 0 ? ((budgetIncome - budgetOpEx) / totalDebtSvc).toFixed(2) : 'n/a';
+
+    const priorBlock = p ? `
+PRIOR YEAR (${prior.asOfDate}):
+- TOTAL ASSETS: ${money(p['TOTAL ASSETS']||0)}
+- TOTAL LIABILITIES: ${money(p['TOTAL LIABILITIES']||0)}
+- NET WORTH: ${money(p['NET WORTH']||0)}
+- Working Capital: ${money((p['Total Current Assets']||0) - (p['Total Current Liab']||0))}
+` : 'PRIOR YEAR: none on file (first year).\n';
+
+    const qualityIssues = validateSheet(sheet)
+      .filter(i => i.severity === 'warning')
+      .map(i => `- ${i.message}`)
+      .join('\n') || '- None.';
+
+    return `Client: ${sheet.clientName}
+As of: ${sheet.asOfDate}
+
+BALANCE SHEET:
+- Total Current Assets: ${money(tca)}
+- Total Long-Term Assets: ${money(t['Total LT Assets']||0)}
+- TOTAL ASSETS: ${money(ta)}
+- Total Current Liabilities: ${money(tcl)}
+- Total Long-Term Liabilities: ${money(tl - tcl)}
+- TOTAL LIABILITIES: ${money(tl)}
+- NET WORTH: ${money(t['NET WORTH']||0)}
+- Working Capital: ${money(wc)}
+
+KEY RATIOS:
+- Current Ratio: ${currentRatio}
+- Debt/Asset Ratio: ${debtAsset}
+- Equity Ratio: ${equity}
+
+BUDGET / PROJECTED CASH FLOW:
+- Crop income: ${money(budgetCrops)}
+- Livestock income: ${money(budgetLivestock)}
+- Other income: ${money(budgetMisc)}
+- Total projected income: ${money(budgetIncome)}
+- Operating expenses: ${money(budgetOpEx)}
+- Debt service (term + RE + proposed): ${money(totalDebtSvc)}
+- Net cash flow: ${money(netCashFlow)}
+- DSCR: ${dscr}
+
+${priorBlock}
+DATA QUALITY NOTES:
+${qualityIssues}
+
+Write a credit memo using EXACTLY these section headings, in this order:
+
+## Financial Summary
+## Balance Sheet Analysis
+## Cash Flow / Repayment Capacity
+## Strengths
+## Concerns / Risks
+## Recommendation
+
+Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if prior year data is provided. Strengths and Concerns should each have 2–4 bullet points. Recommendation should be one sentence. Keep the whole memo under 500 words. Do not include any preamble, closing, or disclaimer — start with the first heading.`;
+  };
+
+  const generateNewMemo = async () => {
+    setMemoStatus('generating');
+    try {
+      const uid = session?.user?.id;
+      if (!uid) throw new Error('Not signed in');
+      const latestSheet = thisClientSheets[thisClientSheets.length - 1];
+      const priorSheet  = thisClientSheets[thisClientSheets.length - 2];
+      if (!latestSheet) throw new Error('No balance sheet to base memo on');
+      const [latestItem, priorItem] = await Promise.all([
+        storage.get(latestSheet.key),
+        priorSheet ? storage.get(priorSheet.key) : Promise.resolve(null),
+      ]);
+      const latestData = latestItem ? JSON.parse(latestItem.value) : null;
+      const priorData  = priorItem  ? JSON.parse(priorItem.value)  : null;
+      if (!latestData) throw new Error('Could not load balance sheet data');
+
+      const prompt = buildMemoPrompt(latestData, priorData);
+      const resp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          system: 'You are a senior agricultural credit officer at First Bank of Montana. Write professional, concise credit memos suitable for a loan file. Cite specific numbers and ratios from the data. Flag anything that looks off. Use markdown headings exactly as instructed.',
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) throw new Error('AI service returned ' + resp.status);
+      const json = await resp.json();
+      const memoText = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || 'Unable to generate memo.';
+
+      // Save as a new row (versioned)
+      const insertResp = await fetch(SUPABASE_URL + '/rest/v1/credit_memos', {
+        method: 'POST',
+        headers: { ...supaHeaders(), 'Prefer': 'return=representation' },
+        body: JSON.stringify({
+          user_id: uid, client_name: clientName,
+          based_on_as_of_date: latestSheet.asOfDate,
+          content: memoText, edited: false,
+        }),
+      });
+      if (!insertResp.ok) throw new Error('Could not save memo');
+      const rows = await insertResp.json();
+      const newMemo = Array.isArray(rows) ? rows[0] : rows;
+      // Shift the previous latest into history
+      if (latestMemo) setMemoHistory(h => [latestMemo, ...h]);
+      setLatestMemo(newMemo);
+      setMemoDraft(newMemo.content);
+      setMemoStatus('saved');
+      setTimeout(() => setMemoStatus(''), 1500);
+    } catch (e) {
+      setMemoStatus('error:' + e.message);
+    }
+  };
+
+  const handleMemoEdit = (v) => {
+    setMemoDraft(v);
+    if (!latestMemo) return;
+    setMemoStatus('saving');
+    if (memoSaveTimer.current) clearTimeout(memoSaveTimer.current);
+    memoSaveTimer.current = setTimeout(async () => {
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/credit_memos?id=eq.' + latestMemo.id, {
+          method: 'PATCH',
+          headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ content: v, edited: true, updated_at: new Date().toISOString() }),
+        });
+        setLatestMemo(m => m ? { ...m, content: v, edited: true } : m);
+        setMemoStatus('saved');
+        setTimeout(() => setMemoStatus(''), 1500);
+      } catch { setMemoStatus(''); }
+    }, 800);
+  };
+
 
   // Derived: when the reminder will fire, or when it already did.
   const renewalMeta = React.useMemo(() => {
@@ -4211,6 +4405,71 @@ function ClientDashboard({
               </div>
             );
           })()}
+        </div>
+
+        {/* Credit memo — full width, AI-drafted from latest sheet + budget */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3,display:'flex',alignItems:'center',gap:8}}>
+              <span>Credit memo</span>
+              {latestMemo && (
+                <span style={{fontSize:11,color:'#888',fontWeight:400,textTransform:'none',letterSpacing:0}}>
+                  · Based on {latestMemo.based_on_as_of_date}
+                  · Generated {new Date(latestMemo.created_at).toLocaleDateString()}
+                  {latestMemo.edited && ' · edited'}
+                </span>
+              )}
+              {memoStatus === 'saving' && <span style={{fontSize:11,color:'#888',fontWeight:400,textTransform:'none',letterSpacing:0}}>Saving…</span>}
+              {memoStatus === 'saved'  && <span style={{fontSize:11,color:'#166534',fontWeight:400,textTransform:'none',letterSpacing:0}}>✓ Saved</span>}
+              {memoStatus.startsWith?.('error:') && <span style={{fontSize:11,color:'#dc2626',fontWeight:400,textTransform:'none',letterSpacing:0}}>{memoStatus.slice(6)}</span>}
+            </div>
+            <div style={{display:'flex',gap:6}}>
+              {memoHistory.length > 0 && (
+                <button onClick={()=>setShowMemoHistory(v=>!v)}
+                  style={{fontSize:11,padding:'5px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
+                  {showMemoHistory ? 'Hide' : 'Show'} history ({memoHistory.length})
+                </button>
+              )}
+              {latestMemo && (
+                <button onClick={()=>{ navigator.clipboard?.writeText(memoDraft); setMemoStatus('saved'); setTimeout(()=>setMemoStatus(''),1200); }}
+                  style={{fontSize:11,padding:'5px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
+                  📋 Copy
+                </button>
+              )}
+              <button onClick={generateNewMemo} disabled={memoStatus==='generating' || sheetSummaries.length===0}
+                style={{fontSize:12,padding:'6px 14px',borderRadius:6,border:'none',background:'#6B0E1E',color:'white',cursor:memoStatus==='generating'?'wait':'pointer',fontFamily:'inherit',fontWeight:600,opacity:memoStatus==='generating'?.7:1}}>
+                {memoStatus==='generating' ? 'Generating…' : (latestMemo ? 'Regenerate' : '✨ Generate memo')}
+              </button>
+            </div>
+          </div>
+
+          {!latestMemo ? (
+            <div style={{fontSize:13,color:'#888',padding:'20px 0',textAlign:'center',lineHeight:1.6}}>
+              {sheetSummaries.length === 0
+                ? 'Save a balance sheet first, then generate a memo.'
+                : <>No memo yet. Click <strong>Generate memo</strong> to draft one from the latest balance sheet + budget.</>}
+            </div>
+          ) : (
+            <textarea value={memoDraft} onChange={e=>handleMemoEdit(e.target.value)}
+              rows={16}
+              style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.6}}/>
+          )}
+
+          {showMemoHistory && memoHistory.length > 0 && (
+            <div style={{marginTop:12,borderTop:'1px solid #eee',paddingTop:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3,marginBottom:8}}>Prior versions</div>
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {memoHistory.map(m => (
+                  <details key={m.id} style={{background:'#fafafa',border:'1px solid #eee',borderRadius:6,padding:'6px 10px'}}>
+                    <summary style={{cursor:'pointer',fontSize:12,color:'#374151'}}>
+                      {new Date(m.created_at).toLocaleString()} — based on {m.based_on_as_of_date}{m.edited?' · edited':''}
+                    </summary>
+                    <pre style={{whiteSpace:'pre-wrap',fontFamily:'inherit',fontSize:12,color:'#374151',marginTop:8,lineHeight:1.5}}>{m.content}</pre>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Notes + quick actions */}
