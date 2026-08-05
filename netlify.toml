@@ -7,3 +7,9 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Renewal reminder — runs daily at 13:00 UTC (07:00 MT).
+# Finds clients whose renewal_date is within 45 days and hasn't been
+# notified yet, then emails the customer + lender a pre-filled share link.
+[functions."renewal-reminder"]
+  schedule = "0 13 * * *"
