@@ -3713,6 +3713,172 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
+// ─── WhatIfView ──────────────────────────────────────────────────────────────
+// Read-only sensitivity analysis: adjust crop price / yield / input cost by %
+// and see live-updated projected income, operating expenses, DSCR, and net cash flow.
+// Nothing here mutates the saved data.
+function WhatIfView({ data }) {
+  const [pricePct,  setPricePct]  = React.useState(0);
+  const [yieldPct,  setYieldPct]  = React.useState(0);
+  const [costPct,   setCostPct]   = React.useState(0);
+
+  const n = v => Number(String(v||"").replace(/[^0-9.-]/g,""))||0;
+  const money = v => (v>=0?"$":"-$") + Math.abs(Math.round(v)).toLocaleString();
+
+  // Baseline income (crops + livestock + misc), from the current budget.
+  const baseCropIncome = (data.budgetCrops||[])
+    .reduce((s,r) => s + n(r.acres) * n(r.yieldPerAcre) * n(r.price) * (n(r.share||"100")/100), 0);
+  const baseLivestockIncome = (data.budgetLivestock||[])
+    .reduce((s,r) => s + n(r.head) * n(r.lbs) * n(r.price), 0);
+  const baseMiscIncome = (data.budgetMisc||[])
+    .reduce((s,r) => s + n(r.amount), 0);
+  const baseOpEx = (data.budgetExpenses||[])
+    .filter(r => !r.prepaid)
+    .reduce((s,r) => s + n(r.amount), 0);
+  const debtServiceTerm = (data.intermediatDebt||[]).reduce((s,r) => s + n(r.annualPmt), 0);
+  const debtServiceRE   = (data.reCurrent||[]).reduce((s,r) => s + n(r.annualPmt), 0);
+  const debtServiceNew  = (data.budgetProposedDebt||[]).reduce((s,r) => s + n(r.annualPmt), 0);
+  const debtService     = debtServiceTerm + debtServiceRE + debtServiceNew;
+
+  const baseIncome = baseCropIncome + baseLivestockIncome + baseMiscIncome;
+  const baseNetCF  = baseIncome - baseOpEx - debtService;
+  const baseDSCR   = debtService > 0 ? (baseIncome - baseOpEx) / debtService : null;
+
+  // Scenario: apply the sliders. Crop income scales with BOTH price and yield.
+  const scenarioCropIncome = baseCropIncome * (1 + pricePct/100) * (1 + yieldPct/100);
+  const scenarioOpEx       = baseOpEx * (1 + costPct/100);
+  const scenarioIncome     = scenarioCropIncome + baseLivestockIncome + baseMiscIncome;
+  const scenarioNetCF      = scenarioIncome - scenarioOpEx - debtService;
+  const scenarioDSCR       = debtService > 0 ? (scenarioIncome - scenarioOpEx) / debtService : null;
+
+  const hasBudget = baseIncome > 0 || baseOpEx > 0;
+
+  // Preset scenarios.
+  const setPreset = (p, y, c) => { setPricePct(p); setYieldPct(y); setCostPct(c); };
+
+  const Slider = ({ label, val, setVal, min, max, help }) => (
+    <div style={{marginBottom:14}}>
+      <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
+        <span style={{color:'#374151',fontWeight:600}}>{label}</span>
+        <span style={{fontWeight:700,color: val===0 ? '#888' : val<0 ? '#A32D2D' : '#3B6D11'}}>
+          {val===0 ? 'baseline' : (val>0?'+':'') + val + '%'}
+        </span>
+      </div>
+      <input type="range" min={min} max={max} step="1" value={val} onChange={e=>setVal(Number(e.target.value))}
+        style={{width:'100%'}}/>
+      <div style={{fontSize:10,color:'#888',textAlign:'right',marginTop:2}}>{help}</div>
+    </div>
+  );
+
+  const impactRow = (label, base, scen, bold=false) => {
+    const delta = scen - base;
+    const color = Math.abs(delta) < 1 ? '#888' : delta < 0 ? '#A32D2D' : '#3B6D11';
+    const bg = bold ? '#fefaf3' : 'transparent';
+    return (
+      <tr style={{background:bg,borderBottom:'1px solid #eee'}}>
+        <td style={{padding:'8px',fontWeight:bold?700:500}}>{label}</td>
+        <td style={{padding:'8px',textAlign:'right'}}>{money(base)}</td>
+        <td style={{padding:'8px',textAlign:'right',color,fontWeight:bold?700:500}}>{money(scen)}</td>
+        <td style={{padding:'8px',textAlign:'right',color}}>{Math.abs(delta)<1 ? '—' : (delta>0?'+':'') + money(delta)}</td>
+      </tr>
+    );
+  };
+
+  return (
+    <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:10,padding:20,marginTop:16}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16,flexWrap:'wrap',gap:8}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:700,color:'#1a1a1a'}}>What-if analysis</div>
+          <div style={{fontSize:12,color:'#888',marginTop:2}}>
+            Adjust the sliders to see how the budget holds up under different conditions. Nothing here changes the saved balance sheet.
+          </div>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          <button onClick={()=>setPreset(0,0,0)}
+            style={{fontSize:11,padding:'4px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
+            Reset
+          </button>
+          <button onClick={()=>setPreset(-20,-15,10)}
+            style={{fontSize:11,padding:'4px 10px',borderRadius:5,border:'1px solid #fcd34d',background:'#fef3c7',color:'#92400e',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
+            Bad year
+          </button>
+          <button onClick={()=>setPreset(10,10,-5)}
+            style={{fontSize:11,padding:'4px 10px',borderRadius:5,border:'1px solid #86efac',background:'#f0fdf4',color:'#166534',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
+            Good year
+          </button>
+        </div>
+      </div>
+
+      {!hasBudget ? (
+        <div style={{textAlign:'center',padding:40,color:'#888'}}>
+          <div style={{fontSize:32,marginBottom:8}}>📊</div>
+          <div>Fill in the Budget / Cash Flow tab first — the what-if runs on those projections.</div>
+        </div>
+      ) : (
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
+
+          <div>
+            <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3,marginBottom:12}}>Inputs</div>
+            <Slider label="Crop price"  val={pricePct} setVal={setPricePct} min={-40} max={40}
+              help={baseCropIncome ? `${money(baseCropIncome)} baseline crop income → ${money(baseCropIncome * (1 + pricePct/100) * (1 + yieldPct/100))} scenario` : 'No crop income entered'} />
+            <Slider label="Crop yield"  val={yieldPct} setVal={setYieldPct} min={-40} max={40}
+              help="Applies to every crop row's yield-per-acre" />
+            <Slider label="Input costs" val={costPct}  setVal={setCostPct}  min={-30} max={40}
+              help={baseOpEx ? `${money(baseOpEx)} baseline op-ex → ${money(baseOpEx * (1 + costPct/100))} scenario` : 'No operating expenses entered'} />
+          </div>
+
+          <div>
+            <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3,marginBottom:12}}>Impact</div>
+            <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'#f5f5f5'}}>
+                  <th style={{textAlign:'left',padding:'6px 8px',fontWeight:600,color:'#555'}}>Metric</th>
+                  <th style={{textAlign:'right',padding:'6px 8px',fontWeight:600,color:'#555'}}>Baseline</th>
+                  <th style={{textAlign:'right',padding:'6px 8px',fontWeight:600,color:'#555'}}>Scenario</th>
+                  <th style={{textAlign:'right',padding:'6px 8px',fontWeight:600,color:'#555'}}>Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {impactRow('Projected income',  baseIncome,  scenarioIncome)}
+                {impactRow('Operating expenses', baseOpEx,   scenarioOpEx)}
+                {impactRow('Debt service',       debtService, debtService)}
+                {impactRow('Net cash flow',      baseNetCF,   scenarioNetCF, true)}
+                <tr style={{background: scenarioDSCR !== null && scenarioDSCR < 1 ? '#fef2f2' : '#f5f5f5'}}>
+                  <td style={{padding:'10px 8px',fontWeight:700}}>DSCR</td>
+                  <td style={{padding:'10px 8px',textAlign:'right',fontWeight:700}}>{baseDSCR===null?'n/a':baseDSCR.toFixed(2)}</td>
+                  <td style={{padding:'10px 8px',textAlign:'right',fontWeight:700,fontSize:14,color: scenarioDSCR===null ? '#888' : scenarioDSCR < 1 ? '#A32D2D' : scenarioDSCR < 1.25 ? '#92400e' : '#3B6D11'}}>
+                    {scenarioDSCR===null ? 'n/a' : scenarioDSCR.toFixed(2)}
+                  </td>
+                  <td style={{padding:'10px 8px',textAlign:'right',color:'#888'}}>
+                    {baseDSCR===null||scenarioDSCR===null ? '—' : (scenarioDSCR-baseDSCR>=0?'+':'') + (scenarioDSCR-baseDSCR).toFixed(2)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Alerts */}
+            {scenarioDSCR !== null && scenarioDSCR < 1 && (
+              <div style={{marginTop:14,background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#A32D2D',lineHeight:1.5}}>
+                ⚠ <strong>DSCR falls below 1.0</strong> under this scenario — the operation would not cover debt service.
+              </div>
+            )}
+            {scenarioDSCR !== null && scenarioDSCR >= 1 && scenarioDSCR < 1.25 && (
+              <div style={{marginTop:14,background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#92400e',lineHeight:1.5}}>
+                ⚠ DSCR is between 1.0 and 1.25 — technically covers debt service but leaves little cushion.
+              </div>
+            )}
+            {scenarioNetCF < 0 && scenarioDSCR !== null && scenarioDSCR >= 1 && (
+              <div style={{marginTop:14,background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#92400e',lineHeight:1.5}}>
+                Net cash flow is negative even though DSCR is positive — the shortfall would need to come from working capital or new borrowing.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ClientDashboard ─────────────────────────────────────────────────────────
 // One-page overview for a single client: KPI cards, net-worth trend, pending items
 // filtered to this client, all saved as-of-dates as tiles, per-client notes.
@@ -8909,6 +9075,10 @@ ${extraPages}
           onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
           Year Comparison
         </button>
+        <button className={"tab-btn" + (activeTab === "whatif" ? " tab-active" : "")}
+          onClick={()=>setActiveTab("whatif")}>
+          What-if
+        </button>
         <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
           onClick={()=>setActiveTab("inspection")}>
           🌾 Ag Inspection
@@ -9287,6 +9457,10 @@ ${extraPages}
           budgetTotalDebtService={budgetTotalDebtService}
           onClose={()=>setShowShareBudget(false)}
         />
+      )}
+
+      {activeTab === "whatif" && (
+        <WhatIfView data={data} />
       )}
 
       {activeTab === "inspection" && (
