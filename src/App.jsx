@@ -3552,6 +3552,357 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
+// ─── CAPortal ─────────────────────────────────────────────────────────────────
+function CAPortal({ session, profile, onSignOut, onOpen }) {
+  const [shares, setShares] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [openSheet, setOpenSheet] = React.useState(null); // {share, data}
+  const [editData, setEditData] = React.useState(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitMsg, setSubmitMsg] = React.useState('');
+  const [caEdits, setCaEdits] = React.useState({}); // shareId -> pending edit
+
+  const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
+
+  const loadShares = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(window.SUPABASE_URL+'/rest/v1/ca_shares?ca_user_id=eq.'+session.user.id+'&dismissed_by_ca=eq.false&select=*&order=shared_at.desc', {headers:hdr});
+      const data = await r.json();
+      setShares(Array.isArray(data) ? data : []);
+      if (Array.isArray(data) && data.length) {
+        const er = await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?ca_user_id=eq.'+session.user.id+'&status=eq.pending&select=*', {headers:hdr});
+        const edits = await er.json();
+        const editMap = {};
+        (edits||[]).forEach(e => { editMap[e.share_id] = e; });
+        setCaEdits(editMap);
+      }
+    } catch {}
+    setLoading(false);
+  };
+  React.useEffect(()=>{ loadShares(); },[]);
+
+  const dismissShare = async (shareId) => {
+    setShares(s=>s.filter(x=>x.id!==shareId));
+    await fetch(window.SUPABASE_URL+'/rest/v1/ca_shares?id=eq.'+shareId, {
+      method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
+      body: JSON.stringify({dismissed_by_ca:true})
+    });
+  };
+
+  const openForEdit = (share) => {
+    const data = share.sheet_data || {};
+    setEditData({...data});
+    setOpenSheet(share);
+    setSubmitMsg('');
+  };
+
+  const handleSubmitChanges = async () => {
+    if (!editData || !openSheet) return;
+    setSubmitting(true);
+    try {
+      const existing = caEdits[openSheet.id];
+      if (existing) {
+        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {
+          method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
+          body: JSON.stringify({edited_data:editData, submitted_at:new Date().toISOString(), status:'pending'})
+        });
+      } else {
+        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits', {
+          method:'POST', headers:{...hdr,'Prefer':'return=minimal'},
+          body: JSON.stringify({
+            share_id: openSheet.id,
+            ca_user_id: session.user.id,
+            ca_name: profile?.full_name || session.user.email,
+            client_name: openSheet.client_name,
+            sheet_key: openSheet.sheet_key,
+            edited_data: editData,
+            status: 'pending'
+          })
+        });
+      }
+      setSubmitMsg('Changes submitted to lender for review.');
+      await loadShares();
+    } catch(e) { setSubmitMsg('Error: '+e.message); }
+    setSubmitting(false);
+  };
+
+  const byLender = shares.reduce((acc,s) => {
+    const key = s.lender_name || 'Unknown Lender';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(s);
+    return acc;
+  },{});
+
+  if (openSheet) {
+    return (
+      <CASheetView
+        share={openSheet}
+        data={editData}
+        setData={setEditData}
+        session={session}
+        profile={profile}
+        onBack={()=>{ setOpenSheet(null); setEditData(null); }}
+        onSubmit={handleSubmitChanges}
+        submitting={submitting}
+        submitMsg={submitMsg}
+        hasPendingEdit={!!caEdits[openSheet.id]}
+      />
+    );
+  }
+
+  return (
+    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
+      <div style={{background:'#6B0E1E',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana</div>
+          <div style={{fontSize:12,opacity:.8}}>Credit Analyst Portal — {profile?.full_name}</div>
+        </div>
+        <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
+      </div>
+
+      <div style={{maxWidth:800,margin:'32px auto',padding:'0 24px'}}>
+        {loading ? (
+          <div style={{textAlign:'center',padding:60,color:'#888'}}>Loading shared files...</div>
+        ) : shares.length === 0 ? (
+          <div style={{textAlign:'center',padding:60,color:'#888',background:'white',borderRadius:12,boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
+            <div style={{fontSize:40,marginBottom:12}}>📂</div>
+            <div style={{fontWeight:600,fontSize:16,marginBottom:8}}>No shared files yet</div>
+            <div style={{fontSize:13}}>Files shared with you by lenders will appear here.</div>
+          </div>
+        ) : (
+          Object.entries(byLender).map(([lender, lenderShares]) => (
+            <div key={lender} style={{marginBottom:28}}>
+              <div style={{fontWeight:700,fontSize:15,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',paddingBottom:6,marginBottom:12}}>
+                🏦 {lender}
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {lenderShares.map(share => (
+                  <div key={share.id} style={{background:'white',borderRadius:10,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'0 1px 4px rgba(0,0,0,.08)',border:'1px solid #e5e7eb'}}>
+                    <div style={{fontSize:24}}>📋</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a'}}>{share.client_name}</div>
+                      <div style={{fontSize:12,color:'#888',marginTop:2}}>
+                        Shared {new Date(share.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                        {caEdits[share.id] && <span style={{marginLeft:8,background:'#fef3c7',color:'#92400e',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>Changes Pending Review</span>}
+                      </div>
+                    </div>
+                    <button onClick={()=> onOpen ? onOpen(share) : openForEdit(share)}
+                      style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'7px 16px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                      Open
+                    </button>
+                    <button onClick={()=>{ if(window.confirm("Remove this file from your portal? This does not delete the lender original.")) dismissShare(share.id); }}
+                      style={{background:'none',border:'1px solid #f0c0c0',borderRadius:7,padding:'7px 12px',fontSize:12,cursor:'pointer',color:'#dc2626',fontFamily:'inherit'}}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CASheetView ─────────────────────────────────────────────────────────────
+function CASheetView({ share, data, setData, session, profile, onBack, onSubmit, submitting, submitMsg, hasPendingEdit }) {
+  return (
+    <div style={{minHeight:'100vh',background:'#f3f4f6'}}>
+      <div style={{background:'#1d4ed8',color:'white',padding:'14px 28px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:14}}>
+          <button onClick={onBack} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>← Back</button>
+          <div>
+            <div style={{fontWeight:800,fontSize:16}}>{share.client_name}</div>
+            <div style={{fontSize:11,opacity:.8}}>CA Edit Mode — changes go to lender for review</div>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {submitMsg && <span style={{fontSize:12,background:'rgba(255,255,255,.15)',padding:'4px 10px',borderRadius:6}}>{submitMsg}</span>}
+          <button onClick={onSubmit} disabled={submitting}
+            style={{background:'#fbbf24',color:'#1a1a1a',border:'none',borderRadius:7,padding:'8px 20px',fontWeight:800,fontSize:14,cursor:submitting?'wait':'pointer',fontFamily:'inherit',opacity:submitting?.7:1}}>
+            {submitting?'Submitting...':(hasPendingEdit?'Resubmit Changes':'Submit Changes to Lender')}
+          </button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:1000,margin:'24px auto',padding:'0 24px'}}>
+        <div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:'10px 16px',marginBottom:20,fontSize:13,color:'#1e40af'}}>
+          📝 You are reviewing <strong>{share.client_name}</strong> shared by <strong>{share.lender_name}</strong>. Edit any fields below and click <strong>Submit Changes to Lender</strong> when done. The lender will review your changes before they are saved.
+        </div>
+        <CABalanceSheetEditor data={data} setData={setData} />
+      </div>
+    </div>
+  );
+}
+
+// ─── CABalanceSheetEditor ────────────────────────────────────────────────────
+function CABalanceSheetEditor({ data, setData }) {
+  const set = (k,v) => setData(d=>({...d,[k]:v}));
+  const setArr = (f,i,k,v) => setData(d=>({...d,[f]:(d[f]||[]).map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  const addRow = (f,empty) => setData(d=>({...d,[f]:[...(d[f]||[]),empty]}));
+  const removeRow = (f,i) => setData(d=>({...d,[f]:(d[f]||[]).filter((_,j)=>j!==i)}));
+
+  const inp = (val,onChange,ph='',prefix='') => (
+    <div style={{display:'flex',alignItems:'center',border:'1px solid #d1d5db',borderRadius:5,background:'white',overflow:'hidden',flex:1}}>
+      {prefix&&<span style={{padding:'5px 6px',background:'#f3f4f6',fontSize:12,color:'#666',borderRight:'1px solid #d1d5db'}}>{prefix}</span>}
+      <input type="text" value={val||''} onChange={e=>onChange(e.target.value)} placeholder={ph}
+        style={{flex:1,border:'none',padding:'5px 8px',fontSize:12,fontFamily:'inherit',outline:'none'}}/>
+    </div>
+  );
+  const numInp = (val,onChange,ph='') => inp(val,onChange,ph,'$');
+  const sec = (title) => <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:12,padding:'6px 12px',marginTop:16,marginBottom:6,borderRadius:5,letterSpacing:'.5px'}}>{title}</div>;
+  const row = (children) => <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:6}}>{children}</div>;
+  const lbl = (t) => <span style={{fontSize:11,color:'#555',width:160,flexShrink:0}}>{t}</span>;
+  const del = (onClick) => <button onClick={onClick} style={{background:'none',border:'1px solid #f0c0c0',borderRadius:4,padding:'3px 7px',fontSize:11,cursor:'pointer',color:'#dc2626',flexShrink:0}}>✕</button>;
+  const addBtn = (onClick,label='+ Add Row') => <button onClick={onClick} style={{background:'none',border:'1px dashed #ccc',borderRadius:5,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#555',fontFamily:'inherit',marginBottom:8}}>{label}</button>;
+
+  return (
+    <div style={{background:'white',borderRadius:10,padding:20,boxShadow:'0 1px 4px rgba(0,0,0,.08)'}}>
+      {sec('CLIENT INFORMATION')}
+      {row(<>{lbl('Client Name')}{inp(data.clientName,v=>set('clientName',v),'Client name')}</>)}
+      {row(<>{lbl('As of Date')}<input type="date" value={data.asOfDate||''} onChange={e=>set('asOfDate',e.target.value)} style={{border:'1px solid #d1d5db',borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit'}}/></>)}
+
+      {sec('CURRENT ASSETS')}
+      {row(<>{lbl('Glacier Bank Cash')}{numInp(data.cashGlacier,v=>set('cashGlacier',v))}</>)}
+      {(data.cashOther||[]).map((r,i)=>row(<>{lbl(i===0?'Other Bank Accounts':'')}{inp(r.institution||r.bank,v=>setArr('cashOther',i,'institution',v),'Bank name')}{numInp(r.amount,v=>setArr('cashOther',i,'amount',v))}{del(()=>removeRow('cashOther',i))}</>))}
+      {addBtn(()=>addRow('cashOther',{institution:'',amount:''}),'+ Add Bank Account')}
+
+      {(data.receivables||[]).map((r,i)=>row(<>{lbl(i===0?'Receivables':'')}{inp(r.description,v=>setArr('receivables',i,'description',v),'Description')}{numInp(r.amount,v=>setArr('receivables',i,'amount',v))}{del(()=>removeRow('receivables',i))}</>))}
+      {addBtn(()=>addRow('receivables',{description:'',amount:''}),'+ Add Receivable')}
+
+      {(data.farmProducts||[]).map((r,i)=>row(<>{lbl(i===0?'Grain/Farm Products':'')}{inp(r.kind,v=>setArr('farmProducts',i,'kind',v),'Kind')}{inp(r.quantity,v=>setArr('farmProducts',i,'quantity',v),'Qty')}{inp(r.unit,v=>setArr('farmProducts',i,'unit',v),'Unit')}{numInp(r.pricePerUnit,v=>setArr('farmProducts',i,'pricePerUnit',v))}{del(()=>removeRow('farmProducts',i))}</>))}
+      {addBtn(()=>addRow('farmProducts',{kind:'',quantity:'',unit:'bu',pricePerUnit:'',share:'100'}),'+ Add Farm Product')}
+
+      {sec('LONG-TERM ASSETS')}
+      {(data.realEstate||[]).map((r,i)=>row(<>{lbl(i===0?'Real Estate':'')}{inp(r.description,v=>setArr('realEstate',i,'description',v),'Description')}{inp(r.acres,v=>setArr('realEstate',i,'acres',v),'Acres')}{numInp(r.valuePerAcre,v=>setArr('realEstate',i,'valuePerAcre',v))}{del(()=>removeRow('realEstate',i))}</>))}
+      {addBtn(()=>addRow('realEstate',{description:'',acres:'',valuePerAcre:'',reType:'',legal:''}),'+ Add Real Estate')}
+
+      {(data.machinery||[]).map((r,i)=>row(<>{lbl(i===0?'Machinery':'')}{inp(r.year,v=>setArr('machinery',i,'year',v),'Year')}{inp(r.make,v=>setArr('machinery',i,'make',v),'Make/Model')}{numInp(r.value,v=>setArr('machinery',i,'value',v))}{del(()=>removeRow('machinery',i))}</>))}
+      {addBtn(()=>addRow('machinery',{year:'',make:'',size:'',serial:'',condition:'',value:''}),'+ Add Machinery')}
+
+      {(data.vehicles||[]).map((r,i)=>row(<>{lbl(i===0?'Vehicles':'')}{inp(r.year,v=>setArr('vehicles',i,'year',v),'Year')}{inp(r.make,v=>setArr('vehicles',i,'make',v),'Make/Model')}{numInp(r.value,v=>setArr('vehicles',i,'value',v))}{del(()=>removeRow('vehicles',i))}</>))}
+      {addBtn(()=>addRow('vehicles',{year:'',make:'',vin:'',condition:'',value:''}),'+ Add Vehicle')}
+
+      {sec('LIABILITIES')}
+      {(data.operatingNotes||[]).map((r,i)=>row(<>{lbl(i===0?'Operating Notes':'')}{inp(r.creditor,v=>setArr('operatingNotes',i,'creditor',v),'Creditor')}{numInp(r.balance,v=>setArr('operatingNotes',i,'balance',v))}{del(()=>removeRow('operatingNotes',i))}</>))}
+      {addBtn(()=>addRow('operatingNotes',{creditor:'',balance:'',dueDate:''}),'+ Add Operating Note')}
+
+      {(data.intermediatDebt||[]).map((r,i)=>row(<>{lbl(i===0?'Term Debt':'')}{inp(r.creditor,v=>setArr('intermediatDebt',i,'creditor',v),'Creditor')}{inp(r.security,v=>setArr('intermediatDebt',i,'security',v),'Security')}{numInp(r.principal,v=>setArr('intermediatDebt',i,'principal',v))}{numInp(r.annualPmt,v=>setArr('intermediatDebt',i,'annualPmt',v))}{del(()=>removeRow('intermediatDebt',i))}</>))}
+      {addBtn(()=>addRow('intermediatDebt',{creditor:'',security:'',principal:'',rate:'',annualPmt:'',dueDate:''}),'+ Add Term Debt')}
+
+      {(data.reMortgages||[]).map((r,i)=>row(<>{lbl(i===0?'RE Mortgages':'')}{inp(r.lienHolder,v=>setArr('reMortgages',i,'lienHolder',v),'Lien Holder')}{numInp(r.principal,v=>setArr('reMortgages',i,'principal',v))}{inp(r.rate,v=>setArr('reMortgages',i,'rate',v),'Rate')}{del(()=>removeRow('reMortgages',i))}</>))}
+      {addBtn(()=>addRow('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''}),'+ Add RE Mortgage')}
+
+      {sec('NOTES')}
+      {row(<>{lbl('Comments/Notes')}<textarea value={data.notes||''} onChange={e=>set('notes',e.target.value)} rows={3}
+        style={{flex:1,border:'1px solid #d1d5db',borderRadius:5,padding:'6px 8px',fontSize:12,fontFamily:'inherit',resize:'vertical'}}/></>)}
+    </div>
+  );
+}
+
+// ─── CAEditDiff ──────────────────────────────────────────────────────────────
+function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting }) {
+  const diffs = [];
+  const compare = (key, label, oval, nval) => {
+    const os = String(oval||'').trim();
+    const ns = String(nval||'').trim();
+    if (os !== ns) diffs.push({key, label, old: os, new: ns});
+  };
+
+  const scalarFields = [
+    ['clientName','Client Name'],['asOfDate','As of Date'],['cashGlacier','Glacier Bank Cash'],['notes','Notes']
+  ];
+  scalarFields.forEach(([k,l]) => compare(k, l, original[k], edited[k]));
+
+  const arrayFields = [
+    {field:'cashOther', label:'Other Bank', key:'institution', val:'amount'},
+    {field:'receivables', label:'Receivable', key:'description', val:'amount'},
+    {field:'farmProducts', label:'Farm Product', key:'kind', val:'pricePerUnit'},
+    {field:'realEstate', label:'Real Estate', key:'description', val:'valuePerAcre'},
+    {field:'machinery', label:'Machinery', key:'make', val:'value'},
+    {field:'vehicles', label:'Vehicle', key:'make', val:'value'},
+    {field:'operatingNotes', label:'Operating Note', key:'creditor', val:'balance'},
+    {field:'intermediatDebt', label:'Term Debt', key:'creditor', val:'principal'},
+    {field:'reMortgages', label:'RE Mortgage', key:'lienHolder', val:'principal'},
+  ];
+  arrayFields.forEach(({field, label, key, val}) => {
+    const orig = original[field] || [];
+    const edit = edited[field] || [];
+    const maxLen = Math.max(orig.length, edit.length);
+    for (let i=0; i<maxLen; i++) {
+      const o = orig[i] || {};
+      const e = edit[i] || {};
+      const name = e[key]||o[key]||`${label} ${i+1}`;
+      compare(`${field}_${i}_${key}`, `${label}: ${name} (name)`, o[key], e[key]);
+      compare(`${field}_${i}_${val}`, `${label}: ${name} (value)`, o[val], e[val]);
+    }
+  });
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}>
+      <div style={{background:'white',borderRadius:12,width:'min(700px,100%)',maxHeight:'85vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
+        <div style={{padding:'18px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,color:'#1a1a1a'}}>Review CA Changes — {clientName}</div>
+            <div style={{fontSize:12,color:'#888',marginTop:2}}>Submitted by {caName}</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#888'}}>✕</button>
+        </div>
+
+        <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
+          {diffs.length === 0 ? (
+            <div style={{textAlign:'center',padding:40,color:'#888'}}>
+              <div style={{fontSize:32,marginBottom:8}}>✓</div>
+              <div>No changes detected</div>
+            </div>
+          ) : (
+            <>
+              <div style={{fontSize:13,color:'#555',marginBottom:14}}>{diffs.length} change{diffs.length!==1?'s':''} proposed:</div>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  <tr style={{background:'#f3f4f6'}}>
+                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#374151',border:'1px solid #e5e7eb'}}>Field</th>
+                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#dc2626',border:'1px solid #e5e7eb'}}>Current Value</th>
+                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#15803d',border:'1px solid #e5e7eb'}}>CA Proposed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diffs.map((d,i) => (
+                    <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
+                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#374151'}}>{d.label}</td>
+                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{d.old||'—'}</td>
+                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{d.new||'—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+
+        <div style={{padding:'16px 24px',borderTop:'1px solid #e5e7eb',display:'flex',gap:10,justifyContent:'flex-end'}}>
+          <button onClick={onReject}
+            style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            Reject Changes
+          </button>
+          {diffs.length > 0 && (
+            <button onClick={onAccept} disabled={accepting}
+              style={{background:'#15803d',color:'white',border:'none',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:accepting?'wait':'pointer',fontFamily:'inherit',opacity:accepting?.7:1}}>
+              {accepting?'Saving...':'Accept & Save to Sheet'}
+            </button>
+          )}
+          <button onClick={onClose}
+            style={{background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:7,padding:'9px 20px',fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BalanceSheet() {
   const [step, setStep] = useState(0);
   const [screen, setScreen] = useState("home");
@@ -3614,6 +3965,16 @@ export default function BalanceSheet() {
   const [availableEntities, setAvailableEntities] = useState([]);
   const [pendingEntityName, setPendingEntityName] = useState('');
   const [pendingEntityDate, setPendingEntityDate] = useState('');
+  // ── CA sharing ─────────────────────────────────────────────────────────────
+  const [caUsers, setCAUsers] = useState([]);
+  const [showShareCA, setShowShareCA] = useState(null); // sheet key being shared
+  const [sharingCA, setSharingCA] = useState(false);
+  const [selectedCAUser, setSelectedCAUser] = useState('');
+  const [pendingCAEdits, setPendingCAEdits] = useState([]);
+  const [showCADiff, setShowCADiff] = useState(null); // ca_edit record with .original added
+  const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [caOpenShare, setCaOpenShare] = useState(null);
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
@@ -3634,12 +3995,16 @@ export default function BalanceSheet() {
       setUserFolders([]);
       setSavedSheets([]);
       setPendingReviews([]);
+      setProfile(null);
+      setProfileLoading(true);
       return;
     }
     // Run everything in try/catch so nothing can silently kill it
     try {
-      supaGetProfile().then(p => setProfile(p)).catch(() => {});
-    } catch(e) { console.warn('profile load error:', e); }
+      supaGetProfile()
+        .then(p => { setProfile(p); setProfileLoading(false); })
+        .catch(() => { setProfileLoading(false); });
+    } catch(e) { console.warn('profile load error:', e); setProfileLoading(false); }
     try {
       const userId = session?.user?.id || 'default';
       const stored = localStorage.getItem(`fbmt_userFolders_${userId}`);
@@ -3648,6 +4013,8 @@ export default function BalanceSheet() {
     setTimeout(() => {
       loadSavedList();
       loadPendingReviews();
+      loadCAUsers();
+      loadPendingCAEdits();
     }, 100);
   }, [session?.access_token]);
 
@@ -4922,6 +5289,88 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       }
       setBudgetSharePin(pin); setBudgetShareStatus('ready');
     } catch(e) { setBudgetShareStatus('error:'+e.message); }
+  };
+
+  // ── CA sharing functions ───────────────────────────────────────────────────
+  const loadCAUsers = async () => {
+    if (!isConfigured()) return;
+    try {
+      const r = await fetch(SUPABASE_URL+'/rest/v1/profiles?role=eq.ca&select=id,full_name,email', {headers:supaHeaders()});
+      const d = await r.json();
+      setCAUsers(Array.isArray(d)?d:[]);
+    } catch(e) { console.error('loadCAUsers error:', e); }
+  };
+
+  const shareWithCA = async (sheetKey, caUserId) => {
+    if (!sheetKey || !caUserId) return;
+    setSharingCA(true);
+    try {
+      const item = await storage.get(sheetKey);
+      const sheetData = item ? JSON.parse(item.value) : {};
+      // Merge current budget data from state into the snapshot
+      const fullData = {
+        ...sheetData,
+        budgetCrops: data.budgetCrops,
+        budgetLivestock: data.budgetLivestock,
+        budgetMisc: data.budgetMisc,
+        budgetExpenses: data.budgetExpenses,
+        budgetInsuranceEnabled: data.budgetInsuranceEnabled,
+        budgetProposedDebt: data.budgetProposedDebt,
+      };
+      const sheet = savedSheets.find(s=>s.key===sheetKey);
+      const resp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
+        method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
+        body: JSON.stringify({
+          lender_user_id: session?.user?.id,
+          lender_name: profile?.full_name || session?.user?.email || 'First Bank of Montana',
+          ca_user_id: caUserId,
+          client_name: sheet?.clientName || sheetData.clientName || '',
+          sheet_key: sheetKey,
+          sheet_data: fullData
+        })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      setShowShareCA(null); setSelectedCAUser('');
+      alert('Sheet shared with CA successfully.');
+    } catch(e) { alert('Error sharing: '+e.message); }
+    setSharingCA(false);
+  };
+
+  const loadPendingCAEdits = async () => {
+    if (!isConfigured()) return;
+    if (!session?.user?.id) return;
+    try {
+      const r = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?status=eq.pending&select=*', {headers:supaHeaders()});
+      const edits = await r.json();
+      setPendingCAEdits(Array.isArray(edits)?edits:[]);
+    } catch {}
+  };
+
+  const acceptCAEdit = async (edit) => {
+    setAcceptingCAEdit(true);
+    try {
+      await storage.set(edit.sheet_key, JSON.stringify({...edit.edited_data, _lastCAEdit: new Date().toISOString()}));
+      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+edit.id, {
+        method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
+        body: JSON.stringify({status:'accepted'})
+      });
+      setPendingCAEdits(p=>p.filter(e=>e.id!==edit.id));
+      setShowCADiff(null);
+      await loadSavedList();
+      alert('CA changes accepted and saved to the sheet.');
+    } catch(e) { alert('Error accepting: '+e.message); }
+    setAcceptingCAEdit(false);
+  };
+
+  const rejectCAEdit = async (editId) => {
+    try {
+      await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+editId, {
+        method:'PATCH', headers:{...supaHeaders(),'Prefer':'return=minimal'},
+        body: JSON.stringify({status:'rejected'})
+      });
+    } catch {}
+    setPendingCAEdits(p=>p.filter(e=>e.id!==editId));
+    setShowCADiff(null);
   };
 
   const loadPendingReviews = async () => {
@@ -6313,6 +6762,35 @@ ${extraPages}
     );
   }
 
+  // ── Role-based routing ─────────────────────────────────────────────────────
+  const handleSignOut = async () => {
+    await supaLogout();
+    setSession(null); setProfile(null); setProfileLoading(true);
+    setCaOpenShare(null); setScreen("home"); setData(emptyData());
+  };
+
+  // Wait for profile to load before routing — prevents CA briefly seeing lender screen
+  if (profileLoading && session) {
+    return (
+      <div style={{minHeight:'100vh',background:'#6B0E1E',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{color:'white',fontSize:14,opacity:.8}}>Loading...</div>
+      </div>
+    );
+  }
+
+  if (profile?.role === 'ca') {
+    if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
+      onOpen={(share) => {
+        const sheetData = share.sheet_data || {};
+        setData({...emptyData(), ...sheetData});
+        setCaOpenShare(share);
+        setScreen('wizard');
+        setStep(0);
+      }}
+    />;
+    // CA has opened a sheet — fall through to full app below in CA mode
+  }
+
   if (screen === "home") {
     return (
       <div className="app">
@@ -6465,6 +6943,40 @@ ${extraPages}
             </div>
           )}
 
+          {/* ── Pending CA Changes ── */}
+          {pendingCAEdits.length > 0 && (
+            <div style={{background:"white",borderRadius:10,padding:"14px 18px",marginBottom:16,border:"1px solid #93c5fd",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:".95rem",color:"#1a1a1a"}}>Pending CA Changes</div>
+                <div style={{background:"#1d4ed8",color:"white",borderRadius:999,padding:"1px 8px",fontSize:".75rem",fontWeight:700}}>{pendingCAEdits.length}</div>
+                <button onClick={loadPendingCAEdits} style={{marginLeft:"auto",background:"none",border:"1px solid #ddd",borderRadius:5,padding:"3px 10px",fontSize:".75rem",cursor:"pointer",color:"#888",fontFamily:"inherit"}}>Refresh</button>
+              </div>
+              {pendingCAEdits.map(edit=>(
+                <div key={edit.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"#f0f6ff",borderRadius:8,marginBottom:8,border:"1px solid #bfdbfe"}}>
+                  <span style={{fontSize:"1.2rem"}}>📝</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:".88rem"}}>{edit.client_name}</div>
+                    <div style={{fontSize:".78rem",color:"#555"}}>Changes by {edit.ca_name} · {edit.submitted_at ? new Date(edit.submitted_at).toLocaleDateString() : '—'}</div>
+                  </div>
+                  <button onClick={async()=>{
+                    try {
+                      const item = await storage.get(edit.sheet_key);
+                      const orig = item ? JSON.parse(item.value) : {};
+                      setShowCADiff({...edit, original: orig});
+                    } catch { setShowCADiff({...edit, original:{}}); }
+                  }}
+                    style={{background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:"6px 14px",fontWeight:700,fontSize:".8rem",cursor:"pointer",fontFamily:"inherit"}}>
+                    Review Changes
+                  </button>
+                  <button onClick={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(edit.id); }}
+                    style={{background:"none",border:"1px solid #f0c0c0",borderRadius:6,padding:"6px 10px",fontSize:".8rem",cursor:"pointer",color:"#dc2626",fontFamily:"inherit"}}>
+                    Reject
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* ── Pending Reviews ── */}
           {pendingReviews.length > 0 && (
             <div style={{marginBottom:28}}>
@@ -6510,6 +7022,53 @@ ${extraPages}
           )}
 
           {bsCompare && <BSCompareModal review={bsCompare} onAccept={acceptCustomerBS} onDiscard={()=>setBsCompare(null)} />}
+
+          {/* ── Share with CA Modal ── */}
+          {showShareCA && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+              <div style={{background:"white",borderRadius:12,padding:28,width:"min(400px,90%)",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                <div style={{fontWeight:700,fontSize:16,marginBottom:6}}>Share with Credit Analyst</div>
+                <div style={{fontSize:13,color:"#555",marginBottom:18}}>Select a CA to share this balance sheet with. They will be able to view, edit, and submit changes back to you.</div>
+                <select value={selectedCAUser} onChange={e=>setSelectedCAUser(e.target.value)}
+                  style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"9px 12px",fontSize:14,fontFamily:"inherit",marginBottom:16,boxSizing:"border-box"}}>
+                  <option value="">Select a Credit Analyst...</option>
+                  {caUsers.map(u=>(
+                    <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
+                  ))}
+                </select>
+                {caUsers.length === 0 && (
+                  <div style={{fontSize:12,color:"#888",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                    No CA users found.
+                    <button onClick={loadCAUsers} style={{background:"#f0f6ff",border:"1px solid #93c5fd",borderRadius:4,padding:"3px 10px",fontSize:12,cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit"}}>Refresh</button>
+                  </div>
+                )}
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={()=>shareWithCA(showShareCA, selectedCAUser)} disabled={!selectedCAUser||sharingCA}
+                    style={{flex:1,background:"#1d4ed8",color:"white",border:"none",borderRadius:6,padding:10,fontWeight:700,fontSize:14,cursor:(!selectedCAUser||sharingCA)?"not-allowed":"pointer",fontFamily:"inherit",opacity:(!selectedCAUser||sharingCA)?.7:1}}>
+                    {sharingCA?"Sharing...":"Share"}
+                  </button>
+                  <button onClick={()=>{setShowShareCA(null);setSelectedCAUser('');}}
+                    style={{flex:1,background:"#f3f4f6",color:"#374151",border:"1px solid #d1d5db",borderRadius:6,padding:10,fontWeight:600,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── CA Edit Diff Modal ── */}
+          {showCADiff && (
+            <CAEditDiff
+              original={showCADiff.original||{}}
+              edited={showCADiff.edited_data||{}}
+              caName={showCADiff.ca_name}
+              clientName={showCADiff.client_name}
+              accepting={acceptingCAEdit}
+              onAccept={()=>acceptCAEdit(showCADiff)}
+              onReject={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(showCADiff.id); }}
+              onClose={()=>setShowCADiff(null)}
+            />
+          )}
 
           <div className="home-section-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <span>
@@ -6728,6 +7287,10 @@ ${extraPages}
                                 onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}>
                                 Move
                               </button>
+                              <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
+                                onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}>
+                                Share CA
+                              </button>
                               <button className="sheet-delete" onClick={e=>deleteSheet(s.key,e)}>Delete</button>
                             </div>
                           ))}
@@ -6747,6 +7310,12 @@ ${extraPages}
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
+      {caOpenShare && (
+        <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13}}>
+          <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Changes will be submitted to lender for review</span>
+          <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'3px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>← Back to Portal</button>
+        </div>
+      )}
 
       {/* ── Balance Sheet Splitter Modal ── */}
       {showSplitter && <BSSplitter
