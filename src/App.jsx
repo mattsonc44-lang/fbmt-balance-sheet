@@ -3713,6 +3713,199 @@ function BSCompareModal({review, onAccept, onDiscard}) {
   );
 }
 
+// ─── BudgetCompareModal ──────────────────────────────────────────────────────
+// Reviewing a customer-submitted budget. Shows crops/livestock/misc/expenses
+// they entered, then lets the banker pick which existing balance sheet to
+// merge this budget into (or discard).
+function BudgetCompareModal({ review, savedSheets, targetKey, setTargetKey, onAccept, onDiscard, applying }) {
+  const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmt = v => v===0 ? '—' : '$'+Math.round(v).toLocaleString();
+  const draft = review.draft || {};
+  const crops     = (draft.budgetCrops || []).filter(r => r.crop || r.acres);
+  const livestock = (draft.budgetLivestock || []).filter(r => r.type || r.head);
+  const misc      = (draft.budgetMisc || []).filter(r => r.description || r.amount);
+  const expenses  = (draft.budgetExpenses || []).filter(r => r.description || r.amount);
+  const cropTotal      = crops.reduce((s,r) => s + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
+  const livestockTotal = livestock.reduce((s,r) => s + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
+  const miscTotal      = misc.reduce((s,r) => s + nm(r.amount), 0);
+  const incomeTotal    = cropTotal + livestockTotal + miscTotal;
+  const opExTotal      = expenses.filter(r => !r.prepaid).reduce((s,r) => s + nm(r.amount), 0);
+  const prepaidTotal   = expenses.filter(r =>  r.prepaid).reduce((s,r) => s + nm(r.amount), 0);
+  const netCF = incomeTotal - opExTotal;
+
+  // Group saved sheets by client for the picker.
+  const byClient = {};
+  savedSheets.forEach(s => {
+    const c = s.clientName || '(no client name)';
+    (byClient[c] = byClient[c] || []).push(s);
+  });
+
+  const THS = { padding:'8px 12px', fontWeight:700, fontSize:11, textAlign:'left', background:'#1a1a1a', color:'white', textTransform:'uppercase', letterSpacing:'.4px' };
+  const TD  = { padding:'6px 12px', fontSize:12, borderBottom:'1px solid #f0f0f0' };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:4000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:16}}>
+      <div style={{background:'white',borderRadius:10,width:'100%',maxWidth:820,margin:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+        <div style={{background:'#1a1a1a',borderRadius:'10px 10px 0 0',padding:'12px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{color:'white',fontWeight:700,fontSize:15}}>🌾 Review Customer Budget — {review.client_name||''}</div>
+          <button onClick={onDiscard} style={{background:'rgba(255,255,255,.15)',color:'white',border:'none',borderRadius:5,padding:'6px 12px',fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>✕ Close</button>
+        </div>
+
+        <div style={{padding:'18px 22px'}}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:14}}>
+            Submitted {review.submitted_at ? new Date(review.submitted_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
+            {review.as_of_date ? ' · As of ' + review.as_of_date : ''}
+          </div>
+
+          {/* Income summary strip */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
+            <div style={{background:'#EAF3DE',borderRadius:8,padding:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:'#3B6D11',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Crop income</div>
+              <div style={{fontSize:16,fontWeight:700,color:'#173404'}}>{fmt(cropTotal)}</div>
+              <div style={{fontSize:10,color:'#3B6D11',marginTop:2}}>{crops.length} row{crops.length!==1?'s':''}</div>
+            </div>
+            <div style={{background:'#EAF3DE',borderRadius:8,padding:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:'#3B6D11',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Livestock</div>
+              <div style={{fontSize:16,fontWeight:700,color:'#173404'}}>{fmt(livestockTotal)}</div>
+              <div style={{fontSize:10,color:'#3B6D11',marginTop:2}}>{livestock.length} row{livestock.length!==1?'s':''}</div>
+            </div>
+            <div style={{background:'#EAF3DE',borderRadius:8,padding:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:'#3B6D11',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Other income</div>
+              <div style={{fontSize:16,fontWeight:700,color:'#173404'}}>{fmt(miscTotal)}</div>
+              <div style={{fontSize:10,color:'#3B6D11',marginTop:2}}>{misc.length} line{misc.length!==1?'s':''}</div>
+            </div>
+            <div style={{background:'#FCEBEB',borderRadius:8,padding:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:'#A32D2D',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}}>Op. expenses</div>
+              <div style={{fontSize:16,fontWeight:700,color:'#501313'}}>{fmt(opExTotal)}</div>
+              <div style={{fontSize:10,color:'#A32D2D',marginTop:2}}>{expenses.length} line{expenses.length!==1?'s':''}{prepaidTotal ? ` · ${fmt(prepaidTotal)} prepaid` : ''}</div>
+            </div>
+          </div>
+
+          <div style={{background:'#f5f5f5',borderRadius:8,padding:'10px 14px',marginBottom:20,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontSize:13,color:'#374151',fontWeight:600}}>Net cash flow before debt service</span>
+            <span style={{fontSize:16,fontWeight:700,color:netCF>=0?'#166534':'#991b1b'}}>{fmt(netCF)}</span>
+          </div>
+
+          {/* Line-item tables */}
+          {crops.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>Crops</div>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr>
+                  <th style={THS}>Crop</th><th style={{...THS,textAlign:'right'}}>Acres</th>
+                  <th style={{...THS,textAlign:'right'}}>Yield</th><th style={{...THS,textAlign:'right'}}>Unit</th>
+                  <th style={{...THS,textAlign:'right'}}>Price</th><th style={{...THS,textAlign:'right'}}>Share</th>
+                  <th style={{...THS,textAlign:'right'}}>Value</th>
+                </tr></thead>
+                <tbody>
+                  {crops.map((r,i) => {
+                    const val = nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100);
+                    return (
+                      <tr key={i}>
+                        <td style={TD}>{r.crop||'—'}</td>
+                        <td style={{...TD,textAlign:'right'}}>{r.acres||'—'}</td>
+                        <td style={{...TD,textAlign:'right'}}>{r.yieldPerAcre||'—'}</td>
+                        <td style={{...TD,textAlign:'right'}}>{r.unit||'bu'}</td>
+                        <td style={{...TD,textAlign:'right'}}>{r.price?'$'+r.price:'—'}</td>
+                        <td style={{...TD,textAlign:'right'}}>{r.share||'100'}%</td>
+                        <td style={{...TD,textAlign:'right',fontWeight:600}}>{fmt(val)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {livestock.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>Livestock</div>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr>
+                  <th style={THS}>Type</th><th style={{...THS,textAlign:'right'}}>Head</th>
+                  <th style={{...THS,textAlign:'right'}}>Lbs</th><th style={{...THS,textAlign:'right'}}>$/lb</th>
+                  <th style={{...THS,textAlign:'right'}}>Value</th>
+                </tr></thead>
+                <tbody>
+                  {livestock.map((r,i) => (
+                    <tr key={i}>
+                      <td style={TD}>{r.type||'—'}</td>
+                      <td style={{...TD,textAlign:'right'}}>{r.head||'—'}</td>
+                      <td style={{...TD,textAlign:'right'}}>{r.lbs||'—'}</td>
+                      <td style={{...TD,textAlign:'right'}}>{r.price?'$'+r.price:'—'}</td>
+                      <td style={{...TD,textAlign:'right',fontWeight:600}}>{fmt(nm(r.head)*nm(r.lbs)*nm(r.price))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {expenses.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>Expenses</div>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr>
+                  <th style={THS}>Description</th>
+                  <th style={{...THS,textAlign:'right'}}>Amount</th>
+                  <th style={{...THS,textAlign:'right'}}>Prepaid?</th>
+                </tr></thead>
+                <tbody>
+                  {expenses.map((r,i) => (
+                    <tr key={i}>
+                      <td style={TD}>{r.description||'—'}</td>
+                      <td style={{...TD,textAlign:'right'}}>{fmt(nm(r.amount))}</td>
+                      <td style={{...TD,textAlign:'right'}}>{r.prepaid?'yes':''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Attach-to-sheet picker */}
+          <div style={{background:'#fdf7f7',border:'1.5px solid #e5c5c5',borderRadius:8,padding:'14px 16px',marginTop:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#6B0E1E',textTransform:'uppercase',letterSpacing:.4,marginBottom:10}}>
+              Combine this budget with a balance sheet
+            </div>
+            <select value={targetKey} onChange={e=>setTargetKey(e.target.value)}
+              style={{width:'100%',border:'1.5px solid #ddd',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
+              <option value="">— pick a sheet, or leave blank to just close —</option>
+              {Object.keys(byClient).sort().map(c => (
+                <optgroup key={c} label={c}>
+                  {byClient[c]
+                    .sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))
+                    .map(s => (
+                      <option key={s.key} value={s.key}>
+                        {s.asOfDate}{s.savedAt ? ' (saved ' + new Date(s.savedAt).toLocaleDateString() + ')' : ''}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+            </select>
+            {targetKey && (
+              <div style={{fontSize:12,color:'#92400e',marginTop:8,background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'6px 10px'}}>
+                ⚠ Any existing budget on that sheet will be replaced with the customer's submission.
+              </div>
+            )}
+          </div>
+
+          <div style={{display:'flex',justifyContent:'flex-end',gap:10,marginTop:16}}>
+            <button onClick={onDiscard} disabled={applying}
+              style={{background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:7,padding:'9px 20px',fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+              Cancel
+            </button>
+            <button onClick={onAccept} disabled={!targetKey || applying}
+              style={{background:'#15803d',color:'white',border:'none',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:(!targetKey||applying)?'not-allowed':'pointer',fontFamily:'inherit',opacity:(!targetKey||applying)?.6:1}}>
+              {applying ? 'Attaching…' : '✅ Attach budget to selected sheet'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── WhatIfView ──────────────────────────────────────────────────────────────
 // Read-only sensitivity analysis: adjust crop price / yield / input cost by %
 // and see live-updated projected income, operating expenses, DSCR, and net cash flow.
@@ -5365,6 +5558,9 @@ export default function BalanceSheet() {
   const [reviewSaveDate, setReviewSaveDate] = useState({});
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [bsCompare, setBsCompare] = useState(null); // {review, orig, draft}
+  const [budgetCompare, setBudgetCompare] = useState(null); // customer-submitted budget review row + resolved draft
+  const [budgetCompareTarget, setBudgetCompareTarget] = useState(''); // sheet key to attach the budget to
+  const [budgetCompareApplying, setBudgetCompareApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("balance");
   const [compSheets, setCompSheets] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
@@ -6919,6 +7115,35 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     d.asOfDate = saveDate || review.as_of_date || new Date().toISOString().slice(0,10);
     setData(d); setActiveTab('budget'); setScreen('wizard');
     await markReviewed(review.share_id,'budget');
+  };
+
+  // Merge a customer-submitted budget into a saved balance sheet the banker picks.
+  const acceptCustomerBudget = async () => {
+    if (!budgetCompare || !budgetCompareTarget) return;
+    setBudgetCompareApplying(true);
+    try {
+      const item = await storage.get(budgetCompareTarget);
+      if (!item) throw new Error("Couldn't load that sheet — try refreshing.");
+      const existing = JSON.parse(item.value);
+      const draft = budgetCompare.draft || {};
+      const merged = {
+        ...existing,
+        budgetCrops:     draft.budgetCrops     ?? existing.budgetCrops,
+        budgetLivestock: draft.budgetLivestock ?? existing.budgetLivestock,
+        budgetMisc:      draft.budgetMisc      ?? existing.budgetMisc,
+        budgetExpenses:  draft.budgetExpenses  ?? existing.budgetExpenses,
+      };
+      await storage.set(budgetCompareTarget, JSON.stringify(merged));
+      await markReviewed(budgetCompare.share_id, 'budget');
+      setData(merged);
+      setActiveTab('budget');
+      setScreen('wizard'); setStep(0);
+      await loadSavedList();
+      setBudgetCompare(null); setBudgetCompareTarget('');
+    } catch(e) {
+      alert('Attach failed: ' + e.message);
+    }
+    setBudgetCompareApplying(false);
   };
 
   const acceptCustomerBS = async () => {
@@ -8679,7 +8904,14 @@ ${extraPages}
                         onChange={e=>setReviewSaveDate(d=>({...d,[review.share_id]:e.target.value}))}
                         style={{border:"1px solid #d1d5db",borderRadius:6,padding:"5px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}}/>
                       <button
-                        onClick={()=>setBsCompare({review, orig:review.original_data||{}, draft:review.customer_draft||{}})}
+                        onClick={()=> {
+                          if (review.type === 'budget') {
+                            setBudgetCompare({...review, draft: review.customer_draft||{}});
+                            setBudgetCompareTarget('');
+                          } else {
+                            setBsCompare({review, orig:review.original_data||{}, draft:review.customer_draft||{}});
+                          }
+                        }}
                         style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:".82rem"}}>
                         📊 Review Changes
                       </button>
@@ -8695,6 +8927,16 @@ ${extraPages}
           )}
 
           {bsCompare && <BSCompareModal review={bsCompare} onAccept={acceptCustomerBS} onDiscard={()=>setBsCompare(null)} />}
+
+          {budgetCompare && <BudgetCompareModal
+            review={budgetCompare}
+            savedSheets={savedSheets}
+            targetKey={budgetCompareTarget}
+            setTargetKey={setBudgetCompareTarget}
+            applying={budgetCompareApplying}
+            onAccept={acceptCustomerBudget}
+            onDiscard={()=>{ setBudgetCompare(null); setBudgetCompareTarget(''); }}
+          />}
 
           {/* ── Share with CA Modal ── */}
           {showShareCA && (
