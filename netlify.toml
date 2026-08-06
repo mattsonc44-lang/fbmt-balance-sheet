@@ -8,8 +8,8 @@
   to = "/index.html"
   status = 200
 
-# Renewal reminder — runs daily at 13:00 UTC (07:00 MT).
-# Finds clients whose renewal_date is within 45 days and hasn't been
-# notified yet, then emails the customer + lender a pre-filled share link.
-[functions."renewal-reminder"]
-  schedule = "0 13 * * *"
+# Renewal reminders are now surfaced in-app instead of auto-emailed.
+# The renewal-reminder function code is still here in case we want to bring
+# scheduled sending back — just add:
+#   [functions."renewal-reminder"]
+#     schedule = "0 13 * * *"
