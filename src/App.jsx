@@ -4161,8 +4161,11 @@ function ClientDashboard({
           if (item) {
             const p = JSON.parse(item.value);
             const raw = Array.isArray(p.linkedEntities) ? p.linkedEntities : [];
-            const norm = raw.map(e => typeof e === 'string' ? { name: e, date: null } : e);
+            const norm = raw.map(e => typeof e === 'string'
+              ? { name: e, date: null, ownership: '100' }
+              : { ownership: '100', ...e });
             for (const entry of norm) {
+              const pct = Number(String(entry.ownership||'100').replace(/[^0-9.]/g,'')) || 100;
               const entitySheets = savedSheets
                 .filter(s => s.clientName === entry.name)
                 .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
@@ -4174,11 +4177,12 @@ function ClientDashboard({
                   const it = await storage.get(targetKey);
                   if (it) {
                     const pe = JSON.parse(it.value);
-                    forwardList.push({ name: entry.name, date: entry.date, nw: sheetTotals(pe)['NET WORTH'] || 0, hasSheet: true });
+                    const nw = sheetTotals(pe)['NET WORTH'] || 0;
+                    forwardList.push({ name: entry.name, date: entry.date, ownership: pct, nw, owned: nw * pct / 100, hasSheet: true });
                   }
-                } catch { forwardList.push({ name: entry.name, date: entry.date, nw: null, hasSheet: true }); }
+                } catch { forwardList.push({ name: entry.name, date: entry.date, ownership: pct, nw: null, owned: null, hasSheet: true }); }
               } else {
-                forwardList.push({ name: entry.name, date: entry.date, nw: null, hasSheet: false });
+                forwardList.push({ name: entry.name, date: entry.date, ownership: pct, nw: null, owned: null, hasSheet: false });
               }
             }
           }
@@ -4853,16 +4857,23 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             {linkedForward.length > 0 && (
               <div style={{marginBottom: linkedReverse.length > 0 ? 14 : 0}}>
                 <div style={{fontSize:11,color:TEXT_SEC,marginBottom:6}}>
-                  {clientName} is invested in <span style={{color:TEXT_MUTED}}>· total {fmtBig(linkedForward.reduce((s,e)=>s+(e.nw||0),0))}</span>
+                  {clientName} is invested in <span style={{color:TEXT_MUTED}}>· weighted total {fmtBig(linkedForward.reduce((s,e)=>s+(e.owned||0),0))}</span>
                 </div>
                 <div style={{display:'flex',flexDirection:'column'}}>
                   {linkedForward.map((e,i) => (
                     <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom: i === linkedForward.length-1 ? 'none' : '0.5px solid #f0f0f0'}}>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,color:TEXT_PRI}}>{e.name}</div>
+                        <div style={{fontSize:12,color:TEXT_PRI}}>
+                          {e.name}
+                          {e.ownership !== undefined && e.ownership < 100 && (
+                            <span style={{marginLeft:6,fontSize:10,color:TEXT_SEC,background:'#f3f4f6',padding:'1px 6px',borderRadius:999}}>{e.ownership}% owned</span>
+                          )}
+                        </div>
                         <div style={{fontSize:11,color:TEXT_SEC}}>
                           {e.hasSheet
-                            ? <>Net worth {fmtBig(e.nw||0)}{e.date ? ` · as of ${e.date}` : ''}</>
+                            ? (e.ownership < 100
+                              ? <>{e.ownership}% of {fmtBig(e.nw||0)} = <span style={{color:TEXT_PRI}}>{fmtBig(e.owned||0)}</span>{e.date ? ` · as of ${e.date}` : ''}</>
+                              : <>Net worth {fmtBig(e.nw||0)}{e.date ? ` · as of ${e.date}` : ''}</>)
                             : <span style={{color:'#c2410c'}}>No balance sheet on file yet</span>}
                         </div>
                       </div>
@@ -5815,6 +5826,7 @@ export default function BalanceSheet() {
   const [availableEntities, setAvailableEntities] = useState([]);
   const [pendingEntityName, setPendingEntityName] = useState('');
   const [pendingEntityDate, setPendingEntityDate] = useState('');
+  const [pendingOwnership, setPendingOwnership] = useState('100'); // % of the linked entity's NW that belongs to this client
   // ── CA sharing ─────────────────────────────────────────────────────────────
   const [caUsers, setCAUsers] = useState([]);
   const [showShareCA, setShowShareCA] = useState(null); // sheet key being shared
@@ -6123,8 +6135,11 @@ Question: ${q}`,
     }
   }, [screen]);
 
-  // Normalize linkedEntities: support both legacy strings and new {name,date} objects
-  const normalizeLinked = (arr) => (arr||[]).map(e => typeof e === 'string' ? {name:e, date:null} : e);
+  // Normalize linkedEntities: support both legacy strings and new {name,date,ownership} objects.
+  // Ownership defaults to "100" so existing rows behave the same as before.
+  const normalizeLinked = (arr) => (arr||[]).map(e => typeof e === 'string'
+    ? { name: e, date: null, ownership: '100' }
+    : { ownership: '100', ...e });
 
   // Load available entities for the link picker
   useEffect(() => {
@@ -6963,7 +6978,11 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const machVal = data.machinery.reduce((s,r)=>s+n(r.value),0);
   const otherAssetsTotal = data.otherAssets.reduce((s,r)=>s+n(r.amount),0);
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
-  const linkedEntityVal = Object.values(linkedEntityNWMap).reduce((s,v)=>s+v,0);
+  const linkedEntityVal = normalizeLinked(data.linkedEntities).reduce((s, e) => {
+    const nw = linkedEntityNWMap[e.name] || 0;
+    const pct = numVal(e.ownership || '100') || 100;
+    return s + nw * (pct / 100);
+  }, 0);
   const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
   const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
@@ -7718,7 +7737,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     const blank = (arr, min) => { const r=[...arr]; while(r.length<min) r.push({}); return r; };
 
     const n = numVal;
-    const linkedEntityVal = Object.values(linkedNW||{}).reduce((s,v)=>s+(Number(v)||0),0);
+    const linkedEntityVal = Object.entries(linkedNW||{}).reduce((s, [name, nw]) => {
+      const entries = (d.linkedEntities||[]).map(e => typeof e === 'string' ? { name: e, ownership: '100' } : e);
+      const entry = entries.find(e => e.name === name) || {};
+      const pct = numVal(entry.ownership || '100') || 100;
+      return s + (Number(nw) || 0) * (pct / 100);
+    }, 0);
     const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
     const machVal = (d.machinery||[]).reduce((s,r)=>s+n(r.value),0);
     const totalCurrentAssets = n(d.cashGlacier)
@@ -7819,7 +7843,13 @@ ${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><
 <div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
 <div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
 ${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).length>0?`<div class="sec">Other Assets:</div>${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
-${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>`<div class="row"><span>${name}</span><span>${pFmt(nw)}</span></div>`).join("")}`:""}
+${linkedEntityVal>0?`<div class="sec">Investment in Related Entities:</div>${Object.entries(linkedNW||{}).map(([name,nw])=>{
+  const entries=(d.linkedEntities||[]).map(e=>typeof e==='string'?{name:e,ownership:'100'}:e);
+  const entry=entries.find(e=>e.name===name)||{};
+  const pct=numVal(entry.ownership||'100')||100;
+  const owned=(Number(nw)||0)*(pct/100);
+  return `<div class="row"><span>${name}${pct<100?` <span style="font-size:6pt;color:#888">(${pct}% of ${pFmt(nw)})</span>`:''}</span><span>${pFmt(owned)}</span></div>`;
+}).join("")}`:""}
 <div class="tot"><span>TOTAL ASSETS</span><span>${pFmt(totalAssets)||"$0"}</span></div>
 </div>
 <div class="col">
@@ -8743,23 +8773,44 @@ ${extraPages}
             {/* Currently linked entities */}
             {normalizeLinked(data.linkedEntities).length > 0 && (
               <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
-                {normalizeLinked(data.linkedEntities).map((entry, i) => (
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"white",border:"1px solid #c0d8f0",borderRadius:8,padding:"8px 12px"}}>
-                    <span style={{fontSize:"1rem"}}>🏢</span>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
-                      <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
-                        {entry.date ? `As of ${entry.date}` : "Latest available"}
-                        {linkedEntityNWMap[entry.name] !== undefined && ` — Net Worth: ${fmt(linkedEntityNWMap[entry.name])}`}
+                {normalizeLinked(data.linkedEntities).map((entry, i) => {
+                  const nw = linkedEntityNWMap[entry.name];
+                  const pct = numVal(entry.ownership || '100') || 100;
+                  const owned = nw !== undefined ? nw * (pct / 100) : null;
+                  return (
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"white",border:"1px solid #c0d8f0",borderRadius:8,padding:"8px 12px"}}>
+                      <span style={{fontSize:"1rem"}}>🏢</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
+                        <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
+                          {entry.date ? `As of ${entry.date}` : "Latest available"}
+                          {nw !== undefined && (
+                            pct < 100
+                              ? ` — ${pct}% of ${fmt(nw)} = ${fmt(owned)}`
+                              : ` — Net Worth: ${fmt(nw)}`
+                          )}
+                        </div>
                       </div>
+                      {/* Editable ownership % for existing rows */}
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input type="text" value={entry.ownership ?? '100'}
+                          onChange={e=>{
+                            const v = e.target.value.replace(/[^0-9.]/g,'');
+                            const next = normalizeLinked(data.linkedEntities).map((r,j) => j===i ? {...r, ownership: v} : r);
+                            set("linkedEntities", next);
+                          }}
+                          title="Ownership %"
+                          style={{width:52,textAlign:"right",border:"1px solid #c0d8f0",borderRadius:5,padding:"3px 6px",fontSize:".78rem",fontFamily:"inherit"}}/>
+                        <span style={{fontSize:".78rem",color:"#2d5a8e",fontWeight:600}}>%</span>
+                      </div>
+                      <button
+                        onClick={()=>set("linkedEntities",(data.linkedEntities||[]).filter((_,j)=>j!==i))}
+                        style={{background:"none",border:"1px solid #f0c0c0",borderRadius:5,padding:"3px 8px",fontSize:".75rem",cursor:"pointer",color:"#c44",fontFamily:"inherit"}}>
+                        Remove
+                      </button>
                     </div>
-                    <button
-                      onClick={()=>set("linkedEntities",(data.linkedEntities||[]).filter((_,j)=>j!==i))}
-                      style={{background:"none",border:"1px solid #f0c0c0",borderRadius:5,padding:"3px 8px",fontSize:".75rem",cursor:"pointer",color:"#c44",fontFamily:"inherit"}}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
                 <div style={{display:"flex",justifyContent:"flex-end",fontSize:".82rem",fontWeight:700,color:"#2d5a8e",padding:"4px 6px"}}>
                   Total Investment Value: {fmt(linkedEntityVal)}
                 </div>
@@ -8792,15 +8843,26 @@ ${extraPages}
                     ) : null;
                   })()}
                   {pendingEntityName && pendingEntityDate && (
-                    <button
-                      onClick={()=>{
-                        set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate}]);
-                        setPendingEntityName('');
-                        setPendingEntityDate('');
-                      }}
-                      style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontSize:".85rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                      Link
-                    </button>
+                    <>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input type="text" value={pendingOwnership}
+                          onChange={e=>setPendingOwnership(e.target.value.replace(/[^0-9.]/g,''))}
+                          placeholder="100"
+                          title="What % of this entity does the client own?"
+                          style={{width:56,textAlign:"right",border:"1.5px solid #c0d8f0",borderRadius:7,padding:"7px 10px",fontSize:".88rem",fontFamily:"inherit",background:"white"}}/>
+                        <span style={{fontSize:".85rem",color:"#2d5a8e",fontWeight:600}}>%</span>
+                      </div>
+                      <button
+                        onClick={()=>{
+                          set("linkedEntities",[...(data.linkedEntities||[]),{name:pendingEntityName,date:pendingEntityDate,ownership:pendingOwnership||'100'}]);
+                          setPendingEntityName('');
+                          setPendingEntityDate('');
+                          setPendingOwnership('100');
+                        }}
+                        style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:7,padding:"7px 14px",fontSize:".85rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                        Link
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
