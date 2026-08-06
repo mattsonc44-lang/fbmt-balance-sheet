@@ -5562,6 +5562,11 @@ export default function BalanceSheet() {
   const [importData, setImportData] = useState(null);
   const [importBudget, setImportBudget] = useState(null);
   const [importBudgetInclude, setImportBudgetInclude] = useState(true);
+  // Budget-only import — how to apply it when there's no accompanying balance sheet
+  const [budgetOnlyMode, setBudgetOnlyMode] = useState('new'); // 'new' | 'existing'
+  const [budgetOnlyClient, setBudgetOnlyClient] = useState('');
+  const [budgetOnlyTargetKey, setBudgetOnlyTargetKey] = useState('');
+  const [budgetOnlyApplying, setBudgetOnlyApplying] = useState(false);
   const [importError, setImportError] = useState("");
   const [importDate, setImportDate] = useState(new Date().toISOString().slice(0,10));
   const [importDragging, setImportDragging] = useState(false);
@@ -6254,12 +6259,17 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
         reader.onload = (e) => {
           try {
             const wb = window.XLSX.read(e.target.result, {type:"array"});
-            const bsName = wb.SheetNames.find(s=>/balance sheet/i.test(s)) || wb.SheetNames[0];
-            const ws = wb.Sheets[bsName];
-            const rows = window.XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
-            processRows(rows, wb);
-            // Parse Annual Budget sheet if present
-            const budgName = wb.SheetNames.find(s=>/annual budget/i.test(s)||(/budget/i.test(s)&&!/monthly/i.test(s)));
+            // A real balance-sheet tab is named "Balance Sheet" (case-insensitive). If none
+            // is present we treat the file as budget-only rather than forcing the first
+            // sheet through the balance-sheet parser (which produces junk data).
+            const bsName    = wb.SheetNames.find(s=>/balance sheet/i.test(s));
+            const budgName  = wb.SheetNames.find(s=>/annual budget/i.test(s)||(/budget/i.test(s)&&!/monthly/i.test(s)));
+
+            if (bsName) {
+              const ws = wb.Sheets[bsName];
+              const rows = window.XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
+              processRows(rows, wb);
+            }
             if (budgName) {
               const bws = wb.Sheets[budgName];
               const brows = window.XLSX.utils.sheet_to_json(bws, {header:1, defval:""});
@@ -6267,6 +6277,9 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
               setImportBudgetInclude(true);
             } else {
               setImportBudget(null);
+            }
+            if (!bsName && !budgName) {
+              setImportError("Couldn't find a 'Balance Sheet' or 'Annual Budget' sheet in this file. Check that the tab names match.");
             }
           } catch(err) {
             setImportError("Excel parse error: " + err.message);
@@ -6298,6 +6311,42 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
     setShowImport(false);
     setImportData(null);
     setImportBudget(null);
+  }
+
+  // Budget-only import: apply into a brand-new empty sheet.
+  function applyBudgetOnlyNew() {
+    if (!importBudget) return;
+    if (!budgetOnlyClient.trim()) { setImportError("Enter a client name to create a new sheet."); return; }
+    const d = { ...emptyData(), ...importBudget, clientName: budgetOnlyClient.trim(), asOfDate: importDate };
+    setData(d);
+    setStep(0);
+    setActiveTab('budget'); // jump straight to the budget tab since that's what was imported
+    setScreen("wizard");
+    setShowImport(false);
+    setImportData(null); setImportBudget(null);
+    setBudgetOnlyClient(''); setBudgetOnlyTargetKey(''); setBudgetOnlyMode('new');
+  }
+
+  // Budget-only import: merge the budget into an existing saved sheet and open it.
+  async function applyBudgetOnlyExisting() {
+    if (!importBudget || !budgetOnlyTargetKey) return;
+    setBudgetOnlyApplying(true);
+    try {
+      const item = await storage.get(budgetOnlyTargetKey);
+      if (!item) throw new Error("Couldn't load that sheet — try refreshing.");
+      const existing = JSON.parse(item.value);
+      const merged = { ...existing, ...importBudget };
+      await storage.set(budgetOnlyTargetKey, JSON.stringify(merged));
+      setData(merged);
+      setStep(0);
+      setActiveTab('budget');
+      setScreen("wizard");
+      setShowImport(false);
+      setImportData(null); setImportBudget(null);
+      setBudgetOnlyClient(''); setBudgetOnlyTargetKey(''); setBudgetOnlyMode('new');
+      await loadSavedList();
+    } catch(e) { setImportError('Add to existing failed: ' + e.message); }
+    setBudgetOnlyApplying(false);
   }
   const deleteSheet = async (key, e) => {
     e.stopPropagation();
@@ -8388,6 +8437,119 @@ ${extraPages}
                     {importError.startsWith("Reading PDF") && <span style={{fontSize:"1.2rem"}}>🤖</span>}
                     {importError}
                     {importError.startsWith("Reading PDF") && <span style={{marginLeft:4,fontSize:".78rem",color:"#3b82f6"}}>AI is extracting your financial data...</span>}
+                  </div>
+                )}
+
+                {!importData && importBudget && (
+                  <div>
+                    <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:8,padding:14,marginBottom:16}}>
+                      <div style={{fontWeight:700,color:"#15803d",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+                        📊 Budget imported (no balance sheet in this file)
+                      </div>
+                      <div style={{fontSize:".85rem",color:"#166534",display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                        <span>Crop rows: <strong>{importBudget.budgetCrops.filter(r=>r.crop).length}</strong></span>
+                        <span>Livestock rows: <strong>{importBudget.budgetLivestock.filter(r=>r.type).length}</strong></span>
+                        <span>Misc income lines: <strong>{importBudget.budgetMisc.filter(r=>r.description).length}</strong></span>
+                        <span>Expense lines: <strong>{importBudget.budgetExpenses.filter(r=>r.description).length}</strong></span>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:14}}>
+                      <div style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",marginBottom:8}}>
+                        Where should this budget go?
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <label style={{flex:1,minWidth:220,display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",padding:"10px 12px",border:"1.5px solid " + (budgetOnlyMode==='new'?'#6B0E1E':'#ddd'),borderRadius:8,background:budgetOnlyMode==='new'?'#fdf7f7':'white'}}>
+                          <input type="radio" name="budgetOnlyMode" value="new" checked={budgetOnlyMode==='new'} onChange={()=>setBudgetOnlyMode('new')} style={{marginTop:3}}/>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:".9rem",color:"#1a1a1a"}}>Start a new balance sheet</div>
+                            <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>Creates an empty balance sheet with just this budget attached. You fill in assets/liabilities later.</div>
+                          </div>
+                        </label>
+                        <label style={{flex:1,minWidth:220,display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",padding:"10px 12px",border:"1.5px solid " + (budgetOnlyMode==='existing'?'#6B0E1E':'#ddd'),borderRadius:8,background:budgetOnlyMode==='existing'?'#fdf7f7':'white',opacity:savedSheets.length===0?.5:1}}>
+                          <input type="radio" name="budgetOnlyMode" value="existing" checked={budgetOnlyMode==='existing'} onChange={()=>setBudgetOnlyMode('existing')} disabled={savedSheets.length===0} style={{marginTop:3}}/>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:".9rem",color:"#1a1a1a"}}>Add to an existing sheet</div>
+                            <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>
+                              {savedSheets.length===0 ? 'No saved sheets yet — save one first to enable this.' : 'Merges the budget into a saved balance sheet. Overwrites any existing budget on that sheet.'}
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {budgetOnlyMode === 'new' ? (
+                      <div style={{marginBottom:16}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 200px",gap:12}}>
+                          <div>
+                            <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                              Client Name
+                            </label>
+                            <input type="text" value={budgetOnlyClient} onChange={e=>setBudgetOnlyClient(e.target.value)}
+                              placeholder="e.g. Johnson Family Farm"
+                              style={{width:"100%",border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:"1rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+                          </div>
+                          <div>
+                            <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                              As of Date
+                            </label>
+                            <input type="date" value={importDate} onChange={e=>setImportDate(e.target.value)}
+                              style={{width:"100%",border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:"1rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{marginBottom:16}}>
+                        <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                          Pick the sheet to add this budget to
+                        </label>
+                        <select value={budgetOnlyTargetKey} onChange={e=>setBudgetOnlyTargetKey(e.target.value)}
+                          style={{width:"100%",border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:".95rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}>
+                          <option value="">— select a saved sheet —</option>
+                          {(() => {
+                            // Group sheets by client for a cleaner dropdown.
+                            const byClient = {};
+                            savedSheets.forEach(s => {
+                              const c = s.clientName || '(no client name)';
+                              (byClient[c] = byClient[c] || []).push(s);
+                            });
+                            return Object.keys(byClient).sort().map(c => (
+                              <optgroup key={c} label={c}>
+                                {byClient[c]
+                                  .sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))
+                                  .map(s => (
+                                    <option key={s.key} value={s.key}>
+                                      {s.asOfDate}{s.savedAt ? ' (saved ' + new Date(s.savedAt).toLocaleDateString() + ')' : ''}
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            ));
+                          })()}
+                        </select>
+                        {budgetOnlyTargetKey && (
+                          <div style={{fontSize:".78rem",color:"#92400e",marginTop:6,background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:6,padding:"6px 10px"}}>
+                            ⚠ Any existing budget on that sheet (crops, livestock, expenses) will be replaced.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div style={{display:"flex",gap:12}}>
+                      <button className="btn btn-secondary" onClick={()=>setShowImport(false)}>Cancel</button>
+                      {budgetOnlyMode === 'new' ? (
+                        <button className="btn btn-primary" onClick={applyBudgetOnlyNew}
+                          disabled={!budgetOnlyClient.trim()}
+                          style={{background:"#6B0E1E",opacity:!budgetOnlyClient.trim()?.6:1}}>
+                          Create sheet with this budget →
+                        </button>
+                      ) : (
+                        <button className="btn btn-primary" onClick={applyBudgetOnlyExisting}
+                          disabled={!budgetOnlyTargetKey || budgetOnlyApplying}
+                          style={{background:"#6B0E1E",opacity:(!budgetOnlyTargetKey||budgetOnlyApplying)?.6:1}}>
+                          {budgetOnlyApplying ? 'Adding…' : 'Add budget to sheet →'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
