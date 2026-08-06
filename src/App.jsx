@@ -4970,7 +4970,7 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             </div>
           </div>
           <div style={{fontSize:11,color:TEXT_MUTED,marginTop:8}}>
-            At T-45 days, the customer and lender each receive a pre-filled balance sheet + budget share link.
+            Shows a reminder on the home page and here when the renewal is within 45 days. Use the Share buttons on the balance sheet to send the link to the customer manually.
           </div>
         </div>
 
@@ -5791,6 +5791,8 @@ export default function BalanceSheet() {
   const [bsShareLink, setBSShareLink] = useState('');
   const [bsSharePin, setBSSharePin] = useState('');
   const [bsShareStatus, setBSShareStatus] = useState('');
+  // Reason picker for share messages (used by both BS and Budget share modals)
+  const [shareReason, setShareReason] = useState('renewal');
   // Budget share
   const [showBudgetShareModal, setShowBudgetShareModal] = useState(false);
   const [budgetShareLink, setBudgetShareLink] = useState('');
@@ -9533,6 +9535,48 @@ ${extraPages}
             />
           )}
 
+          {/* Upcoming renewals reminder — clients whose renewal date is within 45 days */}
+          {(() => {
+            const today = new Date();
+            const window45 = new Date(today); window45.setUTCDate(window45.getUTCDate() + 45);
+            const upcoming = Object.entries(clientNotesMap)
+              .filter(([, n]) => n?.renewal_date && new Date(n.renewal_date + 'T00:00:00Z') >= today && new Date(n.renewal_date + 'T00:00:00Z') <= window45)
+              .map(([clientName, n]) => ({ clientName, renewal_date: n.renewal_date }))
+              .sort((a,b) => a.renewal_date.localeCompare(b.renewal_date));
+            if (upcoming.length === 0) return null;
+            return (
+              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'12px 18px',marginBottom:12}}>
+                <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+                  <div style={{width:3,height:24,background:'#dc2626',borderRadius:1}}></div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,color:'#111'}}>
+                      <span style={{fontWeight:500}}>{upcoming.length} renewal{upcoming.length!==1?'s':''}</span> coming up in the next 45 days
+                    </div>
+                    <div style={{fontSize:11,color:'#6b7280',marginTop:1}}>Open the client, then use Share with Customer to send the balance sheet.</div>
+                  </div>
+                </div>
+                <div style={{display:'flex',flexDirection:'column'}}>
+                  {upcoming.slice(0, 5).map(u => {
+                    const r = new Date(u.renewal_date + 'T00:00:00Z');
+                    const days = Math.round((r - today) / 86400000);
+                    const short = r.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
+                    return (
+                      <button key={u.clientName} onClick={()=>setDashboardClient(u.clientName)}
+                        style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:12,padding:'8px 10px',background:'transparent',border:'none',borderTop:'0.5px solid #f0f0f0',cursor:'pointer',fontFamily:'inherit',textAlign:'left',alignItems:'center'}}>
+                        <div style={{fontSize:12,color:'#111',fontWeight:500,textAlign:'left'}}>{u.clientName}</div>
+                        <div style={{fontSize:12,color: days <= 14 ? '#dc2626' : '#92400e',fontWeight:days<=14?500:400}}>{short}</div>
+                        <div style={{fontSize:11,color:'#6b7280',minWidth:60,textAlign:'right'}}>in {days}d</div>
+                      </button>
+                    );
+                  })}
+                  {upcoming.length > 5 && (
+                    <div style={{padding:'8px 10px',fontSize:11,color:'#6b7280',borderTop:'0.5px solid #f0f0f0'}}>… {upcoming.length - 5} more</div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Ask panel — natural-language Q&A across the whole book */}
           {showQaPanel && (
             <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:16,marginBottom:12}}>
@@ -10466,7 +10510,48 @@ ${extraPages}
                   <div style={{fontSize:"2rem",fontWeight:900,letterSpacing:".25em",color:"#6B0E1E",fontFamily:"monospace"}}>{bsSharePin}</div>
                   <div style={{fontSize:".72rem",color:"#888",marginTop:4}}>Customer must enter this to open the form</div>
                 </div>
-                <button onClick={()=>{const s=encodeURIComponent(`Balance Sheet Review - ${data.clientName}`);const b=encodeURIComponent(`Hello,\n\nPlease review and complete your balance sheet using the secure link below.\n\nLink: ${bsShareLink}\n\nYour PIN: ${bsSharePin}\n\nYou can save your progress and come back anytime. The link expires in 14 days.\n\nThank you,\nFirst Bank of Montana`);window.location.href='mailto:?subject='+s+'&body='+b;}} style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"10px 0",fontWeight:700,fontSize:".9rem",cursor:"pointer",marginBottom:8}}>📧 Open in Email</button>
+
+                {(() => {
+                  const doc = 'balance sheet';
+                  const clientLine = data.clientName || '[client]';
+                  const senderLine = profile?.full_name || 'First Bank of Montana';
+                  const templates = {
+                    renewal:    `Hi ${clientLine},\n\nIt's that time again — your annual ${doc} review is coming up. I've pre-filled everything with last year's numbers. Please review each section, update anything that's changed, and hit submit when you're done.\n\nLink: ${bsShareLink}\nPIN: ${bsSharePin}\n\nThe link expires in 14 days. Let me know if you have any questions.\n\nThanks,\n${senderLine}`,
+                    interim:    `Hi ${clientLine},\n\nFollowing up on our recent conversation — I've prepped a form for you to update your ${doc}. Please review the sections that have changed and submit when ready.\n\nLink: ${bsShareLink}\nPIN: ${bsSharePin}\n\nThanks,\n${senderLine}`,
+                    new_loan:   `Hi ${clientLine},\n\nTo move forward on your loan request, I'll need updated financials. Please open the link below, review each section of the ${doc}, and submit the current numbers when done.\n\nLink: ${bsShareLink}\nPIN: ${bsSharePin}\n\nThanks,\n${senderLine}`,
+                    review:     `Hi ${clientLine},\n\nTime for our regular financial review. Please update the sections in the ${doc} link below with your current numbers and submit when done.\n\nLink: ${bsShareLink}\nPIN: ${bsSharePin}\n\nThanks,\n${senderLine}`,
+                    correction: `Hi ${clientLine},\n\nI need to correct some information on your ${doc}. Please open the link below, confirm or update the numbers, then submit.\n\nLink: ${bsShareLink}\nPIN: ${bsSharePin}\n\nThanks,\n${senderLine}`,
+                  };
+                  const msg = templates[shareReason] || templates.renewal;
+                  return (
+                    <div style={{background:"#fafafa",border:"1px solid #e5e7eb",borderRadius:8,padding:14,marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <label style={{fontSize:11,fontWeight:600,color:"#374151",textTransform:"uppercase",letterSpacing:.4}}>Reason for sharing</label>
+                      </div>
+                      <select value={shareReason} onChange={e=>setShareReason(e.target.value)}
+                        style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"6px 10px",fontSize:13,fontFamily:"inherit",marginBottom:10,boxSizing:"border-box"}}>
+                        <option value="renewal">Annual renewal</option>
+                        <option value="interim">Interim / mid-year update</option>
+                        <option value="new_loan">New loan request</option>
+                        <option value="review">Financial review</option>
+                        <option value="correction">Correcting information</option>
+                      </select>
+                      <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4,textTransform:"uppercase",letterSpacing:.4}}>Message — copy into your email</label>
+                      <textarea readOnly value={msg} rows={9}
+                        style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"8px 10px",fontSize:12,fontFamily:"inherit",boxSizing:"border-box",resize:"vertical",lineHeight:1.5,background:"white"}}/>
+                      <div style={{display:"flex",gap:8,marginTop:6}}>
+                        <button onClick={()=>navigator.clipboard.writeText(msg).then(()=>alert('Copied — paste into your email'))}
+                          style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          📋 Copy message
+                        </button>
+                        <button onClick={()=>{const s=encodeURIComponent(`Balance Sheet Review - ${data.clientName}`);const b=encodeURIComponent(msg);window.location.href='mailto:?subject='+s+'&body='+b;}}
+                          style={{background:"white",color:"#374151",border:"1px solid #d1d5db",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          Open in email
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {bsShareStatus.startsWith('error')&&<div style={{color:"#c44",fontSize:".85rem",padding:"12px 0"}}>Error: {bsShareStatus.slice(6)}<br/><span style={{fontSize:".75rem",color:"#888"}}>Make sure you ran customer-shares-schema.sql in Supabase.</span></div>}
@@ -10493,7 +10578,46 @@ ${extraPages}
                   <div style={{fontSize:".72rem",fontWeight:700,color:"#6B0E1E",marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Customer PIN</div>
                   <div style={{fontSize:"2rem",fontWeight:900,letterSpacing:".25em",color:"#6B0E1E",fontFamily:"monospace"}}>{budgetSharePin}</div>
                 </div>
-                <button onClick={()=>{const s=encodeURIComponent(`Budget Form - ${data.clientName}`);const b=encodeURIComponent(`Hello,\n\nPlease complete your agricultural budget using the secure link below.\n\nLink: ${budgetShareLink}\n\nYour PIN: ${budgetSharePin}\n\nYou can save your progress and come back anytime. The link expires in 14 days.\n\nThank you,\nFirst Bank of Montana`);window.location.href='mailto:?subject='+s+'&body='+b;}} style={{width:"100%",background:"#6B0E1E",color:"white",border:"none",borderRadius:7,padding:"10px 0",fontWeight:700,fontSize:".9rem",cursor:"pointer",marginBottom:8}}>📧 Open in Email</button>
+
+                {(() => {
+                  const doc = 'budget';
+                  const clientLine = data.clientName || '[client]';
+                  const senderLine = profile?.full_name || 'First Bank of Montana';
+                  const templates = {
+                    renewal:    `Hi ${clientLine},\n\nIt's that time again — your annual ${doc} review is coming up. Please fill in this year's projected income and expenses using the link below and submit when you're done.\n\nLink: ${budgetShareLink}\nPIN: ${budgetSharePin}\n\nThe link expires in 14 days. Let me know if you have any questions.\n\nThanks,\n${senderLine}`,
+                    interim:    `Hi ${clientLine},\n\nFollowing up on our recent conversation — I've prepped a form for you to update your ${doc}. Please review and submit when ready.\n\nLink: ${budgetShareLink}\nPIN: ${budgetSharePin}\n\nThanks,\n${senderLine}`,
+                    new_loan:   `Hi ${clientLine},\n\nTo move forward on your loan request, I'll need an updated ${doc}. Please open the link below, fill in this year's projected income and expenses, and submit when done.\n\nLink: ${budgetShareLink}\nPIN: ${budgetSharePin}\n\nThanks,\n${senderLine}`,
+                    review:     `Hi ${clientLine},\n\nTime for our regular financial review. Please update your ${doc} in the link below with your current numbers and submit when done.\n\nLink: ${budgetShareLink}\nPIN: ${budgetSharePin}\n\nThanks,\n${senderLine}`,
+                    correction: `Hi ${clientLine},\n\nI need to correct some information on your ${doc}. Please open the link below, confirm or update the numbers, then submit.\n\nLink: ${budgetShareLink}\nPIN: ${budgetSharePin}\n\nThanks,\n${senderLine}`,
+                  };
+                  const msg = templates[shareReason] || templates.renewal;
+                  return (
+                    <div style={{background:"#fafafa",border:"1px solid #e5e7eb",borderRadius:8,padding:14,marginBottom:14}}>
+                      <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.4}}>Reason for sharing</label>
+                      <select value={shareReason} onChange={e=>setShareReason(e.target.value)}
+                        style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"6px 10px",fontSize:13,fontFamily:"inherit",marginBottom:10,boxSizing:"border-box"}}>
+                        <option value="renewal">Annual renewal</option>
+                        <option value="interim">Interim / mid-year update</option>
+                        <option value="new_loan">New loan request</option>
+                        <option value="review">Financial review</option>
+                        <option value="correction">Correcting information</option>
+                      </select>
+                      <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4,textTransform:"uppercase",letterSpacing:.4}}>Message — copy into your email</label>
+                      <textarea readOnly value={msg} rows={9}
+                        style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"8px 10px",fontSize:12,fontFamily:"inherit",boxSizing:"border-box",resize:"vertical",lineHeight:1.5,background:"white"}}/>
+                      <div style={{display:"flex",gap:8,marginTop:6}}>
+                        <button onClick={()=>navigator.clipboard.writeText(msg).then(()=>alert('Copied — paste into your email'))}
+                          style={{background:"#6B0E1E",color:"white",border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          📋 Copy message
+                        </button>
+                        <button onClick={()=>{const s=encodeURIComponent(`Budget Form - ${data.clientName}`);const b=encodeURIComponent(msg);window.location.href='mailto:?subject='+s+'&body='+b;}}
+                          style={{background:"white",color:"#374151",border:"1px solid #d1d5db",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          Open in email
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {budgetShareStatus.startsWith('error')&&<div style={{color:"#c44",fontSize:".85rem",padding:"12px 0"}}>Error: {budgetShareStatus.slice(6)}</div>}
