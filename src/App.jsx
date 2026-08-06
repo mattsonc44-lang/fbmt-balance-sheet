@@ -5830,6 +5830,13 @@ export default function BalanceSheet() {
   const [homeSearch, setHomeSearch] = useState('');            // filter box on home
   const [clientNotesMap, setClientNotesMap] = useState({});     // { [clientName]: { renewal_date, renewal_reminder_sent_at } }
   const [homeUserMenu, setHomeUserMenu] = useState(false);      // dropdown next to the user avatar
+  // ── Ask-your-book Q&A ────────────────────────────────────────────────────
+  const [showQaPanel,  setShowQaPanel]  = useState(false);
+  const [qaQuestion,   setQaQuestion]   = useState('');
+  const [qaLoading,    setQaLoading]    = useState(false);
+  const [qaResults,    setQaResults]    = useState(null); // {matches:[{client,reason}], note} | null
+  const [qaError,      setQaError]      = useState('');
+  const qaBookCache = React.useRef(null);                 // cached book summary so repeat asks are instant
   const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
@@ -5890,6 +5897,137 @@ export default function BalanceSheet() {
       (Array.isArray(rows) ? rows : []).forEach(row => { map[row.client_name] = row; });
       setClientNotesMap(map);
     } catch {}
+  };
+
+  // Build a compact one-row-per-client summary for Q&A. Loads each client's latest
+  // sheet once, computes totals + ratios + budget DSCR. Cached in qaBookCache.ref
+  // so re-asks are instant. Force=true to bust the cache after a save.
+  const buildBookSummary = async (force = false) => {
+    if (!force && qaBookCache.current) return qaBookCache.current;
+    const uniqueClients = Array.from(new Set(savedSheets.map(s => s.clientName).filter(Boolean)));
+    const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
+    const round0 = v => Math.round(v);
+    const out = [];
+    for (const client of uniqueClients) {
+      const clientSheets = savedSheets
+        .filter(s => s.clientName === client)
+        .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
+      const latestKey = clientSheets[0]?.key;
+      if (!latestKey) continue;
+      try {
+        const item = await storage.get(latestKey);
+        if (!item) continue;
+        const p = JSON.parse(item.value);
+        const t = sheetTotals(p);
+        const ta  = t['TOTAL ASSETS'] || 0;
+        const tl  = t['TOTAL LIABILITIES'] || 0;
+        const tca = t['Total Current Assets'] || 0;
+        const tcl = t['Total Current Liab'] || 0;
+        // Budget-side numbers for DSCR
+        const cropInc = (p.budgetCrops||[]).reduce((s,r) => s + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
+        const livestockInc = (p.budgetLivestock||[]).reduce((s,r) => s + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
+        const miscInc = (p.budgetMisc||[]).reduce((s,r) => s + nm(r.amount), 0);
+        const opEx = (p.budgetExpenses||[]).filter(r => !r.prepaid).reduce((s,r) => s + nm(r.amount), 0);
+        const debtSvc = (p.intermediatDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
+                      + (p.reCurrent||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
+                      + (p.budgetProposedDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0);
+        const budgetIncome = cropInc + livestockInc + miscInc;
+        const dscr = debtSvc > 0 ? (budgetIncome - opEx) / debtSvc : null;
+        // Prior-year deltas for YoY questions
+        const priorKey = clientSheets[1]?.key;
+        let priorNW = null, priorDate = null;
+        if (priorKey) {
+          try {
+            const pi = await storage.get(priorKey);
+            if (pi) {
+              const pp = JSON.parse(pi.value);
+              priorNW = sheetTotals(pp)['NET WORTH'] || 0;
+              priorDate = pp.asOfDate;
+            }
+          } catch {}
+        }
+        // Crops grown, aggregated from farmProducts + budgetCrops
+        const crops = Array.from(new Set([
+          ...(p.farmProducts||[]).map(r => (r.kind||'').trim()).filter(Boolean),
+          ...(p.budgetCrops||[]).map(r => (r.crop||'').trim()).filter(Boolean),
+        ]));
+        const notes = clientNotesMap[client] || {};
+        out.push({
+          client,
+          latest_as_of:    p.asOfDate,
+          sheets_on_file:  clientSheets.length,
+          net_worth:       round0(t['NET WORTH'] || 0),
+          total_assets:    round0(ta),
+          total_liabilities: round0(tl),
+          working_capital: round0(tca - tcl),
+          current_ratio:   tcl > 0 ? Number((tca/tcl).toFixed(2)) : null,
+          debt_asset_pct:  ta > 0 ? Number(((tl/ta)*100).toFixed(1)) : null,
+          equity_pct:      ta > 0 ? Number((((ta-tl)/ta)*100).toFixed(1)) : null,
+          dscr:            dscr !== null ? Number(dscr.toFixed(2)) : null,
+          projected_income: round0(budgetIncome),
+          operating_expenses: round0(opEx),
+          annual_debt_service: round0(debtSvc),
+          prior_year_net_worth: priorNW,
+          prior_year_as_of: priorDate,
+          nw_yoy_change_pct: (priorNW && priorNW !== 0)
+            ? Number((((t['NET WORTH']||0) - priorNW) / Math.abs(priorNW) * 100).toFixed(1))
+            : null,
+          crops_grown: crops,
+          renewal_date: notes.renewal_date || null,
+        });
+      } catch {}
+    }
+    qaBookCache.current = out;
+    return out;
+  };
+
+  // Send a natural-language question + the book summary to Claude and populate qaResults.
+  const askBook = async (q) => {
+    if (!q || !q.trim()) return;
+    setQaLoading(true); setQaError(''); setQaResults(null);
+    try {
+      const book = await buildBookSummary();
+      if (!book.length) {
+        setQaError('No clients on file yet — save some balance sheets first.');
+        setQaLoading(false); return;
+      }
+      const resp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          system: `You are a query engine for an agricultural loan book. Given a JSON summary of clients and a question in plain English, return ONLY strict JSON matching:
+{"matches": [{"client": "Client Name", "reason": "one-line reason with specific numbers from the data"}], "note": "optional short caveat"}
+
+Rules:
+- Only include clients that match the question.
+- Reasons must cite the specific number that made them match (e.g. "DSCR 0.92", "Net worth dropped 34% vs 2024").
+- If the question can't be answered from the data provided (e.g. it asks about a field not in the summary), return {"matches": [], "note": "explain what's missing"}.
+- If no clients match, return {"matches": []}.
+- Do not include any prose outside the JSON.`,
+          messages: [{
+            role: 'user',
+            content: `Book (${book.length} clients):
+${JSON.stringify(book)}
+
+Question: ${q}`,
+          }],
+        }),
+      });
+      if (!resp.ok) throw new Error('AI service returned ' + resp.status);
+      const json = await resp.json();
+      const raw = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || '';
+      // Claude sometimes wraps in ```json — strip it.
+      const clean = raw.replace(/```json|```/g, '').trim();
+      let parsed;
+      try { parsed = JSON.parse(clean); }
+      catch { throw new Error('Response wasn\'t valid JSON — try rephrasing your question.'); }
+      setQaResults(parsed);
+    } catch (e) {
+      setQaError(e.message);
+    }
+    setQaLoading(false);
   };
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
@@ -8908,6 +9046,11 @@ ${extraPages}
                   style={{border:'none',outline:'none',fontSize:12,background:'transparent',width:'100%',fontFamily:'inherit',color:'#111'}}/>
                 {homeSearch && <button onClick={()=>setHomeSearch('')} style={{background:'transparent',border:'none',color:'#9ca3af',cursor:'pointer',padding:0,fontSize:14,lineHeight:1}}>×</button>}
               </div>
+              <button onClick={()=>setShowQaPanel(v=>!v)}
+                title="Ask a natural-language question about your book"
+                style={{background: showQaPanel ? '#6B0E1E' : 'white',border:'0.5px solid ' + (showQaPanel ? '#6B0E1E' : '#e5e7eb'),color: showQaPanel ? 'white' : '#374151',fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+                Ask
+              </button>
               <button onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
                 style={{background:'white',border:'0.5px solid #e5e7eb',color:'#374151',fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
                 + New folder
@@ -9326,6 +9469,86 @@ ${extraPages}
               onReject={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(showCADiff.id); }}
               onClose={()=>setShowCADiff(null)}
             />
+          )}
+
+          {/* Ask panel — natural-language Q&A across the whole book */}
+          {showQaPanel && (
+            <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:16,marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:500,color:'#111'}}>Ask about your book</div>
+                <button onClick={()=>{setShowQaPanel(false);setQaResults(null);setQaError('');}}
+                  style={{background:'transparent',border:'none',color:'#6b7280',cursor:'pointer',fontSize:16,padding:'2px 6px'}}>×</button>
+              </div>
+              <form onSubmit={e=>{e.preventDefault();askBook(qaQuestion);}} style={{display:'flex',gap:6,marginBottom:10}}>
+                <input type="text" value={qaQuestion} onChange={e=>setQaQuestion(e.target.value)}
+                  placeholder="e.g., which clients have DSCR below 1.25"
+                  autoFocus
+                  style={{flex:1,border:'0.5px solid #e5e7eb',borderRadius:6,padding:'8px 12px',fontSize:13,fontFamily:'inherit',outline:'none'}}/>
+                <button type="submit" disabled={qaLoading || !qaQuestion.trim()}
+                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'8px 18px',fontSize:12,fontWeight:500,cursor:(qaLoading||!qaQuestion.trim())?'wait':'pointer',fontFamily:'inherit',opacity:(qaLoading||!qaQuestion.trim())?.6:1}}>
+                  {qaLoading ? 'Thinking…' : 'Ask'}
+                </button>
+              </form>
+
+              {!qaResults && !qaLoading && !qaError && (
+                <div style={{fontSize:11,color:'#6b7280'}}>
+                  <div style={{marginBottom:6}}>Try one of these:</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                    {[
+                      'which clients have DSCR below 1.25',
+                      'show me anyone whose net worth dropped more than 15% this year',
+                      'who hasn\'t renewed in over 18 months',
+                      'who grows wheat',
+                      'who has debt over $500k with less than 40% equity',
+                    ].map(q => (
+                      <button key={q} onClick={()=>{setQaQuestion(q);askBook(q);}}
+                        style={{background:'#f6f5f2',border:'0.5px solid #e5e7eb',borderRadius:999,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'inherit',color:'#374151'}}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {qaError && (
+                <div style={{fontSize:12,color:'#dc2626',background:'#fef2f2',border:'0.5px solid #fca5a5',borderRadius:6,padding:'8px 12px'}}>
+                  {qaError}
+                </div>
+              )}
+
+              {qaResults && (
+                <div style={{marginTop:4}}>
+                  {qaResults.matches && qaResults.matches.length > 0 ? (
+                    <>
+                      <div style={{fontSize:11,color:'#6b7280',marginBottom:6}}>
+                        {qaResults.matches.length} match{qaResults.matches.length===1?'':'es'}
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                        {qaResults.matches.map((m,i) => (
+                          <button key={i} onClick={()=>setDashboardClient(m.client)}
+                            style={{display:'grid',gridTemplateColumns:'1fr auto',gap:12,padding:'10px 12px',background:'#fafafa',border:'0.5px solid #e5e7eb',borderRadius:6,cursor:'pointer',fontFamily:'inherit',textAlign:'left',alignItems:'center'}}>
+                            <div style={{minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:500,color:'#111'}}>{m.client}</div>
+                              <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>{m.reason}</div>
+                            </div>
+                            <span style={{fontSize:11,color:'#6B0E1E'}}>Open →</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{fontSize:12,color:'#6b7280',padding:'6px 0'}}>
+                      No clients match that.
+                    </div>
+                  )}
+                  {qaResults.note && (
+                    <div style={{fontSize:11,color:'#92400e',background:'#fef3c7',border:'0.5px solid #fcd34d',borderRadius:6,padding:'6px 10px',marginTop:8}}>
+                      Note: {qaResults.note}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Section title row above the client list, quiet meta with a refresh icon */}
