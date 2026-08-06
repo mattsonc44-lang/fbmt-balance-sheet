@@ -4074,7 +4074,8 @@ function WhatIfView({ data }) {
 
 // ─── ClientDashboard ─────────────────────────────────────────────────────────
 // One-page overview for a single client: KPI cards, net-worth trend, pending items
-// filtered to this client, all saved as-of-dates as tiles, per-client notes.
+// filtered to this client, all saved as-of-dates as tiles, per-client notes,
+// FSA base acres, renewal reminders, and an AI-drafted credit memo.
 function ClientDashboard({
   clientName, savedSheets, pendingReviews, pendingCAEdits,
   session, sheetTotals,
@@ -4097,8 +4098,10 @@ function ClientDashboard({
   const [renewalDate, setRenewalDate] = React.useState('');
   const [customerEmail, setCustomerEmail] = React.useState('');
   const [renewalSentAt, setRenewalSentAt] = React.useState(null);
+  const [baseAcres, setBaseAcres] = React.useState([]);           // [{crop, acres}]
   const [notesLoaded, setNotesLoaded] = React.useState(false);
   const [notesStatus, setNotesStatus] = React.useState(''); // 'saving' | 'saved' | ''
+  const [showActions, setShowActions] = React.useState(false);
   const saveTimer = React.useRef(null);
 
   // Filter to just this client's sheets, in date order.
@@ -4212,7 +4215,7 @@ function ClientDashboard({
     return () => { cancelled = true; };
   }, [clientName, thisClientSheets.map(s=>s.key).join('|'), savedSheets.length]); // eslint-disable-line
 
-  // Load notes + renewal fields.
+  // Load notes + renewal fields + base acres.
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -4222,7 +4225,7 @@ function ClientDashboard({
         if (!uid) return;
         const url = SUPABASE_URL + '/rest/v1/client_notes?user_id=eq.' + encodeURIComponent(uid)
           + '&client_name=eq.' + encodeURIComponent(clientName)
-          + '&select=notes,renewal_date,customer_email,renewal_reminder_sent_at';
+          + '&select=notes,renewal_date,customer_email,renewal_reminder_sent_at,base_acres';
         const r = await fetch(url, { headers: supaHeaders() });
         const rows = await r.json();
         if (!cancelled) {
@@ -4231,6 +4234,7 @@ function ClientDashboard({
           setRenewalDate(row.renewal_date || '');
           setCustomerEmail(row.customer_email || '');
           setRenewalSentAt(row.renewal_reminder_sent_at || null);
+          setBaseAcres(Array.isArray(row.base_acres) ? row.base_acres : []);
         }
       } catch {}
       if (!cancelled) setNotesLoaded(true);
@@ -4253,6 +4257,7 @@ function ClientDashboard({
           notes,
           renewal_date: renewalDate || null,
           customer_email: customerEmail || null,
+          base_acres: baseAcres,
           updated_at: new Date().toISOString(),
           ...patch,
         }),
@@ -4274,6 +4279,21 @@ function ClientDashboard({
     scheduleSave({ renewal_date: v || null, renewal_reminder_sent_at: null });
   };
   const handleCustomerEmailChange = (v) => { setCustomerEmail(v); scheduleSave({ customer_email: v || null }); };
+
+  // Base acres helpers — always operate on a fresh array so React re-renders.
+  const addBaseAcresRow = () => {
+    const next = [...baseAcres, { crop: '', acres: '' }];
+    setBaseAcres(next); scheduleSave({ base_acres: next });
+  };
+  const updateBaseAcresRow = (i, patch) => {
+    const next = baseAcres.map((r, j) => j === i ? { ...r, ...patch } : r);
+    setBaseAcres(next); scheduleSave({ base_acres: next });
+  };
+  const removeBaseAcresRow = (i) => {
+    const next = baseAcres.filter((_, j) => j !== i);
+    setBaseAcres(next); scheduleSave({ base_acres: next });
+  };
+  const baseAcresTotal = baseAcres.reduce((s, r) => s + (Number(String(r.acres||'').replace(/[^0-9.]/g,''))||0), 0);
 
   // ── Credit memo ──────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -4522,73 +4542,168 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
   const nwVals = sheetSummaries.map(s => s.totals['NET WORTH'] || 0);
   const chartMax = Math.max(...nwVals.map(Math.abs), 1) * 1.15;
 
+  // Renewal date formatted for the header ("Oct 15, 2026")
+  const renewalHeaderDate = renewalDate ? new Date(renewalDate + 'T00:00:00Z')
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+  const renewalHeaderSub = renewalDate
+    ? (() => {
+        const today = new Date();
+        const r = new Date(renewalDate + 'T00:00:00Z');
+        const reminderDay = new Date(r); reminderDay.setUTCDate(reminderDay.getUTCDate() - 45);
+        const daysToReminder = Math.round((reminderDay - today) / 86400000);
+        if (renewalSentAt) return `Reminder sent · Renewal ${Math.round((r - today)/86400000)}d away`;
+        if (daysToReminder > 0) return `Reminder in ${daysToReminder}d`;
+        return 'Inside 45-day window';
+      })()
+    : null;
+
+  // Colors used inline in the redesign — kept as constants so they're easy to swap.
+  const PAGE_BG     = '#f6f5f2';
+  const CARD_BG     = 'white';
+  const CARD_BORDER = '0.5px solid #e5e7eb';
+  const TEXT_PRI    = '#111';
+  const TEXT_SEC    = '#6b7280';
+  const TEXT_MUTED  = '#9ca3af';
+  const ACCENT      = '#6B0E1E';
+  const POS         = '#15803d';
+  const NEG         = '#dc2626';
+
+  // Section header (used at the top of each card).
+  const cardHeader = (title, meta, right) => (
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,gap:12,flexWrap:'wrap'}}>
+      <div style={{fontSize:13,fontWeight:500,color:TEXT_PRI}}>
+        {title}
+        {meta && <span style={{color:TEXT_SEC,fontWeight:400,marginLeft:8}}>{meta}</span>}
+      </div>
+      {right}
+    </div>
+  );
+
   return (
-    <div className="app">
-      <div style={{background:'#6B0E1E',color:'white',padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <div>
-          <button onClick={onBack}
-            style={{background:'transparent',border:'none',color:'rgba(255,255,255,.75)',fontSize:12,cursor:'pointer',fontFamily:'inherit',padding:0,marginBottom:2,display:'flex',alignItems:'center',gap:4}}>
-            ← All clients
-          </button>
-          <div style={{fontSize:18,fontWeight:700}}>{clientName}</div>
-          <div style={{fontSize:11,opacity:.75,marginTop:2}}>
-            {thisClientSheets.length} balance sheet{thisClientSheets.length!==1?'s':''} on file
-            {latest && ' · Last saved ' + latest.asOfDate}
+    <div style={{background:PAGE_BG,minHeight:'100vh',fontFamily:"-apple-system,'Segoe UI',sans-serif"}}>
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div style={{maxWidth:1000,margin:'0 auto',padding:'24px 24px 8px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
+          <div style={{minWidth:0}}>
+            <button onClick={onBack}
+              style={{background:'transparent',border:'none',color:TEXT_SEC,fontSize:12,cursor:'pointer',fontFamily:'inherit',padding:0,marginBottom:4,display:'inline-flex',alignItems:'center',gap:4}}>
+              <span style={{fontSize:10}}>←</span> All clients
+            </button>
+            <div style={{fontSize:24,fontWeight:500,color:TEXT_PRI,letterSpacing:'-0.3px',marginBottom:2}}>{clientName}</div>
+            <div style={{fontSize:12,color:TEXT_SEC}}>
+              {thisClientSheets.length} balance sheet{thisClientSheets.length!==1?'s':''}
+              {latest && <> · Last saved <span style={{color:TEXT_PRI}}>{latest.asOfDate}</span></>}
+            </div>
           </div>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          {totalPending > 0 && (
-            <span style={{background:'#fbbf24',color:'#1a1a1a',borderRadius:999,padding:'3px 10px',fontSize:12,fontWeight:700}}>
-              🔔 {totalPending} pending
-            </span>
-          )}
+          <div style={{display:'flex',alignItems:'center',gap:8,position:'relative'}}>
+            {totalPending > 0 && (
+              <span style={{background:'#fef3c7',color:'#92400e',fontSize:11,padding:'3px 10px',borderRadius:999,fontWeight:500}}>
+                {totalPending} pending
+              </span>
+            )}
+            <button onClick={()=>setShowActions(v=>!v)}
+              style={{background:CARD_BG,border:CARD_BORDER,color:'#374151',fontSize:12,padding:'7px 14px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+              Actions ▾
+            </button>
+            {showActions && (
+              <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,background:CARD_BG,border:CARD_BORDER,borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.08)',minWidth:200,zIndex:20,padding:6}}>
+                <button onClick={()=>{setShowActions(false);onNewSheet();}}
+                  style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:TEXT_PRI}}>
+                  New balance sheet
+                </button>
+                <button onClick={()=>{setShowActions(false);onOpenImport();}}
+                  style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:TEXT_PRI}}>
+                  Import from Excel
+                </button>
+                {latest && (
+                  <button onClick={()=>{setShowActions(false);onShareCA(latest.key);}}
+                    style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:TEXT_PRI}}>
+                    Share latest with CA
+                  </button>
+                )}
+                {sheetSummaries.length >= 2 && (
+                  <button onClick={()=>{setShowActions(false);onOpenComparison();}}
+                    style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:TEXT_PRI}}>
+                    Compare all years
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <div style={{maxWidth:960,margin:'20px auto',padding:'0 20px'}}>
+      {/* ── Body ────────────────────────────────────────────────────────────── */}
+      <div style={{maxWidth:1000,margin:'0 auto',padding:'12px 24px 40px'}}>
 
         {loadingSheets ? (
-          <div style={{textAlign:'center',padding:60,color:'#888'}}>Loading dashboard…</div>
+          <div style={{textAlign:'center',padding:60,color:TEXT_SEC}}>Loading dashboard…</div>
         ) : !latest ? (
-          <div style={{textAlign:'center',padding:60,color:'#888',background:'white',borderRadius:12,border:'1px solid #e5e7eb'}}>
-            <div style={{fontSize:40,marginBottom:12}}>📋</div>
-            <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>No saved sheets yet for {clientName}</div>
+          <div style={{textAlign:'center',padding:'60px 24px',color:TEXT_SEC,background:CARD_BG,borderRadius:12,border:CARD_BORDER}}>
+            <div style={{fontSize:16,fontWeight:500,marginBottom:6,color:TEXT_PRI}}>No saved sheets yet for {clientName}</div>
+            <div style={{fontSize:13,marginBottom:16}}>Start a new balance sheet to see this client's numbers here.</div>
             <button onClick={onNewSheet}
-              style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginTop:8}}>
-              + New Balance Sheet
+              style={{background:ACCENT,color:'white',border:'none',borderRadius:6,padding:'8px 20px',fontWeight:500,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+              New balance sheet
             </button>
           </div>
         ) : (
         <>
 
         {/* KPI cards */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
-          {kpi('Net worth',        'NET WORTH',         'up')}
-          {kpi('Total assets',     'TOTAL ASSETS',      'up')}
-          {kpi('Total liabilities','TOTAL LIABILITIES', 'down')}
-          {kpi('Working capital',  'WORKING CAPITAL',   'up')}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:12}}>
+          {[
+            {label:'Net worth',        key:'NET WORTH',         good:'up',   fmt:v=>fmtBig(v)},
+            {label:'Total assets',     key:'TOTAL ASSETS',      good:'up',   fmt:v=>fmtBig(v)},
+            {label:'Total liabilities',key:'TOTAL LIABILITIES', good:'down', fmt:v=>fmtBig(v)},
+            {label:'Working capital',  key:'WORKING CAPITAL',   good:'up',   fmt:v=>fmtBig(v)},
+          ].map(({label,key,good,fmt}) => {
+            const cur = latest.totals[key] || 0;
+            const prev = prior ? (prior.totals[key] || 0) : 0;
+            const {diff, pct, sign} = changeStr(cur, prev);
+            const trending = diff === 0 ? 'flat' : (diff > 0 ? 'up' : 'down');
+            const isGood = trending === 'flat' ? true : (good === 'up' ? trending==='up' : trending==='down');
+            const arrow  = trending==='up' ? '▲' : trending==='down' ? '▼' : '—';
+            const deltaColor = trending==='flat' ? TEXT_SEC : (isGood ? POS : NEG);
+            const showAlert = key === 'WORKING CAPITAL' && cur < 0;
+            return (
+              <div key={key} style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'14px 16px',position:'relative'}}>
+                {showAlert && <span style={{position:'absolute',top:10,right:10,width:6,height:6,background:NEG,borderRadius:'50%'}}></span>}
+                <div style={{fontSize:11,color:TEXT_SEC,marginBottom:6}}>{label}</div>
+                <div style={{fontSize:22,fontWeight:500,color:showAlert?NEG:TEXT_PRI,letterSpacing:'-0.3px'}}>{fmt(cur)}</div>
+                <div style={{fontSize:12,color:deltaColor,marginTop:4}}>
+                  {prior
+                    ? <>{arrow} {sign}{fmt(Math.abs(diff))}{pct !== null && <span style={{color:TEXT_SEC}}> · {sign}{pct}%</span>}</>
+                    : <span style={{color:TEXT_MUTED}}>Only one sheet on file</span>}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Trend chart + pending items */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
-          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:10,textTransform:'uppercase',letterSpacing:.3}}>Net worth trend</div>
+        {/* Trend chart + Awaiting your review */}
+        <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:12,marginBottom:12}}>
+          <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px 18px 14px'}}>
+            {cardHeader('Net worth trend', `${sheetSummaries.length} year${sheetSummaries.length!==1?'s':''}`)}
             {sheetSummaries.length < 2 ? (
-              <div style={{padding:'20px 0',fontSize:12,color:'#888',textAlign:'center'}}>Save a second sheet to see a trend.</div>
+              <div style={{padding:'20px 0',fontSize:12,color:TEXT_SEC,textAlign:'center'}}>Save a second sheet to see a trend.</div>
             ) : (
-              <svg viewBox={`0 0 ${sheetSummaries.length * 55 + 20} 130`} style={{width:'100%',height:'auto'}}>
-                <line x1="0" y1="100" x2={sheetSummaries.length * 55 + 20} y2="100" stroke="#e5e7eb" strokeWidth="1"/>
+              <svg viewBox={`0 0 ${sheetSummaries.length * 70 + 20} 130`} style={{width:'100%',height:'auto'}}>
+                <line x1="0" y1="100" x2={sheetSummaries.length * 70 + 20} y2="100" stroke="#e5e7eb" strokeWidth="0.5"/>
                 {sheetSummaries.map((s, i) => {
                   const v = s.totals['NET WORTH'] || 0;
                   const h = Math.abs(v)/chartMax*85;
-                  const x = 10 + i * 55;
+                  const x = 10 + i * 70;
                   const y = v >= 0 ? 100 - h : 100;
-                  const fill = v >= 0 ? '#3B6D11' : '#A32D2D';
+                  const isLast = i === sheetSummaries.length - 1;
+                  const fill = isLast ? ACCENT : '#111';
+                  const opacity = isLast ? 1 : 0.4;
                   return (
                     <g key={s.key}>
-                      <rect x={x} y={y} width="40" height={Math.max(h,2)} fill={fill} rx="3" opacity={i===sheetSummaries.length-1?1:.7}/>
-                      <text x={x+20} y={y-4} textAnchor="middle" fontSize="9" fill={fill} fontWeight="700">{fmtBig(v)}</text>
-                      <text x={x+20} y="118" textAnchor="middle" fontSize="9" fill="#555">{s.asOfDate.slice(0,4)}</text>
+                      <rect x={x} y={y} width="50" height={Math.max(h,2)} fill={fill} rx="1" opacity={opacity}/>
+                      <text x={x+25} y={y-4} textAnchor="middle" fontSize="10" fill={isLast?ACCENT:TEXT_SEC} fontWeight={isLast?500:400}>{fmtBig(v)}</text>
+                      <text x={x+25} y="118" textAnchor="middle" fontSize="10" fill={isLast?ACCENT:TEXT_SEC} fontWeight={isLast?500:400}>{s.asOfDate.slice(0,4)}</text>
                     </g>
                   );
                 })}
@@ -4596,35 +4711,34 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             )}
           </div>
 
-          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:10,textTransform:'uppercase',letterSpacing:.3,display:'flex',alignItems:'center',gap:6}}>
-              <span>Pending for this client</span>
-              {totalPending > 0 && <span style={{background:'#fbbf24',color:'#78350f',fontSize:10,padding:'1px 6px',borderRadius:999,fontWeight:700}}>{totalPending}</span>}
-            </div>
+          <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px'}}>
+            {cardHeader('Awaiting your review', null,
+              totalPending > 0 && <span style={{background:'#f3f4f6',color:'#374151',fontSize:11,padding:'2px 8px',borderRadius:999}}>{totalPending}</span>
+            )}
             {totalPending === 0 ? (
-              <div style={{fontSize:12,color:'#888',padding:'12px 0'}}>Nothing waiting on you.</div>
+              <div style={{fontSize:12,color:TEXT_SEC,padding:'8px 0'}}>Nothing waiting on you.</div>
             ) : (
-              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <div style={{display:'flex',flexDirection:'column'}}>
                 {clientPendingCAEdits.map(edit => (
-                  <div key={edit.id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:7}}>
-                    <span style={{fontSize:16}}>📝</span>
+                  <div key={edit.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'0.5px solid #f0f0f0'}}>
+                    <div style={{width:3,height:26,background:'#1d4ed8',borderRadius:1,flexShrink:0}}></div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600}}>CA edit — {edit.ca_name}</div>
-                      <div style={{fontSize:11,color:'#555'}}>{edit.submitted_at?new Date(edit.submitted_at).toLocaleDateString():'—'}</div>
+                      <div style={{fontSize:12,color:TEXT_PRI}}>CA edit from {edit.ca_name}</div>
+                      <div style={{fontSize:11,color:TEXT_SEC}}>{edit.submitted_at?new Date(edit.submitted_at).toLocaleDateString():'—'}</div>
                     </div>
                     <button onClick={()=>onOpenCADiff(edit)}
-                      style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid #bfdbfe',background:'white',color:'#1d4ed8',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>Review</button>
+                      style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>Review →</button>
                   </div>
                 ))}
-                {clientPendingReviews.map(review => (
-                  <div key={review.share_id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'#f0fdf4',border:'1px solid #86efac',borderRadius:7}}>
-                    <span style={{fontSize:16}}>{review.type==='balance_sheet'?'📋':'🌾'}</span>
+                {clientPendingReviews.map((review, i) => (
+                  <div key={review.share_id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom: i === clientPendingReviews.length-1 ? 'none' : '0.5px solid #f0f0f0'}}>
+                    <div style={{width:3,height:26,background:POS,borderRadius:1,flexShrink:0}}></div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600}}>Customer submitted {review.type==='balance_sheet'?'balance sheet':'budget'}</div>
-                      <div style={{fontSize:11,color:'#555'}}>{review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}</div>
+                      <div style={{fontSize:12,color:TEXT_PRI}}>Customer submitted {review.type==='balance_sheet'?'balance sheet':'budget'}</div>
+                      <div style={{fontSize:11,color:TEXT_SEC}}>{review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}</div>
                     </div>
                     <button onClick={()=>onOpenReview(review)}
-                      style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid #86efac',background:'white',color:'#15803d',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>Review</button>
+                      style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>Review →</button>
                   </div>
                 ))}
               </div>
@@ -4632,41 +4746,64 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
           </div>
         </div>
 
+        {/* History strip */}
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
+          {cardHeader('History', `${sheetSummaries.length} sheet${sheetSummaries.length!==1?'s':''}`,
+            sheetSummaries.length >= 2 && (
+              <button onClick={onOpenComparison}
+                style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>Compare all →</button>
+            )
+          )}
+          <div style={{display:'flex',gap:6,overflowX:'auto',paddingBottom:4}}>
+            {sheetSummaries.map((s,i) => {
+              const isLatest = i === sheetSummaries.length - 1;
+              const hasIssues = (s.issues||[]).length > 0;
+              const nw = s.totals['NET WORTH'] || 0;
+              const dateFmt = new Date(s.asOfDate + 'T00:00:00Z').toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
+              return (
+                <button key={s.key} onClick={()=>onOpenSheet(s.key)}
+                  title={hasIssues ? s.issues.map(iss=>iss.message).join(' · ') : `Open ${dateFmt}`}
+                  style={{minWidth:110,textAlign:'left',cursor:'pointer',fontFamily:'inherit',position:'relative',
+                    background:CARD_BG,
+                    border: isLatest ? `1px solid ${ACCENT}` : (hasIssues ? '0.5px solid #fbbf24' : CARD_BORDER),
+                    borderRadius:6, padding:'10px 12px'}}>
+                  {hasIssues && !isLatest && <span style={{position:'absolute',top:6,right:8,width:5,height:5,background:'#f59e0b',borderRadius:'50%'}}></span>}
+                  <div style={{fontSize:10,color:isLatest?ACCENT:TEXT_SEC,fontWeight:isLatest?500:400,marginBottom:3}}>
+                    {dateFmt}
+                  </div>
+                  <div style={{fontSize:13,color:isLatest?ACCENT:TEXT_PRI,fontWeight:500}}>{fmtBig(nw)}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Linked entities — only render if we have any forward or reverse links */}
         {(linkedForward.length > 0 || linkedReverse.length > 0) && (
-          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:10,textTransform:'uppercase',letterSpacing:.3,display:'flex',alignItems:'center',gap:8}}>
-              <span>Linked entities</span>
-              {linkedLoading && <span style={{fontSize:11,color:'#888',fontWeight:400,textTransform:'none',letterSpacing:0}}>loading…</span>}
-            </div>
+          <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
+            {cardHeader('Linked entities', linkedLoading ? 'loading…' : null)}
 
             {linkedForward.length > 0 && (
-              <div style={{marginBottom: linkedReverse.length > 0 ? 12 : 0}}>
-                <div style={{fontSize:11,fontWeight:600,color:'#374151',marginBottom:6}}>
-                  {clientName} is invested in
-                  <span style={{color:'#888',fontWeight:400,marginLeft:6}}>
-                    · Total: {fmtBig(linkedForward.reduce((s,e)=>s+(e.nw||0),0))}
-                  </span>
+              <div style={{marginBottom: linkedReverse.length > 0 ? 14 : 0}}>
+                <div style={{fontSize:11,color:TEXT_SEC,marginBottom:6}}>
+                  {clientName} is invested in <span style={{color:TEXT_MUTED}}>· total {fmtBig(linkedForward.reduce((s,e)=>s+(e.nw||0),0))}</span>
                 </div>
-                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{display:'flex',flexDirection:'column'}}>
                   {linkedForward.map((e,i) => (
-                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#f5f3ef',border:'1px solid #e5e0d5',borderRadius:7}}>
-                      <span style={{fontSize:16}}>🏢</span>
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom: i === linkedForward.length-1 ? 'none' : '0.5px solid #f0f0f0'}}>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,fontWeight:600}}>{e.name}</div>
-                        <div style={{fontSize:11,color:'#555'}}>
+                        <div style={{fontSize:12,color:TEXT_PRI}}>{e.name}</div>
+                        <div style={{fontSize:11,color:TEXT_SEC}}>
                           {e.hasSheet
-                            ? <>Net worth {fmtBig(e.nw||0)}{e.date ? ` (as of ${e.date})` : ''}</>
-                            : <span style={{color:'#c2410c'}}>No balance sheet on file for this entity yet</span>}
+                            ? <>Net worth {fmtBig(e.nw||0)}{e.date ? ` · as of ${e.date}` : ''}</>
+                            : <span style={{color:'#c2410c'}}>No balance sheet on file yet</span>}
                         </div>
                       </div>
-                      {e.hasSheet ? (
+                      {e.hasSheet && (
                         <button onClick={()=>onOpenClient && onOpenClient(e.name)}
-                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #d1c9b8',background:'white',color:'#5a4a2b',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
-                          Open dashboard →
+                          style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                          Open →
                         </button>
-                      ) : (
-                        <span style={{fontSize:11,color:'#888'}}>No sheet</span>
                       )}
                     </div>
                   ))}
@@ -4676,18 +4813,17 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
 
             {linkedReverse.length > 0 && (
               <div>
-                <div style={{fontSize:11,fontWeight:600,color:'#374151',marginBottom:6}}>Linked from</div>
-                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{fontSize:11,color:TEXT_SEC,marginBottom:6}}>Linked from</div>
+                <div style={{display:'flex',flexDirection:'column'}}>
                   {linkedReverse.map((e,i) => (
-                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#f0f6ff',border:'1px solid #bfdbfe',borderRadius:7}}>
-                      <span style={{fontSize:16}}>👤</span>
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom: i === linkedReverse.length-1 ? 'none' : '0.5px solid #f0f0f0'}}>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,fontWeight:600}}>{e.clientName}</div>
-                        <div style={{fontSize:11,color:'#555'}}>Owner / linked from · Net worth {fmtBig(e.nw||0)}</div>
+                        <div style={{fontSize:12,color:TEXT_PRI}}>{e.clientName}</div>
+                        <div style={{fontSize:11,color:TEXT_SEC}}>Owner / linked from · Net worth {fmtBig(e.nw||0)}</div>
                       </div>
                       <button onClick={()=>onOpenClient && onOpenClient(e.clientName)}
-                        style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #bfdbfe',background:'white',color:'#1d4ed8',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
-                        Open dashboard →
+                        style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                        Open →
                       </button>
                     </div>
                   ))}
@@ -4697,129 +4833,117 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
           </div>
         )}
 
-        {/* Saved sheets strip */}
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3}}>Saved balance sheets ({sheetSummaries.length})</div>
-            {sheetSummaries.length >= 2 && (
-              <button onClick={onOpenComparison}
-                style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
-                📊 Compare all
-              </button>
-            )}
-          </div>
-          <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:4}}>
-            {sheetSummaries.map((s,i) => {
-              const isLatest = i === sheetSummaries.length - 1;
-              const hasIssues = (s.issues||[]).length > 0;
-              const nw = s.totals['NET WORTH'] || 0;
-              return (
-                <button key={s.key} onClick={()=>onOpenSheet(s.key)}
-                  title={hasIssues ? s.issues.map(iss=>iss.message).join(' · ') : `Open ${s.asOfDate}`}
-                  style={{minWidth:110,textAlign:'center',cursor:'pointer',fontFamily:'inherit',
-                    background: hasIssues ? '#fef3c7' : 'white',
-                    border: isLatest ? '2px solid #6B0E1E' : ('1px solid ' + (hasIssues ? '#fcd34d' : '#e5e7eb')),
-                    borderRadius:8, padding:'10px 12px'}}>
-                  <div style={{fontSize:11,color:isLatest?'#6B0E1E':hasIssues?'#92400e':'#555',fontWeight:isLatest?700:400}}>
-                    {s.asOfDate}{isLatest?' · latest':''}{hasIssues?' ⚠':''}
-                  </div>
-                  <div style={{fontSize:13,fontWeight:700,marginTop:3,color:isLatest?'#6B0E1E':'#1a1a1a'}}>{fmtBig(nw)}</div>
-                </button>
-              );
-            })}
-          </div>
+        {/* Base acres */}
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
+          {cardHeader(
+            'Base acres',
+            baseAcresTotal > 0 ? `${baseAcresTotal.toLocaleString()} acres total` : 'FSA program acreage',
+            <button onClick={addBaseAcresRow} disabled={!notesLoaded}
+              style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+              + Add crop
+            </button>
+          )}
+          {baseAcres.length === 0 ? (
+            <div style={{fontSize:12,color:TEXT_SEC,padding:'8px 0'}}>
+              No base acres recorded. Click <span style={{color:ACCENT}}>+ Add crop</span> to enter them.
+            </div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column'}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 140px 30px',gap:8,fontSize:10,color:TEXT_MUTED,textTransform:'uppercase',letterSpacing:.4,marginBottom:4,padding:'0 4px'}}>
+                <div>Crop</div>
+                <div style={{textAlign:'right'}}>Base acres</div>
+                <div></div>
+              </div>
+              {baseAcres.map((row, i) => (
+                <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 140px 30px',gap:8,padding:'6px 0',borderBottom: i === baseAcres.length-1 ? 'none' : '0.5px solid #f0f0f0',alignItems:'center'}}>
+                  <input type="text" value={row.crop||''} onChange={e=>updateBaseAcresRow(i,{crop:e.target.value})} disabled={!notesLoaded}
+                    placeholder="e.g. Wheat"
+                    style={{border:CARD_BORDER,borderRadius:5,padding:'6px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
+                  <input type="text" value={row.acres||''} onChange={e=>updateBaseAcresRow(i,{acres:e.target.value.replace(/[^0-9.]/g,'')})} disabled={!notesLoaded}
+                    placeholder="0"
+                    style={{border:CARD_BORDER,borderRadius:5,padding:'6px 10px',fontSize:13,fontFamily:'inherit',textAlign:'right',boxSizing:'border-box'}}/>
+                  <button onClick={()=>removeBaseAcresRow(i)}
+                    style={{background:'transparent',border:'none',color:TEXT_MUTED,cursor:'pointer',fontSize:14,padding:0}}
+                    title="Remove">×</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Renewal card — one row spanning full width */}
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3}}>Renewal reminder</div>
-            {notesStatus && <span style={{fontSize:11,color:'#888'}}>{notesStatus==='saving'?'Saving…':'✓ Saved'}</span>}
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:8}}>
+        {/* Renewal */}
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
+          {cardHeader(
+            'Renewal',
+            renewalHeaderDate ? renewalHeaderDate : 'Not set',
+            renewalHeaderSub && <span style={{fontSize:11,color:TEXT_SEC}}>{renewalHeaderSub}</span>
+          )}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
             <div>
-              <label style={{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>RENEWAL DATE</label>
+              <label style={{fontSize:11,color:TEXT_SEC,display:'block',marginBottom:4}}>Renewal date</label>
               <input type="date" value={renewalDate||''} onChange={e=>handleRenewalDateChange(e.target.value)} disabled={!notesLoaded}
-                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
+                style={{width:'100%',border:CARD_BORDER,borderRadius:5,padding:'7px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
             </div>
             <div>
-              <label style={{fontSize:11,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>CUSTOMER EMAIL</label>
+              <label style={{fontSize:11,color:TEXT_SEC,display:'block',marginBottom:4}}>Customer email</label>
               <input type="email" value={customerEmail||''} onChange={e=>handleCustomerEmailChange(e.target.value)} disabled={!notesLoaded}
                 placeholder="customer@example.com"
-                style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
+                style={{width:'100%',border:CARD_BORDER,borderRadius:5,padding:'7px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}/>
             </div>
           </div>
-          {(() => {
-            const bg = renewalMeta.kind==='success' ? '#f0fdf4'
-                     : renewalMeta.kind==='warning' ? '#fef3c7'
-                     : renewalMeta.kind==='info'    ? '#f0f6ff'
-                     : '#f5f5f5';
-            const fg = renewalMeta.kind==='success' ? '#166534'
-                     : renewalMeta.kind==='warning' ? '#92400e'
-                     : renewalMeta.kind==='info'    ? '#1e40af'
-                     : '#6b7280';
-            return (
-              <div style={{background:bg,color:fg,fontSize:12,padding:'6px 10px',borderRadius:6,lineHeight:1.5}}>
-                {renewalMeta.label} At T-45 days, the customer and lender each get an email with a pre-filled share link + PIN for last year's balance sheet + budget.
-              </div>
-            );
-          })()}
+          <div style={{fontSize:11,color:TEXT_MUTED,marginTop:8}}>
+            At T-45 days, the customer and lender each receive a pre-filled balance sheet + budget share link.
+          </div>
         </div>
 
-        {/* Credit memo — full width, AI-drafted from latest sheet + budget */}
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14,marginBottom:16}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3,display:'flex',alignItems:'center',gap:8}}>
-              <span>Credit memo</span>
-              {latestMemo && (
-                <span style={{fontSize:11,color:'#888',fontWeight:400,textTransform:'none',letterSpacing:0}}>
-                  · Based on {latestMemo.based_on_as_of_date}
-                  · Generated {new Date(latestMemo.created_at).toLocaleDateString()}
-                  {latestMemo.edited && ' · edited'}
-                </span>
-              )}
-              {memoStatus === 'saving' && <span style={{fontSize:11,color:'#888',fontWeight:400,textTransform:'none',letterSpacing:0}}>Saving…</span>}
-              {memoStatus === 'saved'  && <span style={{fontSize:11,color:'#166534',fontWeight:400,textTransform:'none',letterSpacing:0}}>✓ Saved</span>}
-              {memoStatus.startsWith?.('error:') && <span style={{fontSize:11,color:'#dc2626',fontWeight:400,textTransform:'none',letterSpacing:0}}>{memoStatus.slice(6)}</span>}
-            </div>
-            <div style={{display:'flex',gap:6}}>
+        {/* Credit memo */}
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
+          {cardHeader(
+            'Credit memo',
+            latestMemo
+              ? `Based on ${latestMemo.based_on_as_of_date} · Generated ${new Date(latestMemo.created_at).toLocaleDateString()}${latestMemo.edited?' · edited':''}`
+              : 'Not generated yet',
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              {memoStatus === 'saving' && <span style={{fontSize:11,color:TEXT_SEC}}>Saving…</span>}
+              {memoStatus === 'saved'  && <span style={{fontSize:11,color:POS}}>✓ Saved</span>}
+              {memoStatus.startsWith?.('error:') && <span style={{fontSize:11,color:NEG}}>{memoStatus.slice(6)}</span>}
               {memoHistory.length > 0 && (
                 <button onClick={()=>setShowMemoHistory(v=>!v)}
-                  style={{fontSize:11,padding:'5px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
-                  {showMemoHistory ? 'Hide' : 'Show'} history ({memoHistory.length})
+                  style={{fontSize:11,color:TEXT_SEC,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                  {showMemoHistory ? 'Hide' : 'History'} ({memoHistory.length})
                 </button>
               )}
               {latestMemo && (
                 <button onClick={()=>{ navigator.clipboard?.writeText(memoDraft); setMemoStatus('saved'); setTimeout(()=>setMemoStatus(''),1200); }}
-                  style={{fontSize:11,padding:'5px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',color:'#555',cursor:'pointer',fontFamily:'inherit'}}>
-                  📋 Copy
+                  style={{fontSize:11,color:TEXT_SEC,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                  Copy
                 </button>
               )}
               <button onClick={generateNewMemo} disabled={memoStatus==='generating' || sheetSummaries.length===0}
-                style={{fontSize:12,padding:'6px 14px',borderRadius:6,border:'none',background:'#6B0E1E',color:'white',cursor:memoStatus==='generating'?'wait':'pointer',fontFamily:'inherit',fontWeight:600,opacity:memoStatus==='generating'?.7:1}}>
-                {memoStatus==='generating' ? 'Generating…' : (latestMemo ? 'Regenerate' : '✨ Generate memo')}
+                style={{fontSize:12,padding:'6px 14px',borderRadius:6,border:'none',background:ACCENT,color:'white',cursor:memoStatus==='generating'?'wait':'pointer',fontFamily:'inherit',fontWeight:500,opacity:memoStatus==='generating'?.7:1}}>
+                {memoStatus==='generating' ? 'Generating…' : (latestMemo ? 'Regenerate' : 'Generate memo')}
               </button>
             </div>
-          </div>
+          )}
 
           {!latestMemo ? (
-            <div style={{fontSize:13,color:'#888',padding:'20px 0',textAlign:'center',lineHeight:1.6}}>
+            <div style={{fontSize:13,color:TEXT_SEC,padding:'20px 0',textAlign:'center',lineHeight:1.6}}>
               {sheetSummaries.length === 0
                 ? 'Save a balance sheet first, then generate a memo.'
-                : <>No memo yet. Click <strong>Generate memo</strong> to draft one from the latest balance sheet + budget.</>}
+                : <>Draft a lender-style memo from the latest balance sheet and budget.</>}
             </div>
           ) : (
             <textarea value={memoDraft} onChange={e=>handleMemoEdit(e.target.value)}
               rows={16}
-              style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.6}}/>
+              style={{width:'100%',border:CARD_BORDER,borderRadius:5,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.6}}/>
           )}
 
           {showMemoHistory && memoHistory.length > 0 && (
-            <div style={{marginTop:12,borderTop:'1px solid #eee',paddingTop:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3,marginBottom:8}}>Prior versions</div>
+            <div style={{marginTop:14,borderTop:'0.5px solid #f0f0f0',paddingTop:12}}>
+              <div style={{fontSize:11,color:TEXT_SEC,marginBottom:8}}>Prior versions</div>
               <div style={{display:'flex',flexDirection:'column',gap:6}}>
                 {memoHistory.map(m => (
-                  <details key={m.id} style={{background:'#fafafa',border:'1px solid #eee',borderRadius:6,padding:'6px 10px'}}>
+                  <details key={m.id} style={{background:PAGE_BG,border:CARD_BORDER,borderRadius:6,padding:'8px 12px'}}>
                     <summary style={{cursor:'pointer',fontSize:12,color:'#374151'}}>
                       {new Date(m.created_at).toLocaleString()} — based on {m.based_on_as_of_date}{m.edited?' · edited':''}
                     </summary>
@@ -4831,37 +4955,15 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
           )}
         </div>
 
-        {/* Notes + quick actions */}
-        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:12}}>
-          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-              <div style={{fontSize:12,fontWeight:700,color:'#555',textTransform:'uppercase',letterSpacing:.3}}>Notes</div>
-              {notesStatus && <span style={{fontSize:11,color:'#888'}}>{notesStatus==='saving'?'Saving…':'✓ Saved'}</span>}
-            </div>
-            <textarea value={notes} onChange={e=>handleNotesChange(e.target.value)} disabled={!notesLoaded}
-              placeholder="Renewal dates, follow-ups, context that isn't a field on the balance sheet…"
-              rows={6}
-              style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.5}}/>
-          </div>
-          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#555',marginBottom:8,textTransform:'uppercase',letterSpacing:.3}}>Quick actions</div>
-            <div style={{display:'grid',gap:6}}>
-              <button onClick={onNewSheet}
-                style={{fontSize:12,padding:'7px 10px',borderRadius:6,border:'1px solid #e5e7eb',background:'white',textAlign:'left',cursor:'pointer',fontFamily:'inherit'}}>
-                ➕  New balance sheet
-              </button>
-              <button onClick={onOpenImport}
-                style={{fontSize:12,padding:'7px 10px',borderRadius:6,border:'1px solid #e5e7eb',background:'white',textAlign:'left',cursor:'pointer',fontFamily:'inherit'}}>
-                📥  Import from Excel
-              </button>
-              {latest && (
-                <button onClick={()=>onShareCA(latest.key)}
-                  style={{fontSize:12,padding:'7px 10px',borderRadius:6,border:'1px solid #bfdbfe',background:'#f0f6ff',textAlign:'left',cursor:'pointer',fontFamily:'inherit',color:'#1d4ed8',fontWeight:600}}>
-                  🔗  Share with CA
-                </button>
-              )}
-            </div>
-          </div>
+        {/* Notes */}
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px'}}>
+          {cardHeader('Notes', null,
+            notesStatus && <span style={{fontSize:11,color:notesStatus==='saved'?POS:TEXT_SEC}}>{notesStatus==='saving'?'Saving…':'✓ Saved'}</span>
+          )}
+          <textarea value={notes} onChange={e=>handleNotesChange(e.target.value)} disabled={!notesLoaded}
+            placeholder="Renewal follow-ups, context that isn't a field on the balance sheet…"
+            rows={5}
+            style={{width:'100%',border:CARD_BORDER,borderRadius:5,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.6}}/>
         </div>
 
         </>
