@@ -5694,6 +5694,9 @@ export default function BalanceSheet() {
   const [caOpenShare, setCaOpenShare] = useState(null);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
+  const [homeSearch, setHomeSearch] = useState('');            // filter box on home
+  const [clientNotesMap, setClientNotesMap] = useState({});     // { [clientName]: { renewal_date, renewal_reminder_sent_at } }
+  const [homeUserMenu, setHomeUserMenu] = useState(false);      // dropdown next to the user avatar
   const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
@@ -5735,8 +5738,26 @@ export default function BalanceSheet() {
       loadPendingReviews();
       loadCAUsers();
       loadPendingCAEdits();
+      loadClientNotesMap();
     }, 100);
   }, [session?.access_token]);
+
+  // Preload the notes rows for this user's clients so the home tree can show
+  // renewal dates without opening each dashboard.
+  const loadClientNotesMap = async () => {
+    if (!isConfigured()) return;
+    const uid = session?.user?.id;
+    if (!uid) { setClientNotesMap({}); return; }
+    try {
+      const url = SUPABASE_URL + '/rest/v1/client_notes?user_id=eq.' + encodeURIComponent(uid)
+        + '&select=client_name,renewal_date,renewal_reminder_sent_at';
+      const r = await fetch(url, { headers: supaHeaders() });
+      const rows = await r.json();
+      const map = {};
+      (Array.isArray(rows) ? rows : []).forEach(row => { map[row.client_name] = row; });
+      setClientNotesMap(map);
+    } catch {}
+  };
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
   useEffect(() => {
@@ -8663,44 +8684,131 @@ ${extraPages}
   }
 
   if (screen === "home") {
+    const uniqueClients = Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{}));
+    const clientCount = uniqueClients.length;
+    const totalPending = pendingReviews.length + pendingCAEdits.length;
+    const userInitials = (profile?.full_name || session?.user?.email || '??')
+      .split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
+    const searchQ = homeSearch.trim().toLowerCase();
+
+    // Helper for renewal-date pill on each row.
+    const fmtRenewal = (dateStr) => {
+      if (!dateStr) return { label:'—', color:'#9ca3af' };
+      const today = new Date();
+      const r = new Date(dateStr + 'T00:00:00Z');
+      const days = Math.round((r - today) / 86400000);
+      const short = r.toLocaleDateString('en-US', {month:'short',day:'numeric'});
+      if (days < 0)   return { label: `${short} · ${Math.abs(days)}d overdue`, color:'#dc2626' };
+      if (days <= 30) return { label: `${short} · ${days}d`,                   color:'#dc2626' };
+      if (days <= 60) return { label: `${short} · ${days}d`,                   color:'#92400e' };
+      return           { label: short,                                          color:'#6b7280' };
+    };
+
     return (
-      <div className="app">
-        <div className="home-top">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{background:'#f6f5f2',minHeight:'100vh',fontFamily:"-apple-system,'Segoe UI',sans-serif"}}>
+
+        {/* ── Top nav — compact white bar ────────────────────────────────────── */}
+        <div style={{background:'white',borderBottom:'0.5px solid #e5e7eb',padding:'12px 24px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:10}}>
+          <div style={{display:'flex',alignItems:'center',gap:14}}>
+            <div style={{width:28,height:28,background:'#6B0E1E',borderRadius:6,color:'white',fontWeight:500,fontSize:11,display:'flex',alignItems:'center',justifyContent:'center',letterSpacing:'.3px'}}>FBM</div>
             <div>
-              <div className="home-top-title">First Bank of Montana</div>
-              <div className="home-top-sub">Agricultural Balance Sheet System</div>
+              <div style={{fontSize:14,fontWeight:500,color:'#111',letterSpacing:'-0.2px',lineHeight:1}}>First Bank of Montana</div>
+              <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>Agricultural Financial Tools</div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:12}}>
-              {session?.user?.email && <span style={{fontSize:".82rem",color:"rgba(255,255,255,.7)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:5,background:"rgba(255,255,255,.2)",padding:"1px 7px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
-              {(pendingReviews.length + pendingCAEdits.length) > 0 && (
-                <a href="#pending-items"
-                  onClick={e=>{e.preventDefault();document.getElementById('pending-items')?.scrollIntoView({behavior:'smooth',block:'start'});}}
-                  title={`${pendingReviews.length} customer + ${pendingCAEdits.length} CA pending`}
-                  style={{background:"#fbbf24",color:"#1a1a1a",borderRadius:999,padding:"3px 10px",fontSize:".78rem",fontWeight:700,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:4,cursor:"pointer"}}>
-                  🔔 {pendingReviews.length + pendingCAEdits.length}
-                </a>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            {totalPending > 0 && (
+              <a href="#pending-items"
+                onClick={e=>{e.preventDefault();document.getElementById('pending-items')?.scrollIntoView({behavior:'smooth',block:'start'});}}
+                title={`${pendingReviews.length} customer · ${pendingCAEdits.length} CA`}
+                style={{fontSize:12,color:'#374151',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:6}}>
+                <span style={{width:6,height:6,background:'#f59e0b',borderRadius:'50%'}}></span>
+                {totalPending} pending
+              </a>
+            )}
+            {profile?.role === "admin" && (
+              <button onClick={()=>setShowAdminScreen(true)}
+                style={{background:'white',border:'0.5px solid #e5e7eb',color:'#374151',fontSize:12,padding:'5px 12px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+                Users
+              </button>
+            )}
+            <div style={{width:1,height:20,background:'#e5e7eb'}}></div>
+            <div style={{position:'relative'}}>
+              <button onClick={()=>setHomeUserMenu(v=>!v)}
+                style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'none',cursor:'pointer',padding:'2px 4px',fontFamily:'inherit'}}>
+                <div style={{width:24,height:24,background:'#f3f4f6',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:500,color:'#6B0E1E'}}>{userInitials}</div>
+                <span style={{fontSize:12,color:'#374151'}}>{profile?.full_name || session?.user?.email}</span>
+                <span style={{fontSize:9,color:'#6b7280'}}>▾</span>
+              </button>
+              {homeUserMenu && (
+                <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.08)',minWidth:200,zIndex:20,padding:6}}>
+                  <div style={{padding:'8px 10px',borderBottom:'0.5px solid #f0f0f0'}}>
+                    <div style={{fontSize:12,color:'#111'}}>{profile?.full_name || 'User'}</div>
+                    <div style={{fontSize:11,color:'#6b7280'}}>{session?.user?.email}
+                      {profile?.role==="admin" && <span style={{marginLeft:6,background:'#fef3c7',color:'#92400e',fontSize:9,padding:'1px 6px',borderRadius:999,fontWeight:500}}>ADMIN</span>}
+                    </div>
+                  </div>
+                  <button onClick={()=>{setHomeUserMenu(false);handleSignOut();}}
+                    style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:'#111'}}>
+                    Sign out
+                  </button>
+                </div>
               )}
-              {profile?.role === "admin" && (
-                <button onClick={()=>setShowAdminScreen(true)}
-                  style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",color:"white",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit",fontWeight:600}}>
-                  ⚙ Users
-                </button>
-              )}
-              <button onClick={handleSignOut} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.85)",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"inherit"}}>Sign Out</button>
             </div>
           </div>
         </div>
-        <div className="home-body">
-          <div style={{display:"flex",gap:12,marginBottom:36,flexWrap:"wrap"}}>
-            <button className="home-new-btn" style={{margin:0}} onClick={startNew}>
-              + New Balance Sheet
-            </button>
-            <button className="home-new-btn" style={{margin:0,background:"#2d5a8e"}}
-              onClick={()=>{setImportData(null);setImportError("");setShowImport(true);}}>
-              Import from CSV / Excel
-            </button>
+
+        <div style={{maxWidth:1200,margin:'0 auto',padding:'24px'}}>
+
+          {/* ── Title + toolbar ────────────────────────────────────────────── */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,gap:12,flexWrap:'wrap'}}>
+            <div>
+              <div style={{fontSize:22,fontWeight:500,color:'#111',letterSpacing:'-0.3px'}}>Clients</div>
+              <div style={{fontSize:12,color:'#6b7280',marginTop:2}}>
+                {clientCount} active · {savedSheets.length} balance sheet{savedSheets.length!==1?'s':''}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+              <div style={{display:'flex',alignItems:'center',background:'white',border:'0.5px solid #e5e7eb',borderRadius:6,padding:'5px 10px',minWidth:240}}>
+                <span style={{fontSize:11,color:'#9ca3af',marginRight:6}}>🔍</span>
+                <input type="text" value={homeSearch} onChange={e=>setHomeSearch(e.target.value)} placeholder="Search clients…"
+                  style={{border:'none',outline:'none',fontSize:12,background:'transparent',width:'100%',fontFamily:'inherit',color:'#111'}}/>
+                {homeSearch && <button onClick={()=>setHomeSearch('')} style={{background:'transparent',border:'none',color:'#9ca3af',cursor:'pointer',padding:0,fontSize:14,lineHeight:1}}>×</button>}
+              </div>
+              <button onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
+                style={{background:'white',border:'0.5px solid #e5e7eb',color:'#374151',fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+                + New folder
+              </button>
+              <button onClick={()=>{setImportData(null);setImportError("");setShowImport(true);}}
+                style={{background:'white',border:'0.5px solid #e5e7eb',color:'#374151',fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+                Import
+              </button>
+              <button onClick={startNew}
+                style={{background:'#6B0E1E',border:'none',color:'white',fontSize:12,padding:'6px 14px',borderRadius:6,cursor:'pointer',fontFamily:'inherit',fontWeight:500}}>
+                + New sheet
+              </button>
+            </div>
           </div>
+
+          {/* Compact pending banner — subtle, scrolls you to the detail below. */}
+          {totalPending > 0 && (
+            <a href="#pending-items"
+              onClick={e=>{e.preventDefault();document.getElementById('pending-items')?.scrollIntoView({behavior:'smooth',block:'start'});}}
+              style={{textDecoration:'none',display:'block'}}>
+              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'12px 18px',marginBottom:12,display:'flex',alignItems:'center',gap:12}}>
+                <div style={{width:3,height:24,background:'#f59e0b',borderRadius:1}}></div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,color:'#111'}}>
+                    <span style={{fontWeight:500}}>{totalPending} item{totalPending!==1?'s':''}</span> awaiting your review
+                  </div>
+                  <div style={{fontSize:11,color:'#6b7280',marginTop:1}}>
+                    {pendingReviews.length} customer submission{pendingReviews.length!==1?'s':''} · {pendingCAEdits.length} CA edit{pendingCAEdits.length!==1?'s':''}
+                  </div>
+                </div>
+                <span style={{fontSize:11,color:'#6B0E1E'}}>See all →</span>
+              </div>
+            </a>
+          )}
 
           {/* ── Import Modal ── */}
           {showImport && (
@@ -9087,22 +9195,20 @@ ${extraPages}
             />
           )}
 
-          <div className="home-section-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <span>
-              {savedSheets.length > 0
-                ? "Clients (" + Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{})).length + ")"
-                : "Clients"}
-            </span>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <button onClick={()=>loadSavedList()}
-                style={{background:"none",border:"1px solid #d1d5db",borderRadius:6,padding:"3px 10px",color:"#888",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
-                ↻ Refresh
-              </button>
-              <button onClick={()=>{setShowCreateFolder([]);setNewFolderName("");}}
-                style={{background:"none",border:"1.5px dashed #6B0E1E",borderRadius:6,padding:"3px 12px",color:"#6B0E1E",fontSize:".78rem",fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                + New Folder
-              </button>
+          {/* Section title row above the client list, quiet meta with a refresh icon */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:12,marginBottom:8,padding:'0 4px'}}>
+            <div style={{fontSize:13,color:'#6b7280'}}>
+              {searchQ
+                ? `Search: “${homeSearch}”`
+                : (savedSheets.length > 0
+                  ? `${clientCount} client${clientCount!==1?'s':''} · ${savedSheets.length} sheet${savedSheets.length!==1?'s':''}`
+                  : 'No clients yet')}
             </div>
+            <button onClick={()=>{loadSavedList();loadClientNotesMap();}}
+              title="Refresh"
+              style={{background:'transparent',border:'none',color:'#6b7280',fontSize:12,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
+              ↻ Refresh
+            </button>
           </div>
 
           {/* ── Create Folder Modal ── */}
@@ -9190,153 +9296,184 @@ ${extraPages}
             </div>
           )}
 
-          {savedSheets.length === 0
-            ? <div className="home-empty">No saved balance sheets yet. Complete a sheet and save it to store it here.</div>
-            : (() => {
-                // Build tree from folderPath on each sheet
-                // Collect all unique folder paths
-                const allPaths = getAllFolderPaths(savedSheets);
-                // Build a recursive tree renderer
-                function renderFolderLevel(pathPrefix, depth) {
-                  const indent = depth * 20;
-                  // Get child folder names at this level
-                  const childFolders = allPaths
-                    .filter(p => p.length === pathPrefix.length + 1 &&
-                      p.slice(0, pathPrefix.length).join("|") === pathPrefix.join("|"))
-                    .sort((a,b) => a[a.length-1].localeCompare(b[b.length-1]));
-                  // Get sheets at this exact path
-                  const sheetsHere = savedSheets
-                    .filter(s => {
+          {savedSheets.length === 0 ? (
+            <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'48px 24px',textAlign:'center',color:'#6b7280'}}>
+              <div style={{fontSize:14,color:'#111',marginBottom:6}}>No saved balance sheets yet</div>
+              <div style={{fontSize:12,marginBottom:16}}>Start a new sheet to see it here.</div>
+              <button onClick={startNew}
+                style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'8px 18px',fontSize:12,cursor:'pointer',fontFamily:'inherit',fontWeight:500}}>
+                + New sheet
+              </button>
+            </div>
+          ) : (() => {
+            const allPaths = getAllFolderPaths(savedSheets);
+
+            // 3-column grid template used by every row so the columns line up perfectly.
+            const ROW_COLS = 'minmax(0,1fr) 130px 130px 96px';
+            const rowBase = { display:'grid', gridTemplateColumns: ROW_COLS, alignItems:'center', gap:12, padding:'12px 18px', borderBottom:'0.5px solid #f0f0f0' };
+
+            // Search filter — narrows to sheets whose client name matches, and forces those folders open.
+            const sheetMatches = (s) => !searchQ || (s.clientName||'').toLowerCase().includes(searchQ);
+            const folderMatches = (folderName, allSheetsInFolder) =>
+              !searchQ ||
+              folderName.toLowerCase().includes(searchQ) ||
+              allSheetsInFolder.some(sheetMatches);
+            const folderIsOpen = (fKey, allSheetsInFolder, folderName) =>
+              searchQ ? folderMatches(folderName, allSheetsInFolder) : !!openFolders[fKey];
+
+            function renderFolderLevel(pathPrefix, depth) {
+              const childFolders = allPaths
+                .filter(p => p.length === pathPrefix.length + 1 &&
+                  p.slice(0, pathPrefix.length).join("|") === pathPrefix.join("|"))
+                .sort((a,b) => a[a.length-1].localeCompare(b[b.length-1]));
+              const sheetsHere = savedSheets
+                .filter(s => {
+                  const fp = s.folderPath || [];
+                  return fp.length === pathPrefix.length &&
+                    fp.join("|") === pathPrefix.join("|");
+                })
+                .filter(sheetMatches)
+                .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
+
+              return (
+                <React.Fragment key={pathPrefix.join('|') || '_root_'}>
+                  {/* Nested folders at this level */}
+                  {childFolders.map(path => {
+                    const folderName = path[path.length-1];
+                    const fKey = path.join("|");
+                    const allSheetsInFolder = savedSheets.filter(s => {
                       const fp = s.folderPath || [];
-                      return fp.length === pathPrefix.length &&
-                        fp.join("|") === pathPrefix.join("|");
-                    })
-                    .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
-                  const folderKey = pathPrefix.join("|") || "_root_";
-                  const isOpen = pathPrefix.length === 0 ? true : !!openFolders[folderKey];
-                  return (
-                    <div key={folderKey} style={{marginLeft: depth > 0 ? indent + "px" : 0}}>
-                      {/* Subfolder groups */}
-                      {childFolders.map(path => {
-                        const folderName = path[path.length-1];
-                        const fKey = path.join("|");
-                        const fOpen = !!openFolders[fKey];
-                        const allSheetsInFolder = savedSheets.filter(s => {
-                          const fp = s.folderPath || [];
-                          return fp.length >= path.length && fp.slice(0,path.length).join("|") === path.join("|");
-                        });
-                        const latestInFolder = allSheetsInFolder.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
-                        // If this folder contains sheets from exactly one client, clicking the header body opens that client's dashboard.
-                        const uniqueClients = Array.from(new Set(allSheetsInFolder.map(s=>s.clientName).filter(Boolean)));
-                        const dashboardTarget = uniqueClients.length === 1 ? uniqueClients[0] : null;
-                        return (
-                          <div key={fKey} className="client-folder" style={{marginLeft: depth * 20 + "px", marginBottom:6}}>
-                            <div className="client-folder-header"
-                              onClick={()=> dashboardTarget ? setDashboardClient(dashboardTarget) : toggleFolder(fKey)}
-                              title={dashboardTarget ? `Open dashboard for ${dashboardTarget}` : 'Toggle folder'}>
-                              <div className="client-folder-left" style={{flex:1,minWidth:0}}>
-                                <span className="folder-icon">{fOpen ? "📂" : "📁"}</span>
-                                {editingFolder && JSON.stringify(editingFolder.path)===JSON.stringify(path) ? (
-                                  <div style={{display:"flex",alignItems:"center",gap:6,flex:1}} onClick={e=>e.stopPropagation()}>
-                                    <input className="text-input"
-                                      style={{flex:1,maxWidth:220,padding:"5px 10px",fontSize:".9rem"}}
-                                      value={editingFolder.newName} autoFocus
-                                      onChange={e=>setEditingFolder({...editingFolder,newName:e.target.value})}
-                                      onKeyDown={e=>{
-                                        if(e.key==="Enter") renameFolder(editingFolder.path, editingFolder.newName);
-                                        if(e.key==="Escape") setEditingFolder(null);
-                                      }} />
-                                    <button className="btn btn-primary" style={{padding:"5px 12px",fontSize:".8rem"}}
-                                      onClick={()=>renameFolder(editingFolder.path, editingFolder.newName)}>Save</button>
-                                    <button className="btn btn-secondary" style={{padding:"5px 10px",fontSize:".8rem"}}
-                                      onClick={()=>setEditingFolder(null)}>Cancel</button>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <div className="client-folder-name">{folderName}</div>
-                                    <div className="client-folder-meta">
-                                      {allSheetsInFolder.length} sheet{allSheetsInFolder.length!==1?"s":""}
-                                      {latestInFolder && " · Latest: " + latestInFolder.asOfDate}
-                                      {path.length > 1 && <span style={{color:"#aaa",marginLeft:6}}>{path.join(" / ")}</span>}
-                                    </div>
-                                  </div>
-                                )}
+                      return fp.length >= path.length && fp.slice(0,path.length).join("|") === path.join("|");
+                    });
+                    if (!folderMatches(folderName, allSheetsInFolder)) return null;
+
+                    const latestInFolder = allSheetsInFolder.sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))[0];
+                    const uniqueClients = Array.from(new Set(allSheetsInFolder.map(s=>s.clientName).filter(Boolean)));
+                    const dashboardTarget = uniqueClients.length === 1 ? uniqueClients[0] : null;
+                    const fOpen = folderIsOpen(fKey, allSheetsInFolder, folderName);
+                    const notesForFolder = dashboardTarget ? clientNotesMap[dashboardTarget] : null;
+                    const renewal = notesForFolder ? fmtRenewal(notesForFolder.renewal_date) : { label:'—', color:'#9ca3af' };
+                    const isEditing = editingFolder && JSON.stringify(editingFolder.path)===JSON.stringify(path);
+
+                    return (
+                      <React.Fragment key={fKey}>
+                        <div style={{...rowBase, background:'#fdfcfa', cursor: isEditing ? 'default' : 'pointer'}}
+                          onClick={()=> {
+                            if (isEditing) return;
+                            if (dashboardTarget) setDashboardClient(dashboardTarget);
+                            else toggleFolder(fKey);
+                          }}
+                          title={dashboardTarget ? `Open dashboard for ${dashboardTarget}` : (fOpen ? 'Collapse folder' : 'Expand folder')}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft: depth * 16}}>
+                            <button onClick={e=>{e.stopPropagation();toggleFolder(fKey);}}
+                              title={fOpen ? 'Collapse' : 'Expand'}
+                              style={{background:'transparent',border:'none',cursor:'pointer',color:'#6b7280',fontSize:10,fontFamily:'inherit',padding:'0 4px',width:14}}>
+                              {fOpen ? '▾' : '▸'}
+                            </button>
+                            {isEditing ? (
+                              <div style={{display:'flex',alignItems:'center',gap:6,flex:1}} onClick={e=>e.stopPropagation()}>
+                                <input value={editingFolder.newName} autoFocus
+                                  onChange={e=>setEditingFolder({...editingFolder,newName:e.target.value})}
+                                  onKeyDown={e=>{
+                                    if(e.key==="Enter") renameFolder(editingFolder.path, editingFolder.newName);
+                                    if(e.key==="Escape") setEditingFolder(null);
+                                  }}
+                                  style={{flex:1,border:'0.5px solid #e5e7eb',borderRadius:5,padding:'5px 10px',fontSize:13,fontFamily:'inherit'}}/>
+                                <button onClick={()=>renameFolder(editingFolder.path, editingFolder.newName)}
+                                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:5,padding:'5px 12px',fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>Save</button>
+                                <button onClick={()=>setEditingFolder(null)}
+                                  style={{background:'transparent',border:'0.5px solid #e5e7eb',color:'#374151',borderRadius:5,padding:'5px 10px',fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
                               </div>
-                              <div className="client-folder-right">
-                                {(!editingFolder || JSON.stringify(editingFolder.path)!==JSON.stringify(path)) && (
-                                  <span>
-                                    <button style={{background:"none",border:"1px solid #e0d0d0",borderRadius:5,padding:"3px 7px",fontSize:".75rem",cursor:"pointer",color:"#888",fontFamily:"inherit",marginRight:4}}
-                                      title="Rename folder"
-                                      onClick={e=>{e.stopPropagation();setEditingFolder({path,newName:folderName});}}>
-                                      Rename
-                                    </button>
-                                    <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"3px 8px",fontSize:".72rem",cursor:"pointer",color:"#6B0E1E",fontFamily:"inherit",fontWeight:600,marginRight:4}}
-                                      onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}>
-                                      + Sub
-                                    </button>
-                                    {latestInFolder && (
-                                      <button className="sheet-load-btn"
-                                        onClick={e=>{e.stopPropagation();loadSheet(latestInFolder.key);}}>
-                                        Open Latest
-                                      </button>
-                                    )}
-                                  </span>
-                                )}
-                                <button className="folder-chevron"
-                                  onClick={e=>{e.stopPropagation();toggleFolder(fKey);}}
-                                  title={fOpen ? 'Collapse folder' : 'Expand folder'}
-                                  style={{background:'none',border:'none',cursor:'pointer',padding:'2px 6px',fontSize:'.85rem',color:'#888',fontFamily:'inherit'}}>
-                                  {fOpen ? "▲" : "▼"}
-                                </button>
-                              </div>
-                            </div>
-                            {fOpen && renderFolderLevel(path, 1)}
-                          </div>
-                        );
-                      })}
-                      {/* Sheets at this level */}
-                      {sheetsHere.length > 0 && (
-                        <div className={depth > 0 ? "client-folder-sheets" : ""} style={{display:"flex",flexDirection:"column",gap:6}}>
-                          {sheetsHere.map(s => (
-                            <div key={s.key} className="sheet-card sheet-card-nested"
-                              onClick={()=>loadSheet(s.key)}>
-                              <div className="sheet-icon" style={{fontSize:"1.2rem"}}>📋</div>
-                              <div className="sheet-info">
-                                <div style={{fontSize:".9rem",fontWeight:700,color:"#1a1a1a"}}>
-                                  <a href="#" onClick={e=>{e.preventDefault();e.stopPropagation();setDashboardClient(s.clientName);}}
-                                    title="Open client dashboard"
-                                    style={{color:'#1a1a1a',textDecoration:'none',borderBottom:'1px dotted transparent'}}
-                                    onMouseEnter={e=>e.currentTarget.style.borderBottomColor='#6B0E1E'}
-                                    onMouseLeave={e=>e.currentTarget.style.borderBottomColor='transparent'}>
-                                    {s.clientName}
-                                  </a>
+                            ) : (
+                              <div style={{minWidth:0,flex:1}}>
+                                <div style={{fontSize:13,color:'#111',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{folderName}</div>
+                                <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>
+                                  {allSheetsInFolder.length} sheet{allSheetsInFolder.length!==1?'s':''}
+                                  {path.length > 1 && <span style={{color:'#9ca3af'}}> · {path.slice(0,-1).join(' / ')}</span>}
                                 </div>
-                                <div className="sheet-date">As of {s.asOfDate}</div>
-                                {s.savedAt && <div className="sheet-meta">Saved {new Date(s.savedAt).toLocaleDateString()}</div>}
                               </div>
-                              <button className="sheet-load-btn"
-                                onClick={e=>{e.stopPropagation();loadSheet(s.key);}}>
-                                Open
-                              </button>
-                              <button style={{background:"none",border:"1px solid #ddd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#555",fontFamily:"inherit"}}
-                                onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}>
-                                Move
-                              </button>
-                              <button style={{background:"#dbeafe",border:"1px solid #93c5fd",borderRadius:5,padding:"4px 8px",fontSize:".75rem",cursor:"pointer",color:"#1d4ed8",fontFamily:"inherit",fontWeight:600}}
-                                onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}>
-                                Share CA
-                              </button>
-                              <button className="sheet-delete" onClick={e=>deleteSheet(s.key,e)}>Delete</button>
-                            </div>
-                          ))}
+                            )}
+                          </div>
+                          <div style={{textAlign:'right',fontSize:12,color:'#6b7280'}}>
+                            {latestInFolder?.asOfDate ? new Date(latestInFolder.asOfDate + 'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—'}
+                          </div>
+                          <div style={{textAlign:'right',fontSize:12,color:renewal.color,fontWeight:renewal.color==='#dc2626'?500:400}}>
+                            {renewal.label}
+                          </div>
+                          <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4}} onClick={e=>e.stopPropagation()}>
+                            {!isEditing && (
+                              <>
+                                <button title="Rename" onClick={e=>{e.stopPropagation();setEditingFolder({path,newName:folderName});}}
+                                  style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
+                                  Rename
+                                </button>
+                                <button title="Add subfolder" onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}
+                                  style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
+                                  + Sub
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                }
-                return renderFolderLevel([], 0);
-              })()
-          }
+                        {fOpen && renderFolderLevel(path, depth + 1)}
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* Sheets at this level */}
+                  {sheetsHere.map(s => {
+                    const renewal = fmtRenewal(clientNotesMap[s.clientName]?.renewal_date);
+                    return (
+                      <div key={s.key} style={{...rowBase, cursor:'pointer'}}
+                        onClick={()=>setDashboardClient(s.clientName)}
+                        title={`Open dashboard for ${s.clientName}`}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft: (depth * 16) + 18, minWidth:0}}>
+                          <div style={{minWidth:0,flex:1}}>
+                            <div style={{fontSize:13,color:'#111',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.clientName}</div>
+                            <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>Balance sheet · as of {s.asOfDate}</div>
+                          </div>
+                        </div>
+                        <div style={{textAlign:'right',fontSize:12,color:'#6b7280'}}>
+                          {s.savedAt ? new Date(s.savedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—'}
+                        </div>
+                        <div style={{textAlign:'right',fontSize:12,color:renewal.color,fontWeight:renewal.color==='#dc2626'?500:400}}>
+                          {renewal.label}
+                        </div>
+                        <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4}} onClick={e=>e.stopPropagation()}>
+                          <button onClick={e=>{e.stopPropagation();loadSheet(s.key);}}
+                            style={{background:'transparent',border:'none',color:'#6B0E1E',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Open</button>
+                          <button onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}
+                            style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Move</button>
+                          <button onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}
+                            style={{background:'transparent',border:'none',color:'#1d4ed8',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Share CA</button>
+                          <button onClick={e=>{e.stopPropagation();deleteSheet(s.key,e);}}
+                            style={{background:'transparent',border:'none',color:'#dc2626',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Delete</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            }
+
+            return (
+              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,overflow:'hidden'}}>
+                {/* Column header */}
+                <div style={{display:'grid',gridTemplateColumns:ROW_COLS,gap:12,padding:'10px 18px',background:'#fafafa',borderBottom:'0.5px solid #e5e7eb',fontSize:10,fontWeight:500,color:'#6b7280',textTransform:'uppercase',letterSpacing:.4}}>
+                  <div>Client</div>
+                  <div style={{textAlign:'right'}}>Last saved</div>
+                  <div style={{textAlign:'right'}}>Renewal</div>
+                  <div></div>
+                </div>
+                {renderFolderLevel([], 0)}
+                {searchQ && savedSheets.filter(s => (s.clientName||'').toLowerCase().includes(searchQ)).length === 0 && (
+                  <div style={{padding:'32px 18px',textAlign:'center',fontSize:12,color:'#6b7280'}}>
+                    No clients match “{homeSearch}”.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
