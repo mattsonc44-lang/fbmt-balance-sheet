@@ -4099,6 +4099,8 @@ function ClientDashboard({
   const [customerEmail, setCustomerEmail] = React.useState('');
   const [renewalSentAt, setRenewalSentAt] = React.useState(null);
   const [baseAcres, setBaseAcres] = React.useState([]);           // [{crop, acres}]
+  const [interactions, setInteractions] = React.useState([]);     // [{id, occurred_at, type, summary, attendees, created_at}]
+  const interactionSaveTimers = React.useRef({});                 // per-id debounce timers for inline edits
   const [notesLoaded, setNotesLoaded] = React.useState(false);
   const [notesStatus, setNotesStatus] = React.useState(''); // 'saving' | 'saved' | ''
   const [showActions, setShowActions] = React.useState(false);
@@ -4294,6 +4296,71 @@ function ClientDashboard({
     setBaseAcres(next); scheduleSave({ base_acres: next });
   };
   const baseAcresTotal = baseAcres.reduce((s, r) => s + (Number(String(r.acres||'').replace(/[^0-9.]/g,''))||0), 0);
+
+  // ── Call / meeting log ──────────────────────────────────────────────────
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const uid = session?.user?.id;
+        if (!uid) return;
+        const url = SUPABASE_URL + '/rest/v1/client_interactions?user_id=eq.' + encodeURIComponent(uid)
+          + '&client_name=eq.' + encodeURIComponent(clientName)
+          + '&select=*&order=occurred_at.desc,created_at.desc';
+        const r = await fetch(url, { headers: supaHeaders() });
+        const rows = await r.json();
+        if (!cancelled) setInteractions(Array.isArray(rows) ? rows : []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [clientName, session?.user?.id]);
+
+  const addInteraction = async () => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    try {
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/client_interactions', {
+        method: 'POST',
+        headers: { ...supaHeaders(), 'Prefer': 'return=representation' },
+        body: JSON.stringify({
+          user_id: uid,
+          client_name: clientName,
+          occurred_at: new Date().toISOString().slice(0, 10),
+          type: 'call',
+          summary: '',
+          attendees: '',
+        }),
+      });
+      const rows = await resp.json();
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (row) setInteractions(list => [row, ...list]);
+    } catch(e) { alert('Add failed: ' + e.message); }
+  };
+
+  const updateInteraction = (id, patch) => {
+    // Optimistic local update; debounce the network write.
+    setInteractions(list => list.map(r => r.id === id ? { ...r, ...patch } : r));
+    if (interactionSaveTimers.current[id]) clearTimeout(interactionSaveTimers.current[id]);
+    interactionSaveTimers.current[id] = setTimeout(async () => {
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/client_interactions?id=eq.' + id, {
+          method: 'PATCH',
+          headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
+          body: JSON.stringify(patch),
+        });
+      } catch {}
+    }, 500);
+  };
+
+  const deleteInteraction = async (id) => {
+    setInteractions(list => list.filter(r => r.id !== id));
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/client_interactions?id=eq.' + id, {
+        method: 'DELETE',
+        headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
+      });
+    } catch {}
+  };
 
   // ── Credit memo ──────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -4956,7 +5023,7 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
         </div>
 
         {/* Notes */}
-        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px'}}>
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
           {cardHeader('Notes', null,
             notesStatus && <span style={{fontSize:11,color:notesStatus==='saved'?POS:TEXT_SEC}}>{notesStatus==='saving'?'Saving…':'✓ Saved'}</span>
           )}
@@ -4964,6 +5031,72 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             placeholder="Renewal follow-ups, context that isn't a field on the balance sheet…"
             rows={5}
             style={{width:'100%',border:CARD_BORDER,borderRadius:5,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.6}}/>
+        </div>
+
+        {/* Call / meeting log */}
+        <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px'}}>
+          {cardHeader(
+            'Call / meeting log',
+            interactions.length > 0 ? `${interactions.length} entr${interactions.length===1?'y':'ies'}` : 'Log calls, meetings, emails',
+            <button onClick={addInteraction}
+              style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+              + Add entry
+            </button>
+          )}
+          {interactions.length === 0 ? (
+            <div style={{fontSize:12,color:TEXT_SEC,padding:'8px 0'}}>
+              Nothing logged yet. Click <span style={{color:ACCENT}}>+ Add entry</span> after your next call.
+            </div>
+          ) : (() => {
+            const typeColors = {
+              call:    { bg:'#eef2ff', fg:'#3730a3', label:'Call' },
+              meeting: { bg:'#fef3c7', fg:'#92400e', label:'Meeting' },
+              email:   { bg:'#f0fdf4', fg:'#166534', label:'Email' },
+              note:    { bg:'#f5f3ef', fg:'#5a4a2b', label:'Note' },
+              other:   { bg:'#f3f4f6', fg:'#374151', label:'Other' },
+            };
+            return (
+              <div style={{display:'flex',flexDirection:'column'}}>
+                <div style={{display:'grid',gridTemplateColumns:'110px 90px 1fr 160px 30px',gap:8,fontSize:10,color:TEXT_MUTED,textTransform:'uppercase',letterSpacing:.4,marginBottom:4,padding:'0 4px'}}>
+                  <div>Date</div>
+                  <div>Type</div>
+                  <div>Summary</div>
+                  <div>Attendees</div>
+                  <div></div>
+                </div>
+                {interactions.map((row, i) => {
+                  const cfg = typeColors[row.type] || typeColors.other;
+                  return (
+                    <div key={row.id} style={{display:'grid',gridTemplateColumns:'110px 90px 1fr 160px 30px',gap:8,padding:'6px 0',borderBottom: i === interactions.length-1 ? 'none' : '0.5px solid #f0f0f0',alignItems:'center'}}>
+                      <input type="date" value={row.occurred_at||''}
+                        onChange={e=>updateInteraction(row.id,{occurred_at:e.target.value})}
+                        style={{border:CARD_BORDER,borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit',boxSizing:'border-box'}}/>
+                      <select value={row.type||'call'}
+                        onChange={e=>updateInteraction(row.id,{type:e.target.value})}
+                        style={{border:CARD_BORDER,borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit',background:cfg.bg,color:cfg.fg,boxSizing:'border-box'}}>
+                        <option value="call">Call</option>
+                        <option value="meeting">Meeting</option>
+                        <option value="email">Email</option>
+                        <option value="note">Note</option>
+                        <option value="other">Other</option>
+                      </select>
+                      <input type="text" value={row.summary||''}
+                        onChange={e=>updateInteraction(row.id,{summary:e.target.value})}
+                        placeholder="What was discussed?"
+                        style={{border:CARD_BORDER,borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit',boxSizing:'border-box'}}/>
+                      <input type="text" value={row.attendees||''}
+                        onChange={e=>updateInteraction(row.id,{attendees:e.target.value})}
+                        placeholder="Mark, spouse"
+                        style={{border:CARD_BORDER,borderRadius:5,padding:'5px 8px',fontSize:12,fontFamily:'inherit',boxSizing:'border-box'}}/>
+                      <button onClick={()=>{ if(window.confirm('Delete this entry?')) deleteInteraction(row.id); }}
+                        title="Delete"
+                        style={{background:'transparent',border:'none',color:TEXT_MUTED,cursor:'pointer',fontSize:14,padding:0}}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
 
         </>
