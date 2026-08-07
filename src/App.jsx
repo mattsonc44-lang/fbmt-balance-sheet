@@ -5865,6 +5865,63 @@ export default function BalanceSheet() {
     const el = document.createElement("style");
     el.id = "fbmt-styles"; el.textContent = FBMT_CSS;
     if (!document.getElementById("fbmt-styles")) document.head.appendChild(el);
+    // Modernization overrides — restyles the wizard shell (top bar, tabs, sidebar,
+    // card, right panel, progress) to match the home / dashboard visual language.
+    const modern = document.createElement("style");
+    modern.id = "fbmt-modern";
+    modern.textContent = `
+      /* Page + fonts */
+      .app { background: #f6f5f2; font-family: -apple-system, 'Segoe UI', 'Source Sans 3', sans-serif; }
+
+      /* Top bar — dark red block → clean white sticky nav */
+      .top-bar { background: white !important; color: #111 !important; border-bottom: 0.5px solid #e5e7eb; padding: 12px 24px !important; }
+      .top-bar > button { background: transparent !important; border: none !important; color: #6b7280 !important; font-size: 12px !important; padding: 4px 0 !important; margin-right: 12px !important; }
+      .top-bar > button:hover { color: #111 !important; }
+      .top-bar .bank-name { font-family: -apple-system, 'Segoe UI', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; letter-spacing: -0.1px !important; color: #111; }
+      .top-bar .divider { display: none !important; }
+      .top-bar .tool-name { font-size: 11px !important; letter-spacing: normal !important; text-transform: none !important; opacity: 1 !important; color: #6b7280; }
+
+      /* Tab bar — dark maroon → white with underline */
+      .tab-bar { background: white !important; border-bottom: 0.5px solid #e5e7eb; padding: 0 24px !important; gap: 0 !important; }
+      .tab-btn { color: #6b7280 !important; font-size: 13px !important; font-weight: 400 !important; padding: 12px 16px !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; }
+      .tab-btn:hover { color: #111 !important; }
+      .tab-active { color: #111 !important; background: transparent !important; border-bottom-color: #6B0E1E !important; font-weight: 500 !important; border-radius: 0 !important; }
+
+      /* Progress bar — full maroon strip → slim hairline */
+      .progress-bar-wrap { background: white !important; border-bottom: 0.5px solid #e5e7eb; padding: 10px 24px !important; display: flex; align-items: center; gap: 12px; }
+      .progress-label { color: #6b7280 !important; font-size: 11px !important; text-transform: none !important; letter-spacing: normal !important; padding: 0 !important; margin: 0 !important; flex-shrink: 0; }
+      .progress-track { flex: 1; height: 3px !important; background: #f0f0f0 !important; border-radius: 2px; }
+      .progress-fill { background: #6B0E1E !important; border-radius: 2px; }
+
+      /* Main layout — center at 1200px, more breathing room */
+      .main { max-width: 1200px !important; padding: 20px 24px !important; }
+
+      /* Sidebar — cleaner rows, subtle active state */
+      .sidebar-section-label { color: #9ca3af !important; font-size: 10px !important; letter-spacing: .4px !important; padding: 4px 8px !important; }
+      .sidebar-item { color: #6b7280 !important; font-size: 12px !important; padding: 6px 8px !important; border-radius: 5px !important; }
+      .sidebar-item:hover { background: #ececec !important; color: #111 !important; }
+      .sidebar-item.active { background: #f5e8ea !important; color: #111 !important; font-weight: 500 !important; border-left: 2px solid #6B0E1E; border-radius: 0 5px 5px 0; padding-left: 6px !important; }
+      .sidebar-item.done { color: #6b7280 !important; }
+      .sidebar-item.done::before { content: "✓ " !important; color: #15803d; font-size: 10px; }
+
+      /* Card — soft shadow → hairline border */
+      .card { background: white !important; border: 0.5px solid #e5e7eb; border-radius: 8px !important; box-shadow: none !important; }
+      .card-body { padding: 22px 26px !important; }
+      .card-nav { border-bottom: none !important; padding: 12px 26px !important; margin: 0 !important; border-top: 0.5px solid #f0f0f0; background: transparent; }
+
+      /* Right panel — cards with hairline borders, muted labels */
+      .right-panel { width: 220px !important; }
+      .running-total { background: white !important; border: 0.5px solid #e5e7eb; border-radius: 8px !important; padding: 14px 16px !important; }
+
+      /* Buttons — quieter secondary, keep primary as bank red */
+      .btn-secondary { background: white !important; border: 0.5px solid #e5e7eb !important; color: #374151 !important; font-weight: 400 !important; }
+      .btn-primary   { background: #6B0E1E !important; border: none !important; color: white !important; font-weight: 500 !important; }
+      .btn-success   { background: #15803d !important; border: none !important; color: white !important; font-weight: 500 !important; }
+
+      /* Section titles inside the card feel a bit friendlier at the new size */
+      .section-header { color: #111 !important; font-weight: 500 !important; }
+    `;
+    if (!document.getElementById("fbmt-modern")) document.head.appendChild(modern);
   }, []);
 
   useEffect(() => {
@@ -8096,9 +8153,13 @@ ${extraPages}
     document.head.appendChild(style);
   }, []);
 
-  // Focus first input field when step changes
+  // Focus first input field when step changes, and pull secondary controls out of
+  // the tab order so Tab flows cleanly through the data inputs to Next.
   useEffect(() => {
     if (!cardContentRef.current) return;
+    // Delete × buttons on repeating rows — skip in tab flow.
+    cardContentRef.current.querySelectorAll('.remove-btn, button[aria-label="Remove"], button.row-del')
+      .forEach(b => b.setAttribute('tabindex', '-1'));
     const first = cardContentRef.current.querySelector(
       'input:not([type="hidden"]):not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"])'
     );
@@ -10291,7 +10352,19 @@ ${extraPages}
             </div>
             <div className="card">
               <div className="card-body">
-                <div className="card-content" ref={cardContentRef}>{renderStep()}</div>
+                <div className="card-content" ref={cardContentRef}
+                  onKeyDown={e => {
+                    // Enter on any text-like input advances to the next step. Skip textareas
+                    // (Enter is a newline there), buttons/selects (Enter has native meaning),
+                    // and any element that explicitly opted out via data-no-advance.
+                    if (e.key !== 'Enter') return;
+                    const t = e.target;
+                    if (!t || t.tagName !== 'INPUT') return;
+                    if (['submit','button','checkbox','radio'].includes(t.type)) return;
+                    if (t.dataset && t.dataset.noAdvance === 'true') return;
+                    e.preventDefault();
+                    if (step < STEPS.length - 1) next();
+                  }}>{renderStep()}</div>
                 <div className="card-nav">
                   <button className="btn btn-secondary" onClick={prev} disabled={step === 0}>Back</button>
                   <span className="step-info">{step+1} / {STEPS.length}</span>
