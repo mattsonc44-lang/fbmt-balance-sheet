@@ -5911,7 +5911,14 @@ export default function BalanceSheet() {
 
       /* Right panel — cards with hairline borders, muted labels */
       .right-panel { width: 220px !important; }
-      .running-total { background: white !important; border: 0.5px solid #e5e7eb; border-radius: 8px !important; padding: 14px 16px !important; }
+      .running-total { background: white !important; color: #111 !important; border: 0.5px solid #e5e7eb; border-radius: 8px !important; padding: 14px 16px !important; box-shadow: none !important; }
+      .running-total .rt-item span { color: #9ca3af !important; opacity: 1 !important; font-size: 10px !important; letter-spacing: .4px !important; }
+      .running-total .rt-item strong { color: #111 !important; font-size: 18px !important; font-weight: 500 !important; letter-spacing: -0.2px; }
+      /* Green/red pills used inside RunningTotal — repurpose for on-brand colors */
+      .running-total .green { color: #15803d !important; }
+      .running-total .red   { color: #dc2626 !important; }
+      .running-total .rt-item.net { border-top: 0.5px solid #f0f0f0 !important; padding-top: 10px !important; }
+      .running-total .rt-item.net strong { font-size: 20px !important; color: #6B0E1E !important; }
 
       /* Buttons — quieter secondary, keep primary as bank red */
       .btn-secondary { background: white !important; border: 0.5px solid #e5e7eb !important; color: #374151 !important; font-weight: 400 !important; }
