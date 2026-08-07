@@ -5920,6 +5920,18 @@ export default function BalanceSheet() {
 
       /* Section titles inside the card feel a bit friendlier at the new size */
       .section-header { color: #111 !important; font-weight: 500 !important; }
+
+      /* Visible focus rings — the base CSS strips these on buttons, which makes
+         it look like Tab skipped over Back/Next when it didn't. */
+      .btn:focus, .btn:focus-visible,
+      .sidebar-item:focus, .sidebar-item:focus-visible,
+      .tab-btn:focus, .tab-btn:focus-visible,
+      input:focus, input:focus-visible,
+      select:focus, select:focus-visible,
+      textarea:focus, textarea:focus-visible {
+        outline: 2px solid #6B0E1E !important;
+        outline-offset: 2px !important;
+      }
     `;
     if (!document.getElementById("fbmt-modern")) document.head.appendChild(modern);
   }, []);
@@ -10366,14 +10378,14 @@ ${extraPages}
                     if (step < STEPS.length - 1) next();
                   }}>{renderStep()}</div>
                 <div className="card-nav">
-                  <button className="btn btn-secondary" onClick={prev} disabled={step === 0}>Back</button>
+                  <button className="btn btn-secondary" onClick={prev} disabled={step === 0} tabIndex={0}>Back</button>
                   <span className="step-info">{step+1} / {STEPS.length}</span>
                   {step < STEPS.length - 1
-                    ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next}>Next</button>
+                    ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next} tabIndex={0}>Next</button>
                     : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
-                        <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}}>✂️ Split</button>
-                        <button className="btn btn-secondary" onClick={generateLenderPackage} style={{background:'#2d5a8e',color:'white'}}>📦 Lender Package</button>
-                        <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint}>🖨 Print Balance Sheet</button>
+                        <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}} tabIndex={0}>✂️ Split</button>
+                        <button className="btn btn-secondary" onClick={generateLenderPackage} style={{background:'#2d5a8e',color:'white'}} tabIndex={0}>📦 Lender Package</button>
+                        <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint} tabIndex={0}>🖨 Print Balance Sheet</button>
                       </div>
                   }
                 </div>
