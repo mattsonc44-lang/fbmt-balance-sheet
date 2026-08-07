@@ -9770,8 +9770,10 @@ ${extraPages}
           ) : (() => {
             const allPaths = getAllFolderPaths(savedSheets);
 
-            // 3-column grid template used by every row so the columns line up perfectly.
-            const ROW_COLS = 'minmax(0,1fr) 130px 130px 96px';
+            // 4-column grid template used by every row so the columns line up perfectly.
+            // Renewal needs room for "Aug 16 · 12d overdue"; actions need to fit
+            // Open / Move / Share CA / Delete on sheet rows without wrapping.
+            const ROW_COLS = 'minmax(0,1fr) 120px 170px 220px';
             const rowBase = { display:'grid', gridTemplateColumns: ROW_COLS, alignItems:'center', gap:12, padding:'12px 18px', borderBottom:'0.5px solid #f0f0f0' };
 
             // Search filter — narrows to sheets whose client name matches, and forces those folders open.
@@ -9859,10 +9861,10 @@ ${extraPages}
                           <div style={{textAlign:'right',fontSize:12,color:'#6b7280'}}>
                             {latestInFolder?.asOfDate ? new Date(latestInFolder.asOfDate + 'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—'}
                           </div>
-                          <div style={{textAlign:'right',fontSize:12,color:renewal.color,fontWeight:renewal.color==='#dc2626'?500:400}}>
+                          <div style={{textAlign:'right',fontSize:12,color:renewal.color,fontWeight:renewal.color==='#dc2626'?500:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
                             {renewal.label}
                           </div>
-                          <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4}} onClick={e=>e.stopPropagation()}>
+                          <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4,whiteSpace:'nowrap'}} onClick={e=>e.stopPropagation()}>
                             {!isEditing && (
                               <>
                                 <button title="Rename" onClick={e=>{e.stopPropagation();setEditingFolder({path,newName:folderName});}}
@@ -9898,10 +9900,10 @@ ${extraPages}
                         <div style={{textAlign:'right',fontSize:12,color:'#6b7280'}}>
                           {s.savedAt ? new Date(s.savedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—'}
                         </div>
-                        <div style={{textAlign:'right',fontSize:12,color:renewal.color,fontWeight:renewal.color==='#dc2626'?500:400}}>
+                        <div style={{textAlign:'right',fontSize:12,color:renewal.color,fontWeight:renewal.color==='#dc2626'?500:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
                           {renewal.label}
                         </div>
-                        <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4}} onClick={e=>e.stopPropagation()}>
+                        <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4,whiteSpace:'nowrap'}} onClick={e=>e.stopPropagation()}>
                           <button onClick={e=>{e.stopPropagation();loadSheet(s.key);}}
                             style={{background:'transparent',border:'none',color:'#6B0E1E',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Open</button>
                           <button onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}
