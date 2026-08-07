@@ -9130,25 +9130,7 @@ ${extraPages}
             </div>
           </div>
 
-          {/* Compact pending banner — subtle, scrolls you to the detail below. */}
-          {totalPending > 0 && (
-            <a href="#pending-items"
-              onClick={e=>{e.preventDefault();document.getElementById('pending-items')?.scrollIntoView({behavior:'smooth',block:'start'});}}
-              style={{textDecoration:'none',display:'block'}}>
-              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'12px 18px',marginBottom:12,display:'flex',alignItems:'center',gap:12}}>
-                <div style={{width:3,height:24,background:'#f59e0b',borderRadius:1}}></div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,color:'#111'}}>
-                    <span style={{fontWeight:500}}>{totalPending} item{totalPending!==1?'s':''}</span> awaiting your review
-                  </div>
-                  <div style={{fontSize:11,color:'#6b7280',marginTop:1}}>
-                    {pendingReviews.length} customer submission{pendingReviews.length!==1?'s':''} · {pendingCAEdits.length} CA edit{pendingCAEdits.length!==1?'s':''}
-                  </div>
-                </div>
-                <span style={{fontSize:11,color:'#6B0E1E'}}>See all →</span>
-              </div>
-            </a>
-          )}
+          {/* Needs attention lives further down, right above the Ask panel — it merges renewals + pending items into one box. */}
 
           {/* ── Import Modal ── */}
           {showImport && (
@@ -9535,42 +9517,114 @@ ${extraPages}
             />
           )}
 
-          {/* Upcoming renewals reminder — clients whose renewal date is within 45 days */}
+          {/* ── Needs attention — one unified merged feed ────────────────────── */}
           {(() => {
             const today = new Date();
-            const window45 = new Date(today); window45.setUTCDate(window45.getUTCDate() + 45);
-            const upcoming = Object.entries(clientNotesMap)
-              .filter(([, n]) => n?.renewal_date && new Date(n.renewal_date + 'T00:00:00Z') >= today && new Date(n.renewal_date + 'T00:00:00Z') <= window45)
-              .map(([clientName, n]) => ({ clientName, renewal_date: n.renewal_date }))
-              .sort((a,b) => a.renewal_date.localeCompare(b.renewal_date));
-            if (upcoming.length === 0) return null;
+            const items = [];
+
+            // Renewals — past due and upcoming within 45 days.
+            Object.entries(clientNotesMap).forEach(([clientName, n]) => {
+              if (!n?.renewal_date) return;
+              const r = new Date(n.renewal_date + 'T00:00:00Z');
+              const days = Math.round((r - today) / 86400000);
+              const short = r.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
+              if (days < 0) {
+                items.push({ kind:'renewal_overdue', priority:0, color:'#dc2626',
+                  title:`${clientName} renewal overdue`, sub:`${short} · ${Math.abs(days)}d ago`,
+                  onClick: ()=>setDashboardClient(clientName) });
+              } else if (days <= 14) {
+                items.push({ kind:'renewal_soon', priority:2, color:'#dc2626',
+                  title:`${clientName} renewal ${days === 0 ? 'today' : `in ${days}d`}`, sub:short,
+                  onClick: ()=>setDashboardClient(clientName) });
+              } else if (days <= 45) {
+                items.push({ kind:'renewal_upcoming', priority:4, color:'#92400e',
+                  title:`${clientName} renewal in ${days}d`, sub:short,
+                  onClick: ()=>setDashboardClient(clientName) });
+              }
+            });
+
+            // Pending CA edits — highest urgency after overdue.
+            pendingCAEdits.forEach(e => {
+              items.push({
+                kind:'ca_edit', priority:1, color:'#1d4ed8',
+                title:`CA edit from ${e.ca_name} for ${e.client_name}`,
+                sub: e.submitted_at ? `Submitted ${new Date(e.submitted_at).toLocaleDateString()}` : 'Awaiting review',
+                onClick: async () => {
+                  try {
+                    const item = await storage.get(e.sheet_key);
+                    const orig = item ? JSON.parse(item.value) : {};
+                    setShowCADiff({...e, original: orig});
+                  } catch { setShowCADiff({...e, original: {}}); }
+                },
+              });
+            });
+
+            // Pending customer submissions — same tier as CA edits.
+            pendingReviews.forEach(review => {
+              const label = review.type === 'balance_sheet' ? 'balance sheet' : 'budget';
+              items.push({
+                kind:'customer_review', priority:1, color:'#15803d',
+                title:`Customer submitted ${label} for ${review.client_name}`,
+                sub: review.submitted_at ? `Submitted ${new Date(review.submitted_at).toLocaleDateString()}` : 'Awaiting review',
+                onClick: () => {
+                  if (review.type === 'budget') {
+                    setBudgetCompare({...review, draft: review.customer_draft || {}});
+                    setBudgetCompareTarget('');
+                  } else {
+                    setBsCompare({review, orig: review.original_data || {}, draft: review.customer_draft || {}});
+                  }
+                },
+              });
+            });
+
+            if (items.length === 0) return null;
+
+            items.sort((a,b) => a.priority - b.priority || a.title.localeCompare(b.title));
+            const shown = items.slice(0, 8);
+            const rest = items.length - shown.length;
+
+            const overdue = items.filter(i => i.kind === 'renewal_overdue').length;
+            const upcomingCount = items.filter(i => i.kind === 'renewal_soon' || i.kind === 'renewal_upcoming').length;
+            const accentColor = overdue > 0 ? '#dc2626' : '#f59e0b';
+
             return (
-              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'12px 18px',marginBottom:12}}>
+              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'14px 18px',marginBottom:12}}>
                 <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
-                  <div style={{width:3,height:24,background:'#dc2626',borderRadius:1}}></div>
+                  <div style={{width:3,height:24,background:accentColor,borderRadius:1}}></div>
                   <div style={{flex:1}}>
                     <div style={{fontSize:12,color:'#111'}}>
-                      <span style={{fontWeight:500}}>{upcoming.length} renewal{upcoming.length!==1?'s':''}</span> coming up in the next 45 days
+                      <span style={{fontWeight:500}}>Needs attention</span>
+                      <span style={{color:'#6b7280',marginLeft:8}}>{items.length} item{items.length!==1?'s':''}</span>
                     </div>
-                    <div style={{fontSize:11,color:'#6b7280',marginTop:1}}>Open the client, then use Share with Customer to send the balance sheet.</div>
+                    <div style={{fontSize:11,color:'#6b7280',marginTop:1}}>
+                      {[
+                        overdue > 0 && `${overdue} overdue`,
+                        pendingCAEdits.length > 0 && `${pendingCAEdits.length} CA edit${pendingCAEdits.length!==1?'s':''}`,
+                        pendingReviews.length > 0 && `${pendingReviews.length} customer submission${pendingReviews.length!==1?'s':''}`,
+                        upcomingCount > 0 && `${upcomingCount} renewal${upcomingCount!==1?'s':''} upcoming`,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
+                  {(pendingReviews.length + pendingCAEdits.length) > 0 && (
+                    <a href="#pending-items"
+                      onClick={e=>{e.preventDefault();document.getElementById('pending-items')?.scrollIntoView({behavior:'smooth',block:'start'});}}
+                      style={{fontSize:11,color:'#6B0E1E',textDecoration:'none'}}>Detail →</a>
+                  )}
                 </div>
                 <div style={{display:'flex',flexDirection:'column'}}>
-                  {upcoming.slice(0, 5).map(u => {
-                    const r = new Date(u.renewal_date + 'T00:00:00Z');
-                    const days = Math.round((r - today) / 86400000);
-                    const short = r.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
-                    return (
-                      <button key={u.clientName} onClick={()=>setDashboardClient(u.clientName)}
-                        style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:12,padding:'8px 10px',background:'transparent',border:'none',borderTop:'0.5px solid #f0f0f0',cursor:'pointer',fontFamily:'inherit',textAlign:'left',alignItems:'center'}}>
-                        <div style={{fontSize:12,color:'#111',fontWeight:500,textAlign:'left'}}>{u.clientName}</div>
-                        <div style={{fontSize:12,color: days <= 14 ? '#dc2626' : '#92400e',fontWeight:days<=14?500:400}}>{short}</div>
-                        <div style={{fontSize:11,color:'#6b7280',minWidth:60,textAlign:'right'}}>in {days}d</div>
-                      </button>
-                    );
-                  })}
-                  {upcoming.length > 5 && (
-                    <div style={{padding:'8px 10px',fontSize:11,color:'#6b7280',borderTop:'0.5px solid #f0f0f0'}}>… {upcoming.length - 5} more</div>
+                  {shown.map((it,i) => (
+                    <button key={i} onClick={it.onClick}
+                      style={{display:'grid',gridTemplateColumns:'3px 1fr auto',gap:10,padding:'8px 10px',background:'transparent',border:'none',borderTop:'0.5px solid #f0f0f0',cursor:'pointer',fontFamily:'inherit',textAlign:'left',alignItems:'center'}}>
+                      <div style={{width:3,height:20,background:it.color,borderRadius:1}}></div>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:12,color:'#111',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{it.title}</div>
+                        <div style={{fontSize:11,color:'#6b7280',marginTop:1}}>{it.sub}</div>
+                      </div>
+                      <span style={{fontSize:11,color:it.color}}>Open →</span>
+                    </button>
+                  ))}
+                  {rest > 0 && (
+                    <div style={{padding:'8px 10px',fontSize:11,color:'#6b7280',borderTop:'0.5px solid #f0f0f0'}}>… {rest} more</div>
                   )}
                 </div>
               </div>
