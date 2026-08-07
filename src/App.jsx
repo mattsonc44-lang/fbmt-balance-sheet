@@ -6564,6 +6564,116 @@ Question: ${q}`,
     XLSX.writeFile(wb, "FBMT_Balance_Sheet_Import_Template.xlsx");
   }
 
+  // Download the current balance sheet + budget as an Excel file matching the
+  // section-code shape the import understands, so this round-trips cleanly.
+  async function exportToExcel() {
+    if (!data.clientName) { alert('Enter a client name before exporting.'); return; }
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    const XLSX = window.XLSX;
+    const s = v => v == null ? '' : String(v);
+    const n = v => (v==null || v==='') ? '' : String(v);
+
+    // ── Balance Sheet tab — CSV/section-code format the parser expects.
+    const bsRows = [
+      ["SECTION","FIELD1","FIELD2","FIELD3","FIELD4","FIELD5","FIELD6","NOTES"],
+      ["CLIENT", s(data.clientName), s(data.asOfDate), "", "", "", "", ""],
+      ["CASH_GLACIER", n(data.cashGlacier), "", "", "", "", "", ""],
+    ];
+    (data.cashOther||[]).filter(r => r.institution || r.amount).forEach(r =>
+      bsRows.push(["CASH_OTHER", s(r.institution), n(r.amount), "", "", "", "", ""]));
+    (data.receivables||[]).filter(r => r.description || r.amount).forEach(r =>
+      bsRows.push(["RECEIVABLES", s(r.description), n(r.amount), "", "", "", "", ""]));
+    (Array.isArray(data.federalPayments) ? data.federalPayments : [{amount:data.federalPayments}])
+      .filter(r => r && (r.program || r.amount)).forEach(r =>
+        bsRows.push(["FEDERAL_PAYMENTS", n(r.amount), s(r.program||""), "", "", "", "", ""]));
+    (data.livestockMarket||[]).filter(r => r.kind || r.value).forEach(r =>
+      bsRows.push(["LIVESTOCK_MARKET", n(r.number), s(r.kind), n(r.value), "", "", "", ""]));
+    (data.farmProducts||[]).filter(r => r.kind || r.quantity).forEach(r =>
+      bsRows.push(["FARM_PRODUCTS", n(r.quantity), s(r.unit||'bu'), s(r.kind), n(r.pricePerUnit), n(r.share||'100'), r.contracted?'true':'false', ""]));
+    (data.cropInvestment||[]).filter(r => r.cropType || r.acres).forEach(r =>
+      bsRows.push(["CROP_INVESTMENT", s(r.cropType), n(r.acres), n(r.valuePerAcre), "", "", "", ""]));
+    (data.supplies||[]).filter(r => r.description || r.value).forEach(r =>
+      bsRows.push(["SUPPLIES", s(r.description), n(r.value), "", "", "", "", ""]));
+    (data.otherCurrent||[]).filter(r => r.description || r.amount).forEach(r =>
+      bsRows.push(["OTHER_CURRENT", s(r.description), n(r.amount), "", "", "", "", ""]));
+    (data.breedingStock||[]).filter(r => r.kind || r.value).forEach(r =>
+      bsRows.push(["BREEDING_STOCK", n(r.number), s(r.kind), n(r.value), "", "", "", ""]));
+    (data.realEstate||[]).filter(r => r.description || r.acres).forEach(r =>
+      bsRows.push(["REAL_ESTATE", n(r.acres), s(r.reType), s(r.description), n(r.valuePerAcre), "", "", ""]));
+    (data.reContracts||[]).filter(r => r.description || r.amount).forEach(r =>
+      bsRows.push(["RE_CONTRACTS", s(r.description), n(r.amount), "", "", "", "", ""]));
+    (data.vehicles||[]).filter(r => r.make || r.value).forEach(r =>
+      bsRows.push(["VEHICLES", s(r.year), s(r.make), s(r.vin), s(r.condition), n(r.value), "", ""]));
+    (data.machinery||[]).filter(r => r.make || r.value).forEach(r =>
+      bsRows.push(["MACHINERY", s(r.year), s(r.make), s(r.size), s(r.serial), s(r.condition), n(r.value), ""]));
+    (data.otherAssets||[]).filter(r => r.description || r.amount).forEach(r =>
+      bsRows.push(["OTHER_ASSETS", s(r.description), n(r.amount), "", "", "", "", ""]));
+    (data.operatingNotes||[]).filter(r => r.creditor || r.balance).forEach(r =>
+      bsRows.push(["OPERATING_NOTES", s(r.creditor), s(r.dueDate), n(r.pmt), n(r.balance), s(r.security), "", ""]));
+    (data.accountsDue||[]).filter(r => r.creditor || r.amount).forEach(r =>
+      bsRows.push(["ACCOUNTS_DUE", s(r.creditor), n(r.amount), "", "", "", "", ""]));
+    (data.intermediatDebt||[]).filter(r => r.creditor || r.principal).forEach(r =>
+      bsRows.push(["INTERMEDIATE_DEBT", s(r.creditor), s(r.security), s(r.dueDate), n(r.annualPmt), n(r.principal), s(r.rate), ""]));
+    (data.reCurrent||[]).filter(r => r.creditor || r.annualPmt).forEach(r =>
+      bsRows.push(["RE_CURRENT", s(r.creditor), n(r.annualPmt), s(r.rate), "", "", "", ""]));
+    if (data.taxesDue) bsRows.push(["TAXES_DUE", n(data.taxesDue), "", "", "", "", "", ""]);
+    (data.otherCurrentLiab||[]).filter(r => r.description || r.amount).forEach(r =>
+      bsRows.push(["OTHER_CURRENT_LIAB", s(r.description), n(r.amount), "", "", "", "", ""]));
+    (data.reMortgages||[]).filter(r => r.lienHolder || r.principal).forEach(r =>
+      bsRows.push(["RE_MORTGAGES", s(r.lienHolder), s(r.terms), s(r.rate), n(r.principal), "", "", ""]));
+    (data.otherLiabilities||[]).filter(r => r.description || r.balance).forEach(r =>
+      bsRows.push(["OTHER_LIABILITIES", s(r.description), n(r.balance), "", "", "", "", ""]));
+
+    const bsWs = XLSX.utils.aoa_to_sheet(bsRows);
+    bsWs["!cols"] = [18,20,16,16,14,12,12,20].map(w=>({wch:w}));
+
+    // ── Annual Budget tab — mirrors what parseBudgetSheet reads.
+    const budgetRows = [
+      ["ANNUAL BUDGET", "", "", "", "", "", "", ""],
+      [`Client: ${data.clientName}`, "", "", "", "", "", "", `As of: ${data.asOfDate}`],
+      [""],
+      ["Crops", "", "", "", "", "", "", ""],
+      ["Acres", "Variety", "Yield", "Price", "Value", "", "", ""],
+    ];
+    (data.budgetCrops||[]).filter(r => r.crop || r.acres).forEach(r => {
+      const acres = Number(r.acres)||0;
+      const yld   = Number(r.yieldPerAcre)||0;
+      const price = Number(r.price)||0;
+      const share = (Number(r.share)||100)/100;
+      const value = acres * yld * price * share;
+      budgetRows.push([acres, r.crop||'', yld, price, value, "", "", ""]);
+    });
+    budgetRows.push([""]);
+    budgetRows.push(["Livestock", "", "", "", "", "", "", ""]);
+    budgetRows.push(["Number", "Type", "Lbs", "Price", "Value", "", "", ""]);
+    (data.budgetLivestock||[]).filter(r => r.type || r.head).forEach(r => {
+      const head = Number(r.head)||0;
+      const lbs  = Number(r.lbs)||0;
+      const price = Number(r.price)||0;
+      budgetRows.push([head, r.type||'', lbs, price, head*lbs*price, "", "", ""]);
+    });
+    budgetRows.push([""]);
+    budgetRows.push(["Miscellaneous Income", "", "", "", "", "", "", ""]);
+    (data.budgetMisc||[]).filter(r => r.description || r.amount).forEach(r => {
+      budgetRows.push([r.description||'', "", "", "", Number(r.amount)||0, "", "", ""]);
+    });
+    budgetRows.push([""]);
+    // Expenses live in cols 6-7 per parseBudgetSheet
+    budgetRows.push(["", "", "", "", "", "", "Expense", "Amount"]);
+    (data.budgetExpenses||[]).filter(r => r.description || r.amount).forEach(r => {
+      budgetRows.push(["", "", "", "", "", "", r.description||'', Number(r.amount)||0]);
+    });
+
+    const budWs = XLSX.utils.aoa_to_sheet(budgetRows);
+    budWs["!cols"] = [12,22,10,10,14,4,22,12].map(w=>({wch:w}));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, bsWs,  "Balance Sheet");
+    XLSX.utils.book_append_sheet(wb, budWs, "Annual Budget");
+    const safeName = String(data.clientName).replace(/[^A-Za-z0-9]+/g, '_');
+    XLSX.writeFile(wb, `FBMT_${safeName}_${data.asOfDate||''}.xlsx`);
+  }
+
   async function loadScript(src) {
     if (window.__loadedScripts && window.__loadedScripts[src]) return;
     return new Promise((res, rej) => {
@@ -10596,6 +10706,7 @@ ${extraPages}
                     ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next} tabIndex={0}>Next</button>
                     : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
                         <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}} tabIndex={0}>✂️ Split</button>
+                        <button className="btn btn-secondary" onClick={exportToExcel} style={{background:'#1B4332',color:'white'}} tabIndex={0}>📥 Excel</button>
                         <button className="btn btn-secondary" onClick={generateLenderPackage} style={{background:'#2d5a8e',color:'white'}} tabIndex={0}>📦 Lender Package</button>
                         <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint} tabIndex={0}>🖨 Print Balance Sheet</button>
                       </div>
