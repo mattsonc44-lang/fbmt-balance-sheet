@@ -6564,309 +6564,221 @@ Question: ${q}`,
     XLSX.writeFile(wb, "FBMT_Balance_Sheet_Import_Template.xlsx");
   }
 
-  // Download the current balance sheet + budget as an Excel file matching the
-  // First Bank of Montana Ag Loan Package template layout. Two-column bank
-  // format with assets on the left (cols A-D) and liabilities on the right
-  // (cols F-J), section headers at the exact rows the template uses.
+  // Download the current balance sheet + budget as an Excel file. Uses the
+  // real First Bank of Montana Ag Loan Package template as the base — logo,
+  // formatting, borders, print settings, and formulas all preserved — and
+  // just overwrites the specific cells that hold client data.
+  //
+  // Requires fbmt-template.xlsx to live in the repo's public/ folder so it's
+  // fetchable at /fbmt-template.xlsx.
+  // Download the current balance sheet + budget as an Excel file. Uses the
+  // real First Bank of Montana Ag Loan Package template as the base — logo,
+  // formatting, borders, print settings, and formulas are all preserved — and
+  // just overwrites the specific cells that hold client data.
+  //
+  // Requires fbmt-template.xlsx to live in the repo's public/ folder so it's
+  // fetchable at /fbmt-template.xlsx.
   async function exportToExcel() {
     if (!data.clientName) { alert('Enter a client name before exporting.'); return; }
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
     const XLSX = window.XLSX;
-    const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-    const N = v => n(v) || 0;
+    const N = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
 
-    // Row-and-column helper: builds a 2D array and lets us drop values at [row][col].
-    const grid = [];
-    const put = (r, c, v) => {
-      while (grid.length <= r) grid.push([]);
-      const row = grid[r];
-      while (row.length <= c) row.push('');
-      row[c] = v;
+    // Fetch the template. If it's missing, give the user a clear message.
+    let wb;
+    try {
+      const resp = await fetch('/fbmt-template.xlsx');
+      if (!resp.ok) throw new Error(resp.status);
+      const buf = await resp.arrayBuffer();
+      wb = XLSX.read(buf, { type:'array', cellStyles:true, cellFormula:true, bookFiles:true });
+    } catch (e) {
+      alert("Couldn't load the FBMT template. Make sure fbmt-template.xlsx is in the public/ folder of the repo (alongside config.js).");
+      return;
+    }
+
+    const bs  = wb.Sheets['Balance Sheet'];
+    const bud = wb.Sheets['Annual Budget'];
+    if (!bs || !bud) { alert("Template is missing 'Balance Sheet' or 'Annual Budget' tab."); return; }
+
+    // Sheet cell setter that preserves the existing cell's style (`s`) and
+    // number format (`z`). Only the value + type are overwritten.
+    const setCell = (sheet) => (r, c, v) => {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const existing = sheet[addr] || {};
+      const t = typeof v === 'number' ? 'n' : 's';
+      sheet[addr] = { ...existing, v, t };
+      const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+      if (r > range.e.r) range.e.r = r;
+      if (c > range.e.c) range.e.c = c;
+      sheet['!ref'] = XLSX.utils.encode_range(range);
     };
+    const putBS  = setCell(bs);
+    const putBud = setCell(bud);
 
-    // ── Header block (rows 0-8) — matches the template exactly.
-    put(1, 2, 'Balance Sheet prepared for:');
-    put(3, 2, 'First Bank of Montana');
-    put(6, 0, 'Name:');   put(6, 1, data.clientName);
-    put(6, 5, 'As of Date:'); put(6, 6, data.asOfDate);
-    put(8, 0, 'ASSETS'); put(8, 3, 'AMOUNT');
-    put(8, 5, 'LIABILITIES'); put(8, 8, 'PMT.'); put(8, 9, 'Balance');
+    // ── BALANCE SHEET — plug into the template's specific cells ────────────
+    // Header block — Name and As of Date. (Everything else, including the
+    // "Balance Sheet prepared for:" title, "First Bank of Montana", and the
+    // ASSETS/LIABILITIES column headers, stays as it is in the template.)
+    putBS(6, 1, data.clientName);
+    putBS(6, 6, data.asOfDate);
 
-    // ── LEFT COLUMN: Assets ────────────────────────────────────────────────
-    // Cash on Hand — row 9
-    put(9, 0, 'Cash on Hand and in Bank:'); put(9, 3, N(data.cashGlacier));
-    // Other bank accounts stacked under cash
+    // ── Assets (left side: cols 0-3) ─────────────────────────────────────
+    putBS(9, 3, N(data.cashGlacier));
     let r = 10;
     (data.cashOther||[]).filter(x=>x.institution||x.amount).forEach(x=>{
-      put(r, 0, x.institution||''); put(r, 3, N(x.amount)); r++;
+      putBS(r, 0, x.institution||''); putBS(r, 3, N(x.amount)); r++;
     });
 
-    // Current Receivables — row 10 in template
-    put(10, 0, 'Current Receivables (Collectible within 12 mos.):');
     r = 11;
     (data.receivables||[]).filter(x=>x.description||x.amount).forEach(x=>{
-      put(r, 0, x.description||''); put(r, 3, N(x.amount)); r++;
+      putBS(r, 0, x.description||''); putBS(r, 3, N(x.amount)); r++;
     });
-    put(13, 0, '(If Above are secured, List type of Security below)');
 
-    // Federal Payments — row 14
-    put(14, 0, 'Federal Payments Due and Receivable');
     const fedAmt = Array.isArray(data.federalPayments)
       ? (data.federalPayments||[]).reduce((s,x)=>s+N(x.amount),0)
       : N(data.federalPayments);
-    put(14, 3, fedAmt);
+    putBS(14, 3, fedAmt);
 
-    // Livestock on Hand — row 15
-    put(15, 0, 'Livestock on Hand (to be marketed):');
-    put(16, 0, 'Number'); put(16, 1, 'Kind & Weight'); put(16, 2, 'Value');
     r = 17;
     (data.livestockMarket||[]).filter(x=>x.kind||x.value).forEach(x=>{
-      put(r, 0, x.number||''); put(r, 1, x.kind||''); put(r, 3, N(x.value)); r++;
+      putBS(r, 0, x.number||''); putBS(r, 1, x.kind||''); putBS(r, 3, N(x.value)); r++;
     });
 
-    // Farm Products — row 22
-    put(22, 0, 'Farm Products on Hand or in Storage');
-    put(23, 0, 'Quantity'); put(23, 1, 'Kind'); put(23, 2, 'Value');
     r = 24;
     (data.farmProducts||[]).filter(x=>x.kind||x.quantity).forEach(x=>{
       const value = N(x.quantity) * N(x.pricePerUnit) * (N(x.share||'100')/100);
-      put(r, 0, x.quantity||''); put(r, 1, `${x.kind||''} ${x.unit||'bu'}`);
-      put(r, 3, value); r++;
+      putBS(r, 0, x.quantity||''); putBS(r, 1, `${x.kind||''} ${x.unit||'bu'}`);
+      putBS(r, 3, value); r++;
     });
 
-    // Crop Investment — row 30
-    put(30, 0, 'Cash Investment  -  Crops');
     const cropInvTotal = (data.cropInvestment||[]).reduce((s,x)=>s+N(x.acres)*N(x.valuePerAcre),0);
-    put(30, 3, cropInvTotal);
+    putBS(30, 3, cropInvTotal);
 
-    // Supplies — row 31
-    put(31, 0, 'Supplies on Hand:');
     r = 32;
     (data.supplies||[]).filter(x=>x.description||x.value).forEach(x=>{
-      put(r, 0, x.description||''); put(r, 3, N(x.value)); r++;
+      putBS(r, 0, x.description||''); putBS(r, 3, N(x.value)); r++;
     });
 
-    // Other current assets — row 34
-    put(34, 0, 'Other Current Assets (Itemize):');
     r = 35;
     (data.otherCurrent||[]).filter(x=>x.description||x.amount).forEach(x=>{
-      put(r, 0, x.description||''); put(r, 3, N(x.amount)); r++;
+      putBS(r, 0, x.description||''); putBS(r, 3, N(x.amount)); r++;
     });
 
-    // TOTAL CURRENT ASSETS — row 38
-    const totalCurrentAssetsCalc = N(data.cashGlacier)
-      + (data.cashOther||[]).reduce((s,x)=>s+N(x.amount),0)
-      + (data.receivables||[]).reduce((s,x)=>s+N(x.amount),0)
-      + fedAmt
-      + (data.livestockMarket||[]).reduce((s,x)=>s+N(x.value),0)
-      + (data.farmProducts||[]).reduce((s,x)=>s+N(x.quantity)*N(x.pricePerUnit)*(N(x.share||'100')/100),0)
-      + cropInvTotal
-      + (data.supplies||[]).reduce((s,x)=>s+N(x.value),0)
-      + (data.otherCurrent||[]).reduce((s,x)=>s+N(x.amount),0);
-    put(38, 0, 'TOTAL CURRENT ASSETS:'); put(38, 3, totalCurrentAssetsCalc);
-
-    // Long-term assets header — row 40
-    put(40, 0, '….. INTERMEDIATE & LONG TERM ASSETS');
-
-    // Breeding Stock — row 41
-    put(41, 0, 'Breeding Stock');
-    put(42, 0, 'Number'); put(42, 1, 'Kind'); put(42, 2, 'Value');
     r = 43;
     (data.breedingStock||[]).filter(x=>x.kind||x.value).forEach(x=>{
-      put(r, 0, x.number||''); put(r, 1, x.kind||''); put(r, 3, N(x.value)); r++;
+      putBS(r, 0, x.number||''); putBS(r, 1, x.kind||''); putBS(r, 3, N(x.value)); r++;
     });
 
-    // Real Estate — row 51
-    put(51, 0, 'REAL ESTATE:');
-    put(52, 0, 'Acres'); put(52, 1, 'Description');
     r = 53;
     (data.realEstate||[]).filter(x=>x.description||x.acres).forEach(x=>{
-      put(r, 0, N(x.acres)); put(r, 1, x.description||''); put(r, 3, N(x.acres)*N(x.valuePerAcre)); r++;
+      putBS(r, 0, N(x.acres)); putBS(r, 1, x.description||''); putBS(r, 3, N(x.acres)*N(x.valuePerAcre)); r++;
     });
 
-    // RE Sale Contracts — row 58
-    put(58, 0, 'Real Estate Sale Contracts Receivable');
     const reContractTotal = (data.reContracts||[]).reduce((s,x)=>s+N(x.amount),0);
-    put(58, 3, reContractTotal);
-    // Individual rows just after
-    r = 59;
-    (data.reContracts||[]).filter(x=>x.description||x.amount).forEach(x=>{
-      put(r, 0, x.description||''); put(r, 3, N(x.amount)); r++;
-    });
+    putBS(58, 3, reContractTotal);
 
-    // Titled Vehicles — row 61
-    const vehiclesTotal = (data.vehicles||[]).reduce((s,x)=>s+N(x.value),0);
-    put(61, 0, 'Titled Vehicles:'); put(61, 3, vehiclesTotal);
-    // Machinery — row 62
-    const machineryTotal = (data.machinery||[]).reduce((s,x)=>s+N(x.value),0);
-    put(62, 0, 'Machinery and Equipment:'); put(62, 3, machineryTotal);
-    // Other Assets — row 63
-    const otherAssetsTotal = (data.otherAssets||[]).reduce((s,x)=>s+N(x.amount),0);
-    put(63, 0, 'Other Assets (Itemize):'); put(63, 3, otherAssetsTotal);
+    putBS(61, 3, (data.vehicles||[]).reduce((s,x)=>s+N(x.value),0));
+    putBS(62, 3, (data.machinery||[]).reduce((s,x)=>s+N(x.value),0));
+    putBS(63, 3, (data.otherAssets||[]).reduce((s,x)=>s+N(x.amount),0));
 
-    // TOTAL ASSETS — row 67
-    const totalAssetsCalc = totalCurrentAssetsCalc
-      + (data.breedingStock||[]).reduce((s,x)=>s+N(x.value),0)
-      + (data.realEstate||[]).reduce((s,x)=>s+N(x.acres)*N(x.valuePerAcre),0)
-      + reContractTotal + vehiclesTotal + machineryTotal + otherAssetsTotal;
-    put(67, 0, '..............TOTAL ASSETS.............'); put(67, 3, totalAssetsCalc);
-
-    // ── RIGHT COLUMN: Liabilities ──────────────────────────────────────────
-    // Operating & Unsecured Notes — row 9
-    put(9, 5, 'Operating & Unsecured Notes:'); put(9, 7, 'Due Date');
+    // ── Liabilities (right side: cols 5-9) ───────────────────────────────
     r = 10;
     (data.operatingNotes||[]).filter(x=>x.creditor||x.balance).forEach(x=>{
-      put(r, 5, x.creditor||''); put(r, 7, x.dueDate||''); put(r, 8, N(x.pmt)); put(r, 9, N(x.balance)); r++;
+      putBS(r, 5, x.creditor||''); putBS(r, 7, x.dueDate||'');
+      putBS(r, 8, N(x.pmt)); putBS(r, 9, N(x.balance)); r++;
     });
 
-    // Accounts Due — row 14
-    put(14, 5, 'Accounts Due:');
     r = 15;
     (data.accountsDue||[]).filter(x=>x.creditor||x.amount).forEach(x=>{
-      put(r, 5, x.creditor||''); put(r, 9, N(x.amount)); r++;
+      putBS(r, 5, x.creditor||''); putBS(r, 9, N(x.amount)); r++;
     });
 
-    // Intermediate Term Debt — row 19
-    put(19, 5, 'Intermediate Term and Installment Debt:'); put(19, 8, 'Annual');
-    put(20, 5, 'Creditor'); put(20, 6, 'Security'); put(20, 7, 'Due Date'); put(20, 8, 'PMT.'); put(20, 9, 'Principal');
     r = 21;
     (data.intermediatDebt||[]).filter(x=>x.creditor||x.principal).forEach(x=>{
-      put(r, 5, x.creditor||''); put(r, 6, x.security||''); put(r, 7, x.dueDate||'');
-      put(r, 8, N(x.annualPmt)); put(r, 9, N(x.principal)); r++;
+      putBS(r, 5, x.creditor||''); putBS(r, 6, x.security||''); putBS(r, 7, x.dueDate||'');
+      putBS(r, 8, N(x.annualPmt)); putBS(r, 9, N(x.principal)); r++;
     });
 
-    // Current portion of RE — row 34
-    put(34, 5, 'Current Portion of Real Estate Mortgages'); put(34, 9, 'Annual');
-    put(35, 5, 'Creditor'); put(35, 9, 'Pmt. Amount');
     r = 36;
     (data.reCurrent||[]).filter(x=>x.creditor||x.annualPmt).forEach(x=>{
-      put(r, 5, x.creditor||''); put(r, 9, N(x.annualPmt)); r++;
+      putBS(r, 5, x.creditor||''); putBS(r, 9, N(x.annualPmt)); r++;
     });
 
-    // Taxes Due — row 40
-    put(40, 5, 'State and Fed. Income Taxes Due:'); put(40, 9, N(data.taxesDue));
+    putBS(40, 9, N(data.taxesDue));
 
-    // Other Current Liab — row 41
-    put(41, 5, 'Other Current Liabilities (Itemize):');
     r = 42;
     (data.otherCurrentLiab||[]).filter(x=>x.description||x.amount).forEach(x=>{
-      put(r, 5, x.description||''); put(r, 9, N(x.amount)); r++;
+      putBS(r, 5, x.description||''); putBS(r, 9, N(x.amount)); r++;
     });
 
-    // Totals right side
-    const totalCurrentLiab = (data.operatingNotes||[]).reduce((s,x)=>s+N(x.balance),0)
-      + (data.accountsDue||[]).reduce((s,x)=>s+N(x.amount),0)
-      + (data.intermediatDebt||[]).reduce((s,x)=>s+N(x.annualPmt),0)
-      + (data.reCurrent||[]).reduce((s,x)=>s+N(x.annualPmt),0)
-      + N(data.taxesDue)
-      + (data.otherCurrentLiab||[]).reduce((s,x)=>s+N(x.amount),0);
-    const intermedLT = (data.intermediatDebt||[]).reduce((s,x)=>s+Math.max(0,N(x.principal)-N(x.annualPmt)),0);
-    const reMortTotal = (data.reMortgages||[]).reduce((s,x)=>s+N(x.principal),0);
-    const otherLiabTotal = (data.otherLiabilities||[]).reduce((s,x)=>s+N(x.balance),0);
-    const totalLiabilities = totalCurrentLiab + intermedLT + reMortTotal + otherLiabTotal;
-
-    put(44, 5, 'TOTAL CURRENT LIABILITIES:'); put(44, 9, totalCurrentLiab);
-    put(45, 5, 'TOTAL INTERMEDIATE & CURRENT LIABILITIES:'); put(45, 9, totalCurrentLiab + intermedLT);
-
-    // RE Mortgages — row 47
-    put(47, 5, 'Real Estate Mortgages & Contracts:');
-    put(48, 5, 'Lien Holder'); put(48, 6, 'Terms'); put(48, 8, '  Principal due beyond 12 months');
     r = 49;
     (data.reMortgages||[]).filter(x=>x.lienHolder||x.principal).forEach(x=>{
-      put(r, 5, x.lienHolder||''); put(r, 6, x.terms||''); put(r, 9, N(x.principal)); r++;
+      putBS(r, 5, x.lienHolder||''); putBS(r, 6, x.terms||''); putBS(r, 9, N(x.principal)); r++;
     });
 
-    // Other Liabilities — row 54
-    put(54, 5, 'Other Liabilities (Itemize):'); put(54, 9, 'Balance');
     r = 55;
     (data.otherLiabilities||[]).filter(x=>x.description||x.balance).forEach(x=>{
-      put(r, 5, x.description||''); put(r, 9, N(x.balance)); r++;
+      putBS(r, 5, x.description||''); putBS(r, 9, N(x.balance)); r++;
     });
 
-    // Totals — rows 60, 62, 64
-    put(60, 5, '.......TOTAL LIABILITIES........'); put(60, 8, totalLiabilities);
-    put(62, 5, '……..WORKING CAPITAL…….'); put(62, 8, totalCurrentAssetsCalc - totalCurrentLiab);
-    put(64, 5, '………..NET WORTH……….');    put(64, 8, totalAssetsCalc - totalLiabilities);
+    // ── ANNUAL BUDGET TAB ──────────────────────────────────────────────────
+    putBud(2, 1, data.clientName);
+    putBud(2, 7, data.asOfDate);
+    putBud(5, 1, (data.asOfDate||'').slice(0, 4));
 
-    // Signatures block
-    put(69, 0, 'For the purpose of obtaining credit, the undersigned states these financial statements are true and accurate.');
-    put(72, 0, 'Signature:  _______________________________'); put(72, 5, 'Signature:  _______________________________');
-    put(74, 0, 'Date:  ____________________________________'); put(74, 5, 'Date:  ____________________________________');
-
-    // Pad grid to full width (10 cols) so column widths apply cleanly.
-    grid.forEach(row => { while (row.length < 10) row.push(''); });
-
-    const bsWs = XLSX.utils.aoa_to_sheet(grid);
-    bsWs['!cols'] = [{wch:22},{wch:20},{wch:10},{wch:14},{wch:6},{wch:22},{wch:20},{wch:12},{wch:12},{wch:14}];
-
-    // ── Annual Budget tab — matches template positions.
-    const bg = [];
-    const bput = (r, c, v) => { while (bg.length <= r) bg.push([]); const row = bg[r]; while (row.length <= c) row.push(''); row[c] = v; };
-    bput(0, 0, 'FIRST BANK OF MONTANA');
-    bput(1, 0, 'ANNUAL AGRI-BUSINESS CASH FLOW');
-    bput(2, 0, 'Name:'); bput(2, 1, data.clientName); bput(2, 6, 'Date:'); bput(2, 7, data.asOfDate);
-    bput(5, 0, 'Production Year:'); bput(5, 1, (data.asOfDate||'').slice(0,4));
-    bput(7, 0, 'INCOME:'); bput(7, 6, 'PROJECTED FARM EXPENSE:');
-    bput(8, 0, '   CROPS'); bput(8, 7, 'Amount');
-    bput(9, 0, 'Acres'); bput(9, 1, 'Variety'); bput(9, 2, 'Yld/Acre'); bput(9, 3, 'Price'); bput(9, 4, 'Value');
-    let br = 10;
+    // Crops — rows 10+ (Acres | Variety | Yield | Price | Value)
+    r = 10;
     (data.budgetCrops||[]).filter(x=>x.crop||x.acres).forEach(x=>{
       const value = N(x.acres)*N(x.yieldPerAcre)*N(x.price)*(N(x.share||'100')/100);
-      bput(br, 0, N(x.acres)); bput(br, 1, x.crop||''); bput(br, 2, N(x.yieldPerAcre));
-      bput(br, 3, N(x.price)); bput(br, 4, value); br++;
+      putBud(r, 0, N(x.acres)); putBud(r, 1, x.crop||'');
+      putBud(r, 2, N(x.yieldPerAcre)); putBud(r, 3, N(x.price)); putBud(r, 4, value);
+      r++;
     });
-    const cropTotal = (data.budgetCrops||[]).reduce((s,x)=>s+N(x.acres)*N(x.yieldPerAcre)*N(x.price)*(N(x.share||'100')/100),0);
-    bput(18, 0, 'TOTAL CROP'); bput(18, 4, cropTotal);
-    bput(19, 0, '   LIVESTOCK');
-    bput(21, 0, 'Number'); bput(21, 1, 'Type'); bput(21, 2, 'Lbs'); bput(21, 3, '$/Lbs'); bput(21, 4, 'Value');
-    br = 22;
+
+    // Livestock — rows 22+
+    r = 22;
     (data.budgetLivestock||[]).filter(x=>x.type||x.head).forEach(x=>{
-      bput(br, 0, N(x.head)); bput(br, 1, x.type||''); bput(br, 2, N(x.lbs)); bput(br, 3, N(x.price));
-      bput(br, 4, N(x.head)*N(x.lbs)*N(x.price)); br++;
+      putBud(r, 0, N(x.head)); putBud(r, 1, x.type||'');
+      putBud(r, 2, N(x.lbs)); putBud(r, 3, N(x.price));
+      putBud(r, 4, N(x.head)*N(x.lbs)*N(x.price));
+      r++;
     });
-    const livestockTotal = (data.budgetLivestock||[]).reduce((s,x)=>s+N(x.head)*N(x.lbs)*N(x.price),0);
-    bput(34, 0, 'TOTAL LIVESTOCK'); bput(34, 4, livestockTotal);
-    bput(35, 0, '   MISCELLANEOUS');
-    bput(37, 4, 'Value');
-    br = 38;
+
+    // Miscellaneous income — rows 36+
+    r = 36;
     (data.budgetMisc||[]).filter(x=>x.description||x.amount).forEach(x=>{
-      bput(br, 0, x.description||''); bput(br, 4, N(x.amount)); br++;
+      putBud(r, 0, x.description||''); putBud(r, 4, N(x.amount));
+      r++;
     });
-    const miscTotal = (data.budgetMisc||[]).reduce((s,x)=>s+N(x.amount),0);
-    bput(47, 0, 'TOTAL MISCELLANEOUS'); bput(47, 4, miscTotal);
-    bput(48, 0, 'TOTAL INCOME'); bput(48, 4, cropTotal + livestockTotal + miscTotal);
 
-    // Right-side expenses
-    const expByLabel = {};
+    // Expenses (right side) — the template has fixed labels in col G at rows 9-30.
+    // Match user's expense descriptions against those labels case-insensitively,
+    // drop the amount in col H, and stack any extras in the first empty rows.
+    const stdRows = {
+      'repairs':9,'feed':10,'seed':11,'fertilizer':12,'chemical':13,
+      'custom hire':14,'vet & medical':15,'fuel - oil-gas':16,'tax  re/per':17,
+      'machine rental':18,'rent - lease':19,'electricty  –  phone':20,
+      'insurance':21,'labor':22,'misc. expense':23,
+      'capital purchase':25,'accounting':26,'irrigation expense':27,
+      'vehicle expense':28,'supplies':29,'living':30,
+    };
+    const extras = [];
     (data.budgetExpenses||[]).filter(x=>x.description||x.amount).forEach(x=>{
-      const k = (x.description||'').toLowerCase().trim();
-      expByLabel[k] = (expByLabel[k]||0) + N(x.amount);
+      const key = (x.description||'').toLowerCase().trim();
+      const row = stdRows[key];
+      if (row) putBud(row, 7, N(x.amount));
+      else extras.push(x);
     });
-    // Standard rows the template has
-    const stdExp = [
-      [9, 'Repairs'], [10, 'Feed'], [11, 'Seed'], [12, 'Fertilizer'], [13, 'Chemical'],
-      [14, 'Custom hire'], [15, 'Vet & Medical'], [16, 'Fuel - oil-gas'], [17, 'Tax  RE/Per'],
-      [18, 'Machine Rental'], [19, 'Rent - Lease'], [20, 'Electricty  –  Phone'],
-      [21, 'Insurance'], [22, 'Labor'], [23, 'Misc. expense'],
-      [25, 'Capital purchase'], [26, 'Accounting'], [27, 'Irrigation expense'],
-      [28, 'Vehicle expense'], [29, 'Supplies'], [30, 'Living'],
-    ];
-    stdExp.forEach(([row, label]) => {
-      bput(row, 6, label);
-      const found = expByLabel[label.toLowerCase().trim()];
-      if (found) { bput(row, 7, found); delete expByLabel[label.toLowerCase().trim()]; }
+    // Extras (custom expense labels) go in the first empty slots at rows 32-35 (before "TOTAL INTEREST EXPENSE")
+    // then wrap to whatever rows are safe below.
+    let extraRow = 33;
+    extras.forEach(x=>{
+      putBud(extraRow, 6, x.description||'');
+      putBud(extraRow, 7, N(x.amount));
+      extraRow++;
     });
-    const totalExp = (data.budgetExpenses||[]).reduce((s,x)=>s+N(x.amount),0);
-    bput(31, 6, 'Total Farm Expense'); bput(31, 7, totalExp);
 
-    while (bg.length < 65) bg.push([]);
-    bg.forEach(row => { while (row.length < 9) row.push(''); });
-    const budWs = XLSX.utils.aoa_to_sheet(bg);
-    budWs['!cols'] = [{wch:10},{wch:22},{wch:10},{wch:10},{wch:14},{wch:4},{wch:20},{wch:12},{wch:14}];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, bsWs,  'Balance Sheet');
-    XLSX.utils.book_append_sheet(wb, budWs, 'Annual Budget');
+    // Save with a client-safe filename.
     const safeName = String(data.clientName).replace(/[^A-Za-z0-9]+/g, '_');
     XLSX.writeFile(wb, `FBMT_${safeName}_${data.asOfDate||''}.xlsx`);
   }
