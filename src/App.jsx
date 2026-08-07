@@ -4101,6 +4101,11 @@ function ClientDashboard({
   const [baseAcres, setBaseAcres] = React.useState([]);           // [{crop, acres}]
   const [interactions, setInteractions] = React.useState([]);     // [{id, occurred_at, type, summary, attendees, created_at}]
   const interactionSaveTimers = React.useRef({});                 // per-id debounce timers for inline edits
+  // Meeting prep brief
+  const [showBriefModal, setShowBriefModal] = React.useState(false);
+  const [briefContent, setBriefContent] = React.useState('');
+  const [briefLoading, setBriefLoading] = React.useState(false);
+  const [briefError, setBriefError] = React.useState('');
   const [notesLoaded, setNotesLoaded] = React.useState(false);
   const [notesStatus, setNotesStatus] = React.useState(''); // 'saving' | 'saved' | ''
   const [showActions, setShowActions] = React.useState(false);
@@ -4364,6 +4369,140 @@ function ClientDashboard({
         headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
       });
     } catch {}
+  };
+
+  // ── Meeting prep brief ──────────────────────────────────────────────────
+  // Assembles context from the latest sheet, YoY changes, pending items,
+  // recent call log, and renewal date, then asks Claude to write a 1-page brief.
+  const generateMeetingBrief = async () => {
+    setShowBriefModal(true);
+    setBriefLoading(true); setBriefError(''); setBriefContent('');
+    try {
+      const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+      const money = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
+
+      const latestSheet = thisClientSheets[thisClientSheets.length - 1];
+      const priorSheet  = thisClientSheets[thisClientSheets.length - 2];
+      if (!latestSheet) throw new Error('No balance sheet on file — save one before generating a brief.');
+      const [latestItem, priorItem] = await Promise.all([
+        storage.get(latestSheet.key),
+        priorSheet ? storage.get(priorSheet.key) : Promise.resolve(null),
+      ]);
+      const latestData = latestItem ? JSON.parse(latestItem.value) : null;
+      const priorData  = priorItem  ? JSON.parse(priorItem.value)  : null;
+      if (!latestData) throw new Error('Could not load latest balance sheet.');
+
+      const t = sheetTotals(latestData);
+      const p = priorData ? sheetTotals(priorData) : null;
+      const ta  = t['TOTAL ASSETS'] || 0;
+      const tl  = t['TOTAL LIABILITIES'] || 0;
+      const tca = t['Total Current Assets'] || 0;
+      const tcl = t['Total Current Liab'] || 0;
+      const wc  = tca - tcl;
+      const currentRatio = tcl > 0 ? (tca/tcl).toFixed(2) : 'n/a';
+      const debtAsset    = ta  > 0 ? ((tl/ta)*100).toFixed(1)+'%' : 'n/a';
+
+      // Budget-side numbers for DSCR
+      const cropInc = (latestData.budgetCrops||[]).reduce((s,r) => s + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
+      const livestockInc = (latestData.budgetLivestock||[]).reduce((s,r) => s + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
+      const miscInc = (latestData.budgetMisc||[]).reduce((s,r) => s + nm(r.amount), 0);
+      const opEx = (latestData.budgetExpenses||[]).filter(r => !r.prepaid).reduce((s,r) => s + nm(r.amount), 0);
+      const debtSvc = (latestData.intermediatDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
+                    + (latestData.reCurrent||[]).reduce((s,r) => s + nm(r.annualPmt), 0);
+      const budgetIncome = cropInc + livestockInc + miscInc;
+      const dscr = debtSvc > 0 ? ((budgetIncome - opEx) / debtSvc).toFixed(2) : 'n/a';
+
+      const priorBlock = p ? `
+YEAR-OVER-YEAR (${priorSheet.asOfDate} → ${latestSheet.asOfDate}):
+- Net worth: ${money(p['NET WORTH']||0)} → ${money(t['NET WORTH']||0)} (${(((t['NET WORTH']||0)-(p['NET WORTH']||0))>=0?'+':'')}${money((t['NET WORTH']||0)-(p['NET WORTH']||0))})
+- Total assets: ${money(p['TOTAL ASSETS']||0)} → ${money(ta)}
+- Total liabilities: ${money(p['TOTAL LIABILITIES']||0)} → ${money(tl)}
+- Working capital: ${money((p['Total Current Assets']||0) - (p['Total Current Liab']||0))} → ${money(wc)}
+` : 'YEAR-OVER-YEAR: no prior sheet on file — this is the first year.\n';
+
+      const pendingBlock = [
+        ...clientPendingCAEdits.map(e => `- CA edit from ${e.ca_name} on ${e.submitted_at ? new Date(e.submitted_at).toLocaleDateString() : '?'}`),
+        ...clientPendingReviews.map(r => `- Customer submitted ${r.type==='balance_sheet'?'balance sheet':'budget'} on ${r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '?'}`),
+      ].join('\n') || '- None';
+
+      const recentInteractions = interactions.slice(0, 5)
+        .map(i => `- ${i.occurred_at} · ${i.type}${i.attendees ? ` with ${i.attendees}` : ''}: ${i.summary || '(no summary)'}`)
+        .join('\n') || '- No interactions logged yet';
+
+      let renewalLine = 'No renewal date set.';
+      if (renewalDate) {
+        const today = new Date();
+        const r = new Date(renewalDate + 'T00:00:00Z');
+        const days = Math.round((r - today) / 86400000);
+        renewalLine = `${renewalDate} (${days >= 0 ? `in ${days} days` : `${Math.abs(days)} days overdue`})`;
+      }
+
+      const baseAcresLine = baseAcres.length
+        ? baseAcres.map(r => `${r.crop || '?'}: ${r.acres || 0} ac`).join(', ')
+        : 'None recorded';
+
+      const prompt = `Client: ${clientName}
+As of: ${latestSheet.asOfDate}
+
+CURRENT SNAPSHOT:
+- Net worth: ${money(t['NET WORTH']||0)}
+- Total assets: ${money(ta)}
+- Total liabilities: ${money(tl)}
+- Working capital: ${money(wc)}
+- Current ratio: ${currentRatio}
+- Debt/asset ratio: ${debtAsset}
+- Projected income: ${money(budgetIncome)}
+- Operating expenses: ${money(opEx)}
+- Annual debt service: ${money(debtSvc)}
+- DSCR: ${dscr}
+
+BASE ACRES: ${baseAcresLine}
+
+RENEWAL: ${renewalLine}
+
+${priorBlock}
+OPEN ITEMS:
+${pendingBlock}
+
+RECENT INTERACTIONS (most recent first):
+${recentInteractions}
+
+NOTES:
+${notes || '(none)'}
+
+Write a 1-page meeting prep brief for the lender. Use EXACTLY these section headings, in this order:
+
+## Where they stand
+## What's changed since last visit
+## Open items
+## Suggested talking points
+## Ask them about
+
+Rules:
+- "Where they stand" is 2-3 sentences citing specific numbers and ratios.
+- "What's changed since last visit" references the year-over-year data and any recent interactions. If none, say so.
+- "Open items" lists concrete things needing action, one per bullet.
+- "Suggested talking points" is 3-5 bullets of things the lender should raise.
+- "Ask them about" is 2-3 questions to ask the client (drawn from open items, unusual changes, or industry context).
+- Keep the whole brief under 400 words.
+- Do not include preamble, closing, or disclaimer — start with the first heading.`;
+
+      const resp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1200,
+          system: 'You are a senior agricultural credit officer at First Bank of Montana preparing another lender for a client meeting. Write concise, practical prep briefs that surface what matters. Cite specific numbers. Use markdown headings exactly as instructed.',
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) throw new Error('AI service returned ' + resp.status);
+      const json = await resp.json();
+      const text = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || 'Unable to generate brief.';
+      setBriefContent(text);
+    } catch (e) { setBriefError(e.message); }
+    setBriefLoading(false);
   };
 
   // ── Credit memo ──────────────────────────────────────────────────────────
@@ -4679,6 +4818,13 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             </button>
             {showActions && (
               <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,background:CARD_BG,border:CARD_BORDER,borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.08)',minWidth:200,zIndex:20,padding:6}}>
+                {sheetSummaries.length > 0 && (
+                  <button onClick={()=>{setShowActions(false);generateMeetingBrief();}}
+                    style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:TEXT_PRI}}
+                    title="AI-generate a 1-page prep brief for your next meeting">
+                    Prep for meeting
+                  </button>
+                )}
                 <button onClick={()=>{setShowActions(false);onNewSheet();}}
                   style={{display:'block',width:'100%',textAlign:'left',fontSize:12,padding:'8px 10px',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',borderRadius:5,color:TEXT_PRI}}>
                   New balance sheet
@@ -5113,6 +5259,65 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
         </>
         )}
       </div>
+
+      {/* ── Meeting prep brief modal ─────────────────────────────────────── */}
+      {showBriefModal && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:2000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:20}}>
+          <div style={{background:'white',borderRadius:10,width:'100%',maxWidth:720,margin:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{padding:'16px 22px',borderBottom:'0.5px solid #f0f0f0',display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
+              <div>
+                <div style={{fontSize:15,fontWeight:500,color:TEXT_PRI}}>Meeting prep — {clientName}</div>
+                <div style={{fontSize:11,color:TEXT_SEC,marginTop:2}}>
+                  {briefLoading ? 'Generating…' : briefContent ? new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
+                </div>
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                {briefContent && (
+                  <>
+                    <button onClick={()=>navigator.clipboard?.writeText(briefContent).then(()=>alert('Copied'))}
+                      style={{fontSize:11,padding:'6px 12px',borderRadius:5,border:'0.5px solid #e5e7eb',background:'white',color:'#374151',cursor:'pointer',fontFamily:'inherit'}}>
+                      Copy
+                    </button>
+                    <button onClick={()=>{
+                      const w = window.open('', '_blank', 'width=800,height=1000');
+                      if (!w) return;
+                      w.document.write(`<!DOCTYPE html><html><head><title>Meeting prep — ${clientName}</title><style>body{font-family:-apple-system,'Segoe UI',sans-serif;max-width:640px;margin:32px auto;padding:0 24px;color:#111;line-height:1.6}h1{font-size:20px;font-weight:500;letter-spacing:-.3px;margin:0 0 4px}.meta{color:#6b7280;font-size:12px;margin-bottom:20px}h2{font-size:14px;font-weight:500;color:#111;margin:20px 0 8px;border-top:0.5px solid #e5e7eb;padding-top:16px}h2:first-of-type{border-top:none;padding-top:0}p,li{font-size:13px}ul{padding-left:18px}@media print{body{max-width:none}}</style></head><body><h1>${clientName}</h1><div class="meta">Meeting prep · ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>${briefContent.replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^- (.+)$/gm,'<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>\s*)+/g,m=>'<ul>'+m+'</ul>').replace(/\n\n/g,'</p><p>').replace(/^(?!<)/gm,'<p>').replace(/<p><h2>/g,'<h2>').replace(/<\/h2><\/p>/g,'</h2>').replace(/<p><ul>/g,'<ul>').replace(/<\/ul><\/p>/g,'</ul>')}<script>setTimeout(()=>window.print(),300);</script></body></html>`);
+                      w.document.close();
+                    }}
+                      style={{fontSize:11,padding:'6px 12px',borderRadius:5,border:'0.5px solid #e5e7eb',background:'white',color:'#374151',cursor:'pointer',fontFamily:'inherit'}}>
+                      Print
+                    </button>
+                  </>
+                )}
+                <button onClick={()=>{setShowBriefModal(false);setBriefContent('');setBriefError('');}}
+                  style={{fontSize:16,padding:'2px 8px',borderRadius:5,border:'none',background:'transparent',color:TEXT_SEC,cursor:'pointer',fontFamily:'inherit'}}>×</button>
+              </div>
+            </div>
+            <div style={{padding:'18px 24px',maxHeight:'70vh',overflowY:'auto'}}>
+              {briefLoading && (
+                <div style={{textAlign:'center',padding:'40px 0',color:TEXT_SEC,fontSize:13}}>
+                  Reading the client file and drafting a brief…
+                </div>
+              )}
+              {briefError && (
+                <div style={{background:'#fef2f2',border:'0.5px solid #fca5a5',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#991b1b'}}>
+                  {briefError}
+                </div>
+              )}
+              {briefContent && !briefLoading && (
+                <div style={{fontSize:13,lineHeight:1.6,color:TEXT_PRI}}>
+                  {briefContent.split('\n').map((line, i) => {
+                    if (/^## /.test(line)) return <div key={i} style={{fontSize:13,fontWeight:500,color:TEXT_PRI,marginTop:16,marginBottom:6,paddingTop:12,borderTop:i>0?'0.5px solid #f0f0f0':'none'}}>{line.replace(/^## /,'')}</div>;
+                    if (/^- /.test(line))  return <div key={i} style={{fontSize:13,color:TEXT_PRI,marginLeft:14,marginBottom:3,position:'relative'}}><span style={{position:'absolute',left:-14,color:TEXT_MUTED}}>•</span>{line.replace(/^- /,'')}</div>;
+                    if (line.trim() === '') return <div key={i} style={{height:6}}/>;
+                    return <div key={i} style={{fontSize:13,marginBottom:4}}>{line}</div>;
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
