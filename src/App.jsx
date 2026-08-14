@@ -5651,13 +5651,14 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
     setSubmitting(true);
     try {
       const existing = caEdits[openSheet.id];
+      let resp;
       if (existing) {
-        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {
+        resp = await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existing.id, {
           method:'PATCH', headers:{...hdr,'Prefer':'return=minimal'},
           body: JSON.stringify({edited_data:editData, submitted_at:new Date().toISOString(), status:'pending'})
         });
       } else {
-        await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits', {
+        resp = await fetch(window.SUPABASE_URL+'/rest/v1/ca_edits', {
           method:'POST', headers:{...hdr,'Prefer':'return=minimal'},
           body: JSON.stringify({
             share_id: openSheet.id,
@@ -5669,6 +5670,11 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
             status: 'pending'
           })
         });
+      }
+      // Surface the real Supabase error instead of silently pretending success.
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`Supabase ${resp.status}: ${body || resp.statusText}`);
       }
       // Fire-and-forget email to the lender who owns this share.
       try {
@@ -5866,100 +5872,320 @@ function CABalanceSheetEditor({ data, setData }) {
 }
 
 // ─── CAEditDiff ──────────────────────────────────────────────────────────────
+// Side-by-side review of CA-proposed changes. Groups changes by section
+// (Assets / Liabilities / Budget), detects added/removed/modified rows,
+// and shows an "Impact on totals" summary at the bottom so the lender can
+// see what the accept would do to Total Assets, Total Liabilities, and Net Worth.
 function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting }) {
-  const diffs = [];
-  const compare = (key, label, oval, nval) => {
-    const os = String(oval||'').trim();
-    const ns = String(nval||'').trim();
-    if (os !== ns) diffs.push({key, label, old: os, new: ns});
+  const [tab, setTab] = React.useState('All');
+  const [showUnchanged, setShowUnchanged] = React.useState(false);
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const money = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+
+  // Section definitions — array fields describe how to detect changes per row.
+  const SECTIONS = {
+    Assets: [
+      { key:'clientName',      label:'Client Name',            type:'scalar' },
+      { key:'asOfDate',        label:'As of Date',             type:'scalar' },
+      { key:'cashGlacier',     label:'Cash · Glacier Bank',    type:'scalar' },
+      { key:'cashOther',       label:'Other Bank',   type:'array', name:'institution', val:'amount' },
+      { key:'receivables',     label:'Receivable',   type:'array', name:'description', val:'amount' },
+      { key:'farmProducts',    label:'Farm Product', type:'array', name:'kind', val:'pricePerUnit', altVals:['quantity'] },
+      { key:'cropInvestment',  label:'Crop Investment', type:'array', name:'cropType', val:'valuePerAcre', altVals:['acres'] },
+      { key:'livestockMarket', label:'Market Livestock', type:'array', name:'kind', val:'value', altVals:['number'] },
+      { key:'breedingStock',   label:'Breeding Stock', type:'array', name:'kind', val:'value', altVals:['number'] },
+      { key:'realEstate',      label:'Real Estate',  type:'array', name:'description', val:'valuePerAcre', altVals:['acres'] },
+      { key:'machinery',       label:'Machinery',    type:'array', name:'make', val:'value' },
+      { key:'vehicles',        label:'Vehicle',      type:'array', name:'make', val:'value' },
+      { key:'supplies',        label:'Supplies',     type:'array', name:'description', val:'value' },
+      { key:'otherCurrent',    label:'Other Current Asset', type:'array', name:'description', val:'amount' },
+      { key:'otherAssets',     label:'Other Asset',  type:'array', name:'description', val:'amount' },
+    ],
+    Liabilities: [
+      { key:'operatingNotes',    label:'Operating Note', type:'array', name:'creditor', val:'balance' },
+      { key:'accountsDue',       label:'Accounts Due',   type:'array', name:'creditor', val:'amount' },
+      { key:'intermediatDebt',   label:'Term Debt',      type:'array', name:'creditor', val:'principal', altVals:['annualPmt'] },
+      { key:'reCurrent',         label:'RE Current',     type:'array', name:'creditor', val:'annualPmt' },
+      { key:'taxesDue',          label:'Taxes Due',      type:'scalar' },
+      { key:'otherCurrentLiab',  label:'Other Current Liab', type:'array', name:'description', val:'amount' },
+      { key:'reMortgages',       label:'RE Mortgage',    type:'array', name:'lienHolder', val:'principal' },
+      { key:'otherLiabilities',  label:'Other Liability', type:'array', name:'description', val:'balance' },
+    ],
+    Budget: [
+      { key:'budgetCrops',     label:'Budget Crop',     type:'array', name:'crop', val:'price', altVals:['yieldPerAcre','acres'] },
+      { key:'budgetLivestock', label:'Budget Livestock', type:'array', name:'type', val:'price' },
+      { key:'budgetMisc',      label:'Budget Misc',     type:'array', name:'description', val:'amount' },
+      { key:'budgetExpenses',  label:'Budget Expense',  type:'array', name:'description', val:'amount' },
+    ],
+    Notes: [
+      { key:'notes', label:'Notes', type:'scalar' },
+    ],
   };
 
-  const scalarFields = [
-    ['clientName','Client Name'],['asOfDate','As of Date'],['cashGlacier','Glacier Bank Cash'],['notes','Notes']
-  ];
-  scalarFields.forEach(([k,l]) => compare(k, l, original[k], edited[k]));
+  // Lightweight totals — mirror of the main app's sheetTotals for the three
+  // headline numbers we care about. Keeps CAEditDiff self-contained.
+  const calcTotals = (d) => {
+    if (!d) return { ta:0, tl:0, nw:0 };
+    const cash = n(d.cashGlacier) + (d.cashOther||[]).reduce((s,r)=>s+n(r.amount),0);
+    const rec  = (d.receivables||[]).reduce((s,r)=>s+n(r.amount),0);
+    const fp   = (d.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100),0);
+    const ci   = (d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
+    const ls   = (d.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0);
+    const sup  = (d.supplies||[]).reduce((s,r)=>s+n(r.value),0);
+    const oc   = (d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
+    const fedP = Array.isArray(d.federalPayments)
+      ? (d.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0)
+      : n(d.federalPayments);
+    const bs   = (d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0);
+    const re   = (d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
+    const rec2 = (d.reContracts||[]).reduce((s,r)=>s+n(r.amount),0);
+    const veh  = (d.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
+    const mach = (d.machinery||[]).reduce((s,r)=>s+n(r.value),0);
+    const oa   = (d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+    const ta   = cash + rec + fedP + ls + fp + ci + sup + oc + bs + re + rec2 + veh + mach + oa;
+    const on   = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0);
+    const ad   = (d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
+    const id   = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0);
+    const rc   = (d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const rm   = (d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0);
+    const ol   = (d.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
+    const ocl  = (d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
+    const tl   = on + ad + id + rc + rm + ol + ocl + n(d.taxesDue);
+    return { ta, tl, nw: ta - tl };
+  };
 
-  const arrayFields = [
-    {field:'cashOther', label:'Other Bank', key:'institution', val:'amount'},
-    {field:'receivables', label:'Receivable', key:'description', val:'amount'},
-    {field:'farmProducts', label:'Farm Product', key:'kind', val:'pricePerUnit'},
-    {field:'realEstate', label:'Real Estate', key:'description', val:'valuePerAcre'},
-    {field:'machinery', label:'Machinery', key:'make', val:'value'},
-    {field:'vehicles', label:'Vehicle', key:'make', val:'value'},
-    {field:'operatingNotes', label:'Operating Note', key:'creditor', val:'balance'},
-    {field:'intermediatDebt', label:'Term Debt', key:'creditor', val:'principal'},
-    {field:'reMortgages', label:'RE Mortgage', key:'lienHolder', val:'principal'},
-  ];
-  arrayFields.forEach(({field, label, key, val}) => {
-    const orig = original[field] || [];
-    const edit = edited[field] || [];
-    const maxLen = Math.max(orig.length, edit.length);
-    for (let i=0; i<maxLen; i++) {
-      const o = orig[i] || {};
-      const e = edit[i] || {};
-      const name = e[key]||o[key]||`${label} ${i+1}`;
-      compare(`${field}_${i}_${key}`, `${label}: ${name} (name)`, o[key], e[key]);
-      compare(`${field}_${i}_${val}`, `${label}: ${name} (value)`, o[val], e[val]);
+  // Build the change rows. Each row: { section, label, sub, before, after, kind, delta }
+  const rows = [];
+  for (const [section, defs] of Object.entries(SECTIONS)) {
+    for (const def of defs) {
+      if (def.type === 'scalar') {
+        const o = String(original[def.key] || '').trim();
+        const e = String(edited[def.key]   || '').trim();
+        rows.push({
+          section, label: def.label, sub:'', kind: o === e ? 'unchanged' : 'edit',
+          before: o || '—', after: e || '—',
+          delta: (def.key === 'cashGlacier' || def.key === 'taxesDue') && o !== e
+            ? (n(e) - n(o) >= 0 ? '+' : '') + money(n(e) - n(o)) : ''
+        });
+      } else {
+        const oArr = original[def.key] || [];
+        const eArr = edited[def.key]   || [];
+        const maxLen = Math.max(oArr.length, eArr.length);
+        for (let i = 0; i < maxLen; i++) {
+          const o = oArr[i];
+          const e = eArr[i];
+          const oExists = o && (String(o[def.name]||'').trim() || n(o[def.val]) || (def.altVals||[]).some(k => n(o[k])));
+          const eExists = e && (String(e[def.name]||'').trim() || n(e[def.val]) || (def.altVals||[]).some(k => n(e[k])));
+          const fmtSummary = (r) => {
+            const nm = r[def.name] || '—';
+            const v = n(r[def.val]);
+            return v ? `${nm} · ${money(v)}` : String(nm);
+          };
+          if (!oExists && eExists) {
+            const eSum = fmtSummary(e);
+            rows.push({
+              section, label: def.label, sub: `Row ${i+1} · added`, kind: 'added',
+              before: '—', after: eSum,
+              delta: n(e[def.val]) ? '+' + money(n(e[def.val])) : 'NEW'
+            });
+          } else if (oExists && !eExists) {
+            const oSum = fmtSummary(o);
+            rows.push({
+              section, label: def.label, sub: `Row ${i+1} · removed`, kind: 'removed',
+              before: oSum, after: '—',
+              delta: n(o[def.val]) ? '-' + money(n(o[def.val])) : 'REMOVED'
+            });
+          } else if (oExists && eExists) {
+            const attrs = [def.name, def.val, ...(def.altVals||[])];
+            let anyChange = false;
+            for (const attr of attrs) {
+              const ov = String(o[attr]||'').trim();
+              const ev = String(e[attr]||'').trim();
+              if (ov !== ev) {
+                anyChange = true;
+                const isNumeric = attr === def.val || (def.altVals||[]).includes(attr);
+                const dText = isNumeric && ov && ev
+                  ? (n(ev) - n(ov) >= 0 ? '+' : '') + money(n(ev) - n(ov))
+                  : '';
+                rows.push({
+                  section, label: `${def.label} · ${e[def.name] || o[def.name] || 'row ' + (i+1)}`,
+                  sub: `Row ${i+1} · ${attr}`, kind: 'edit',
+                  before: ov || '—', after: ev || '—', delta: dText
+                });
+              }
+            }
+            if (!anyChange && showUnchanged) {
+              rows.push({
+                section, label: `${def.label} · ${e[def.name] || o[def.name] || 'row ' + (i+1)}`,
+                sub: `Row ${i+1}`, kind: 'unchanged',
+                before: fmtSummary(o), after: fmtSummary(e), delta: ''
+              });
+            }
+          }
+        }
+      }
     }
+  }
+
+  const changed = rows.filter(r => r.kind !== 'unchanged');
+  const filtered = rows.filter(r => {
+    if (r.kind === 'unchanged' && !showUnchanged) return false;
+    if (tab !== 'All' && r.section !== tab) return false;
+    return true;
   });
 
+  const counts = {
+    All: changed.length,
+    Assets: changed.filter(r => r.section === 'Assets').length,
+    Liabilities: changed.filter(r => r.section === 'Liabilities').length,
+    Budget: changed.filter(r => r.section === 'Budget').length,
+  };
+  const sectionsTouched = new Set(changed.map(r => r.section)).size;
+
+  const origTotals = calcTotals(original);
+  const editTotals = calcTotals(edited);
+  const totalDelta = {
+    ta: editTotals.ta - origTotals.ta,
+    tl: editTotals.tl - origTotals.tl,
+    nw: editTotals.nw - origTotals.nw,
+  };
+  const pctDelta = origTotals.nw !== 0 ? (totalDelta.nw / Math.abs(origTotals.nw) * 100) : null;
+
+  // Group filtered rows by section for the render.
+  const grouped = {};
+  filtered.forEach(r => { (grouped[r.section] = grouped[r.section] || []).push(r); });
+
+  const kindStyles = {
+    added:     { bg: '#f0fdf4', accent: '#15803d', badge: 'NEW' },
+    removed:   { bg: '#fef2f2', accent: '#dc2626', badge: 'REMOVED' },
+    edit:      { bg: '#fefaf3', accent: '#111', badge: '' },
+    unchanged: { bg: 'white',   accent: '#9ca3af', badge: '' },
+  };
+
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}>
-      <div style={{background:'white',borderRadius:12,width:'min(700px,100%)',maxHeight:'85vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
-        <div style={{padding:'18px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:2000,padding:20,overflowY:'auto'}}>
+      <div style={{background:'white',borderRadius:12,width:'min(880px,100%)',margin:'auto',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.4)',maxHeight:'90vh'}}>
+        {/* Header */}
+        <div style={{padding:'16px 22px',borderBottom:'0.5px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}>
           <div>
-            <div style={{fontWeight:800,fontSize:16,color:'#1a1a1a'}}>Review CA Changes — {clientName}</div>
-            <div style={{fontSize:12,color:'#888',marginTop:2}}>Submitted by {caName}</div>
+            <div style={{fontSize:15,fontWeight:500,color:'#111'}}>Review CA changes — {clientName}</div>
+            <div style={{fontSize:12,color:'#6b7280',marginTop:2}}>
+              Submitted by {caName || '—'}
+              {changed.length > 0 && ` · ${changed.length} change${changed.length!==1?'s':''} across ${sectionsTouched} section${sectionsTouched!==1?'s':''}`}
+              {changed.length === 0 && ' · no changes detected'}
+            </div>
           </div>
-          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#888'}}>✕</button>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            <button onClick={onReject} disabled={accepting}
+              style={{background:'white',border:'0.5px solid #fca5a5',color:'#dc2626',fontSize:12,padding:'7px 14px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+              Reject
+            </button>
+            {changed.length > 0 && (
+              <button onClick={onAccept} disabled={accepting}
+                style={{background:'#15803d',border:'none',color:'white',fontSize:12,padding:'7px 16px',borderRadius:6,cursor:accepting?'wait':'pointer',fontFamily:'inherit',fontWeight:500,opacity:accepting?.7:1}}>
+                {accepting ? 'Saving…' : 'Accept & save'}
+              </button>
+            )}
+            <button onClick={onClose}
+              style={{background:'transparent',border:'none',fontSize:18,cursor:'pointer',color:'#6b7280',padding:'2px 8px'}}>×</button>
+          </div>
         </div>
 
-        <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
-          {diffs.length === 0 ? (
-            <div style={{textAlign:'center',padding:40,color:'#888'}}>
-              <div style={{fontSize:32,marginBottom:8}}>✓</div>
-              <div>No changes detected</div>
+        {/* Filter tabs */}
+        <div style={{padding:'0 22px',display:'flex',alignItems:'center',gap:2,borderBottom:'0.5px solid #f0f0f0'}}>
+          {['All','Assets','Liabilities','Budget'].map(t => (
+            <button key={t} onClick={()=>setTab(t)}
+              style={{background:'none',border:'none',color:tab===t?'#111':'#6b7280',fontSize:12,fontWeight:tab===t?500:400,padding:'10px 12px',cursor:'pointer',borderBottom:tab===t?'2px solid #6B0E1E':'2px solid transparent',fontFamily:'inherit'}}>
+              {t} {t !== 'All' ? `(${counts[t]})` : `(${counts.All})`}
+            </button>
+          ))}
+          <label style={{marginLeft:'auto',fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer'}}>
+            <input type="checkbox" checked={showUnchanged} onChange={e=>setShowUnchanged(e.target.checked)} style={{margin:0}}/>
+            Show unchanged
+          </label>
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1,overflowY:'auto'}}>
+          {changed.length === 0 && !showUnchanged ? (
+            <div style={{textAlign:'center',padding:40,color:'#6b7280'}}>
+              <div style={{fontSize:14,color:'#111',marginBottom:6}}>No changes detected</div>
+              <div style={{fontSize:12}}>The CA submitted, but every field matches your current sheet.</div>
             </div>
           ) : (
             <>
-              <div style={{fontSize:13,color:'#555',marginBottom:14}}>{diffs.length} change{diffs.length!==1?'s':''} proposed:</div>
-              <table style={{width:'100%',borderCollapse:'collapse'}}>
-                <thead>
-                  <tr style={{background:'#f3f4f6'}}>
-                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#374151',border:'1px solid #e5e7eb'}}>Field</th>
-                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#dc2626',border:'1px solid #e5e7eb'}}>Current Value</th>
-                    <th style={{padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,color:'#15803d',border:'1px solid #e5e7eb'}}>CA Proposed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {diffs.map((d,i) => (
-                    <tr key={i} style={{background:i%2===0?'white':'#fafafa'}}>
-                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#374151'}}>{d.label}</td>
-                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#dc2626',textDecoration:'line-through'}}>{d.old||'—'}</td>
-                      <td style={{padding:'7px 12px',fontSize:12,border:'1px solid #e5e7eb',color:'#15803d',fontWeight:600}}>{d.new||'—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* Column header */}
+              <div style={{display:'grid',gridTemplateColumns:'220px 1fr 1fr 90px',padding:'8px 22px',background:'#fafafa',borderBottom:'0.5px solid #e5e7eb',fontSize:10,color:'#6b7280',textTransform:'uppercase',letterSpacing:.4,fontWeight:500}}>
+                <div>Field</div>
+                <div>Current (yours)</div>
+                <div>CA proposed</div>
+                <div style={{textAlign:'right'}}>Δ</div>
+              </div>
+              {Object.entries(grouped).map(([sec, items]) => (
+                <React.Fragment key={sec}>
+                  <div style={{padding:'8px 22px 4px',fontSize:11,color:'#6b7280',textTransform:'uppercase',letterSpacing:.4,background:'#fdfcfa'}}>{sec}</div>
+                  {items.map((r,i) => {
+                    const st = kindStyles[r.kind];
+                    return (
+                      <div key={i} style={{display:'grid',gridTemplateColumns:'220px 1fr 1fr 90px',padding:'10px 22px',borderBottom:'0.5px solid #f0f0f0',alignItems:'center',background:st.bg,gap:8}}>
+                        <div>
+                          <div style={{fontSize:13,color:'#111',fontWeight:500}}>{r.label}</div>
+                          {r.sub && <div style={{fontSize:10,color:'#6b7280',marginTop:2}}>{r.sub}</div>}
+                        </div>
+                        <div style={{fontSize:13,color: r.kind === 'removed' ? '#6b7280' : '#6b7280', textDecoration: r.kind === 'removed' ? 'line-through' : 'none'}}>
+                          {r.before}
+                        </div>
+                        <div style={{fontSize:13,color: r.kind === 'removed' ? '#9ca3af' : (r.kind === 'added' ? '#15803d' : (r.kind === 'edit' ? '#111' : '#6b7280')),fontWeight: r.kind !== 'unchanged' ? 500 : 400,fontStyle: r.after === '—' ? 'italic' : 'normal'}}>
+                          {r.after}
+                        </div>
+                        <div style={{textAlign:'right',fontSize:11,color:st.accent,fontWeight:500}}>{r.delta}</div>
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
             </>
           )}
-        </div>
 
-        <div style={{padding:'16px 24px',borderTop:'1px solid #e5e7eb',display:'flex',gap:10,justifyContent:'flex-end'}}>
-          <button onClick={onReject}
-            style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            Reject Changes
-          </button>
-          {diffs.length > 0 && (
-            <button onClick={onAccept} disabled={accepting}
-              style={{background:'#15803d',color:'white',border:'none',borderRadius:7,padding:'9px 20px',fontWeight:700,fontSize:13,cursor:accepting?'wait':'pointer',fontFamily:'inherit',opacity:accepting?.7:1}}>
-              {accepting?'Saving...':'Accept & Save to Sheet'}
-            </button>
+          {/* Impact on totals */}
+          {changed.length > 0 && (
+            <>
+              <div style={{padding:'12px 22px 4px',fontSize:11,color:'#6b7280',textTransform:'uppercase',letterSpacing:.4,background:'#fdfcfa',borderTop:'0.5px solid #e5e7eb',marginTop:8}}>Impact on totals</div>
+              <div style={{padding:'8px 22px 16px'}}>
+                <table style={{width:'100%',fontSize:13,borderCollapse:'collapse'}}>
+                  {[
+                    { label:'Total Assets',       cur: origTotals.ta, next: editTotals.ta, delta: totalDelta.ta, goodDir:'up' },
+                    { label:'Total Liabilities',  cur: origTotals.tl, next: editTotals.tl, delta: totalDelta.tl, goodDir:'down' },
+                  ].map((r,i) => {
+                    const trending = r.delta === 0 ? 'flat' : r.delta > 0 ? 'up' : 'down';
+                    const isGood = r.goodDir === 'up' ? trending === 'up' : trending === 'down';
+                    const color = trending === 'flat' ? '#6b7280' : isGood ? '#15803d' : '#dc2626';
+                    return (
+                      <tr key={i} style={{borderBottom:'0.5px solid #f0f0f0'}}>
+                        <td style={{padding:'6px 0',color:'#6b7280'}}>{r.label}</td>
+                        <td style={{padding:'6px 0',textAlign:'right',color:'#6b7280'}}>{money(r.cur)}</td>
+                        <td style={{padding:'6px 0',textAlign:'right',fontWeight:500,color:'#111'}}>{money(r.next)}</td>
+                        <td style={{padding:'6px 0',textAlign:'right',color:color,width:110}}>
+                          {r.delta === 0 ? '—' : (r.delta > 0 ? '+' : '') + money(r.delta)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{background:'#fdf7f7'}}>
+                    <td style={{padding:'8px 6px',fontWeight:500,color:'#6B0E1E'}}>Net Worth</td>
+                    <td style={{padding:'8px 6px',textAlign:'right',color:'#6b7280'}}>{money(origTotals.nw)}</td>
+                    <td style={{padding:'8px 6px',textAlign:'right',fontWeight:500,color:'#6B0E1E'}}>{money(editTotals.nw)}</td>
+                    <td style={{padding:'8px 6px',textAlign:'right',color: totalDelta.nw === 0 ? '#6b7280' : totalDelta.nw > 0 ? '#15803d' : '#dc2626',fontWeight:500}}>
+                      {totalDelta.nw === 0 ? '—' : (totalDelta.nw > 0 ? '+' : '') + money(totalDelta.nw)}
+                      {pctDelta !== null && totalDelta.nw !== 0 && (
+                        <span style={{marginLeft:4,fontSize:11,opacity:.8}}>({pctDelta > 0 ? '+' : ''}{pctDelta.toFixed(1)}%)</span>
+                      )}
+                    </td>
+                  </tr>
+                </table>
+              </div>
+            </>
           )}
-          <button onClick={onClose}
-            style={{background:'#f3f4f6',color:'#374151',border:'1px solid #d1d5db',borderRadius:7,padding:'9px 20px',fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            Close
-          </button>
         </div>
       </div>
     </div>
@@ -7701,7 +7927,10 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
 
       const resp = await fetch(apiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-fbmt-secret": window.FBMT_FUNCTION_SECRET || '',
+        },
         body: JSON.stringify(requestBody)
       });
       if (!resp.ok) {
@@ -9382,16 +9611,34 @@ ${extraPages}
               <input type="date" className="text-input" style={{maxWidth:160}} value={data.asOfDate}
                 onChange={e=>set("asOfDate",e.target.value)} />
             </div>
-            <button className="btn btn-save" onClick={saveSheet}
-              disabled={!data.clientName || saveStatus === "saving"}>
-              {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
-            </button>
-            <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
-            {data.clientName && (
-              <button onClick={()=>{ setSharePreType('bs'); setShowSharePre(true); }}
-                style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
-                🔗 Share with Customer
-              </button>
+            {/* In CA review mode, the normal Save writes to balance_sheets and clashes with the
+                lender's UNIQUE (client_name, as_of_date) row → 409. Swap it out for the ca_edits
+                submit path. */}
+            {caOpenShare ? (
+              <>
+                <button className="btn btn-save" onClick={submitCaEditFromWizard}
+                  style={{background:'#fbbf24',color:'#1a1a1a'}}>
+                  ✅ Submit Changes to Lender
+                </button>
+                <button className="btn btn-secondary"
+                  onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}>
+                  ← Back to Portal
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-save" onClick={saveSheet}
+                  disabled={!data.clientName || saveStatus === "saving"}>
+                  {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save Balance Sheet"}
+                </button>
+                <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
+                {data.clientName && (
+                  <button onClick={()=>{ setSharePreType('bs'); setShowSharePre(true); }}
+                    style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
+                    🔗 Share with Customer
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -10501,13 +10748,82 @@ ${extraPages}
     );
   }
 
+  // ── CA submit — sends the CA's current wizard edits back to the lender for review.
+  //    Inserts (or updates) a row in ca_edits with status='pending'. Fire-and-forget
+  //    email to the lender. On success, drop them back to the portal.
+  const submitCaEditFromWizard = async () => {
+    if (!caOpenShare) return;
+    try {
+      // Was there already a pending edit on this share? PATCH it; otherwise POST new.
+      const existRes = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?share_id=eq.'+caOpenShare.id
+        + '&ca_user_id=eq.'+encodeURIComponent(session?.user?.id||'')+'&select=id&limit=1',
+        { headers: supaHeaders() });
+      const existRows = existRes.ok ? await existRes.json() : [];
+      const existingId = existRows[0]?.id;
+      let resp;
+      if (existingId) {
+        resp = await fetch(SUPABASE_URL+'/rest/v1/ca_edits?id=eq.'+existingId, {
+          method:'PATCH',
+          headers:{...supaHeaders(),'Prefer':'return=minimal'},
+          body: JSON.stringify({ edited_data: data, submitted_at: new Date().toISOString(), status:'pending' }),
+        });
+      } else {
+        resp = await fetch(SUPABASE_URL+'/rest/v1/ca_edits', {
+          method:'POST',
+          headers:{...supaHeaders(),'Prefer':'return=minimal'},
+          body: JSON.stringify({
+            share_id: caOpenShare.id,
+            ca_user_id: session?.user?.id,
+            ca_name: profile?.full_name || session?.user?.email || '',
+            client_name: caOpenShare.client_name,
+            sheet_key: caOpenShare.sheet_key,
+            edited_data: data,
+            status: 'pending',
+          }),
+        });
+      }
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`Supabase ${resp.status}: ${body || resp.statusText}`);
+      }
+      // Fire-and-forget email to the lender.
+      try {
+        await fetch('/.netlify/functions/notify-submission', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            type:'ca_edit',
+            clientName: caOpenShare.client_name,
+            shareId: caOpenShare.id,
+            submittedAt: new Date().toISOString(),
+            lenderEmail: caOpenShare.lender_email || '',
+            caName: profile?.full_name || session?.user?.email || '',
+          }),
+        });
+      } catch {}
+      alert('Changes submitted to lender for review.');
+      setCaOpenShare(null); setData(emptyData()); setScreen("home");
+    } catch (e) {
+      alert('Submit failed: ' + e.message);
+    }
+  };
+
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
       {caOpenShare && (
-        <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13}}>
-          <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Changes will be submitted to lender for review</span>
-          <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'3px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>← Back to Portal</button>
+        <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13,gap:12,flexWrap:'wrap'}}>
+          <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Edit any fields, then submit for lender review</span>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}
+              style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
+              ← Back to Portal
+            </button>
+            <button onClick={submitCaEditFromWizard}
+              style={{background:'#fbbf24',color:'#1a1a1a',border:'none',borderRadius:5,padding:'4px 16px',cursor:'pointer',fontSize:12,fontFamily:'inherit',fontWeight:700}}>
+              ✅ Submit Changes to Lender
+            </button>
+          </div>
         </div>
       )}
 
