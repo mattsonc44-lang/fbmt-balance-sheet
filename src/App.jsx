@@ -1231,7 +1231,8 @@ function BudgetView({
 // ─── ComparisonView ───────────────────────────────────────────────────────────
 function ComparisonView({
   compSheets, compLoading, compInsight, compInsightLoading,
-  generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS
+  generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS,
+  onDeleteSheet,
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
@@ -1391,29 +1392,46 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
             const wouldBeLast = on && activeYears.length <= 2;
             const sheetForY = compSheets.find(s => s.date === y);
             const issueCount = (sheetForY?.issues || []).length;
-            const tooltip = wouldBeLast
-              ? 'At least 2 sheets are required for a comparison.'
-              : issueCount
-                ? `${issueCount} data-quality note${issueCount>1?'s':''} on this sheet`
-                : '';
+            const folder = sheetForY?.folderPath?.length ? sheetForY.folderPath.join(' / ') : 'Unfiled';
+            const savedAt = sheetForY?.savedAt ? new Date(sheetForY.savedAt).toLocaleDateString() : '?';
+            const tooltip = [
+              `Folder: ${folder}`,
+              `Saved: ${savedAt}`,
+              wouldBeLast && 'At least 2 sheets are required for a comparison.',
+              issueCount && `${issueCount} data-quality note${issueCount>1?'s':''} on this sheet`,
+            ].filter(Boolean).join(' · ');
             return (
-              <button key={y}
-                title={tooltip}
-                onClick={() => {
-                  const sel = on
-                    ? activeYears.filter(x => x !== y)
-                    : [...activeYears, y].sort();
-                  if (sel.length >= 2) setSelectedYears(sel);
-                }}
-                style={{padding:'4px 12px',borderRadius:20,border:'1.5px solid',cursor:wouldBeLast?'not-allowed':'pointer',fontSize:13,fontWeight:600,
-                  background: on ? '#6B0E1E' : 'white',
-                  color:       on ? 'white'   : '#6B0E1E',
-                  borderColor: '#6B0E1E',
-                  opacity: wouldBeLast ? .6 : 1}}>
-                {on ? '✓ ' : ''}{y}{issueCount ? ' ⚠' : ''}
-              </button>
+              <span key={y} style={{display:'inline-flex',alignItems:'stretch',borderRadius:20,border:'1.5px solid #6B0E1E',overflow:'hidden',opacity: wouldBeLast ? .6 : 1}}>
+                <button title={tooltip}
+                  onClick={() => {
+                    const sel = on
+                      ? activeYears.filter(x => x !== y)
+                      : [...activeYears, y].sort();
+                    if (sel.length >= 2) setSelectedYears(sel);
+                  }}
+                  style={{padding:'4px 12px',border:'none',cursor:wouldBeLast?'not-allowed':'pointer',fontSize:13,fontWeight:600,
+                    background: on ? '#6B0E1E' : 'white',
+                    color:       on ? 'white'   : '#6B0E1E',
+                    fontFamily:'inherit'}}>
+                  {on ? '✓ ' : ''}{y}{issueCount ? ' ⚠' : ''}
+                </button>
+                {onDeleteSheet && sheetForY?.key && (
+                  <button
+                    onClick={()=>onDeleteSheet(sheetForY.key, `${y} (${folder})`)}
+                    title={`Delete this saved sheet from the database (folder: ${folder})`}
+                    style={{padding:'4px 8px',border:'none',borderLeft:'1px solid ' + (on ? 'rgba(255,255,255,.35)' : '#6B0E1E'),cursor:'pointer',
+                      background: on ? '#6B0E1E' : 'white',
+                      color:       on ? 'rgba(255,255,255,.8)' : '#6B0E1E',
+                      fontSize:11,fontFamily:'inherit'}}>
+                    ×
+                  </button>
+                )}
+              </span>
             );
           })}
+        </div>
+        <div style={{fontSize:11,color:'#6b7280',marginTop:6}}>
+          Hover a chip to see which folder each sheet lives in. Use × to remove a stray sheet from the database.
         </div>
 
         {/* Data-quality notes for selected sheets */}
@@ -7876,7 +7894,12 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
               // Only flag warnings on saved sheets (info-level is noisy retroactively;
               // errors would have blocked the save).
               const issues = validateSheet(p).filter(i => i.severity === 'warning');
-              sheets.push({ date: p.asOfDate, totals, issues });
+              sheets.push({
+                date: p.asOfDate, totals, issues,
+                key,                                    // so we can delete strays from the selector
+                folderPath: p.folderPath || [],         // for tooltip / "which folder is this in"
+                savedAt: p._savedAt || null,
+              });
             }
           } catch {}
         }
@@ -7890,6 +7913,18 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       } else { setCompSheets([]); }
     } catch {}
     setCompLoading(false);
+  };
+
+  // Remove a stray sheet directly from the comparison view.
+  const deleteComparisonSheet = async (key, label) => {
+    if (!window.confirm(`Permanently delete this saved sheet?\n\n${label}\n\nThis removes it from Supabase and can't be undone.`)) return;
+    try {
+      await storage.delete(key);
+      await loadComparisonSheets();
+      await loadSavedList();
+    } catch (e) {
+      alert('Delete failed: ' + (e?.message || e));
+    }
   };
 
   const generateInsights = async () => {
@@ -11256,6 +11291,7 @@ ${extraPages}
               SECTION_BREAKS={SECTION_BREAKS}
               SECTION_HEADERS={SECTION_HEADERS}
               BOLD_ROWS={BOLD_ROWS}
+              onDeleteSheet={deleteComparisonSheet}
             />
           </div>
         </div>
