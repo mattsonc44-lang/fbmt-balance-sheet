@@ -1230,11 +1230,23 @@ function BudgetView({
 
 // ─── ComparisonView ───────────────────────────────────────────────────────────
 function ComparisonView({
-  compSheets, compLoading, compInsight, compInsightLoading,
+  compSheets: rawCompSheets, compLoading, compInsight, compInsightLoading,
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS,
-  onDeleteSheet,
+  onDeleteSheet, currentFolderPath,
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
+  const [showAllFolders, setShowAllFolders] = React.useState(false);
+
+  // Filter compSheets to only those in the currently-open sheet's folder — unless
+  // the user explicitly wants to see across folders. Fixes the "why is this old
+  // sheet showing up" surprise for clients whose sheets got moved between folders.
+  const folderKey = JSON.stringify(currentFolderPath || []);
+  const currentFolderLabel = (currentFolderPath && currentFolderPath.length)
+    ? currentFolderPath.join(' / ') : 'Unfiled';
+  const otherFolderSheets = rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) !== folderKey);
+  const compSheets = showAllFolders
+    ? rawCompSheets
+    : rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) === folderKey);
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
   const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
 
@@ -1366,9 +1378,19 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
 
       {/* ── Sheet selector — always visible ── */}
       <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:'12px 16px',marginBottom:16}}>
-        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8,flexWrap:'wrap'}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6,flexWrap:'wrap'}}>
           <span style={{fontSize:13,color:'#374151',fontWeight:700}}>Compare which sheets?</span>
-          <span style={{fontSize:12,color:'#888'}}>{activeYears.length} of {allYears.length} selected</span>
+          <span style={{fontSize:12,color:'#888'}}>
+            {activeYears.length} of {allYears.length} · scoped to <strong style={{color:'#374151'}}>{currentFolderLabel}</strong>
+          </span>
+          {otherFolderSheets.length > 0 && (
+            <label style={{fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer',marginLeft:'auto'}}>
+              <input type="checkbox" checked={showAllFolders} onChange={e=>{setShowAllFolders(e.target.checked);setSelectedYears(null);}} style={{margin:0}}/>
+              Include {otherFolderSheets.length} sheet{otherFolderSheets.length!==1?'s':''} from other folders
+            </label>
+          )}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8,flexWrap:'wrap'}}>
           <div style={{marginLeft:'auto',display:'flex',gap:6}}>
             <button onClick={()=>setSelectedYears(allYears)}
               style={{padding:'3px 10px',borderRadius:5,border:'1px solid #ddd',background:'white',fontSize:12,cursor:'pointer',color:'#374151',fontFamily:'inherit'}}>
@@ -11292,6 +11314,7 @@ ${extraPages}
               SECTION_HEADERS={SECTION_HEADERS}
               BOLD_ROWS={BOLD_ROWS}
               onDeleteSheet={deleteComparisonSheet}
+              currentFolderPath={data.folderPath || []}
             />
           </div>
         </div>
