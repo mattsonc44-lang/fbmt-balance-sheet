@@ -7955,7 +7955,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   const moveSheet = async (key, newFolderPath) => {
     try {
       const item = await storage.get(key);
-      if (!item) return;
+      if (!item) { alert("Couldn't load that sheet — try refreshing."); return; }
       const p = JSON.parse(item.value);
       p.folderPath = newFolderPath;
       p._savedAt = new Date().toISOString();
@@ -7966,7 +7966,9 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
       }
       await loadSavedList();
       setShowMoveModal(null);
-    } catch {}
+    } catch (e) {
+      alert('Move failed: ' + (e?.message || e));
+    }
   };
 
   // ── Build folder tree from saved sheets ─────────────────────────────────────
@@ -10491,7 +10493,15 @@ ${extraPages}
                 <input className="text-input" type="text" value={newFolderName}
                   placeholder="Folder name..." autoFocus
                   onChange={e=>setNewFolderName(e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Enter"&&newFolderName.trim()){setShowCreateFolder(null);setNewFolderName("");}}} />
+                  onKeyDown={e=>{
+                    if(e.key==="Enter" && newFolderName.trim()){
+                      const newPath=[...showCreateFolder,newFolderName.trim()];
+                      createFolder(newPath);
+                      setShowCreateFolder(null);
+                      setNewFolderName("");
+                    }
+                    if(e.key==="Escape"){ setShowCreateFolder(null); setNewFolderName(""); }
+                  }} />
                 <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end"}}>
                   <button className="btn btn-secondary" onClick={()=>{setShowCreateFolder(null);setNewFolderName("");}}>Cancel</button>
                   <button className="btn btn-primary"
