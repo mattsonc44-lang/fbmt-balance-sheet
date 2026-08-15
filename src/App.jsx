@@ -4165,13 +4165,30 @@ function ClientDashboard({
   const [showActions, setShowActions] = React.useState(false);
   const saveTimer = React.useRef(null);
 
-  // Filter to just this client's sheets, in date order.
-  const thisClientSheets = React.useMemo(() =>
-    savedSheets
-      .filter(s => s.clientName === clientName)
-      .sort((a,b) => a.asOfDate.localeCompare(b.asOfDate)),
-    [savedSheets, clientName]
-  );
+  // Filter to this client's sheets, in date order.
+  // Includes sheets that either match the client name exactly OR live in the
+  // same folder as the most recent sheet for this client name — so typo'd
+  // variants ("ABC Investmest" vs "ABC RE Investmests") still count as the
+  // same client for credit memos, meeting prep, and history. Dedup by key.
+  const thisClientSheets = React.useMemo(() => {
+    const nameMatches = savedSheets.filter(s => s.clientName === clientName);
+    // Anchor folder = most recent name-matching sheet's folder path.
+    const anchor = [...nameMatches].sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''))[0];
+    const anchorFolderKey = anchor && anchor.folderPath && anchor.folderPath.length
+      ? JSON.stringify(anchor.folderPath)
+      : null;
+    const seen = new Set();
+    const out = [];
+    savedSheets.forEach(s => {
+      const sameName = s.clientName === clientName;
+      const sameFolder = anchorFolderKey && JSON.stringify(s.folderPath || []) === anchorFolderKey;
+      if ((sameName || sameFolder) && !seen.has(s.key)) {
+        seen.add(s.key);
+        out.push(s);
+      }
+    });
+    return out.sort((a,b) => (a.asOfDate||'').localeCompare(b.asOfDate||''));
+  }, [savedSheets, clientName]);
 
   // Filter pending items to this client.
   const clientPendingReviews = pendingReviews.filter(r => r.client_name === clientName);
@@ -6340,6 +6357,9 @@ export default function BalanceSheet() {
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
   const [data, setData] = useState(emptyData());
+  // Storage key the sheet was loaded from, so we can delete the old row if
+  // the user renames the client (or changes as-of date) and saves.
+  const [originalKey, setOriginalKey] = useState(null);
 
   useEffect(() => {
     const fl = document.createElement("link");
@@ -6777,6 +6797,12 @@ Question: ${q}`,
       const fp = folderPathOverride !== undefined ? folderPathOverride : (data.folderPath || []);
       const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString() };
       await storage.set(key, JSON.stringify(savePayload));
+      // If we loaded from a different key (user renamed client or changed
+      // as-of date), delete the old row so we don't leave a stale duplicate.
+      if (originalKey && originalKey !== key) {
+        try { await storage.delete(originalKey); } catch {}
+      }
+      setOriginalKey(key);
       set("folderPath", fp);
       setSaveStatus("saved");
       await loadSavedList();
@@ -6791,11 +6817,13 @@ Question: ${q}`,
       const item = await storage.get(key);
       if (item) {
         const p = JSON.parse(item.value); delete p._savedAt;
-        setData({ ...emptyData(), ...p }); setStep(0); setScreen("wizard");
+        setData({ ...emptyData(), ...p });
+        setOriginalKey(key);           // remember where we loaded from
+        setStep(0); setScreen("wizard");
       }
     } catch {}
   };
-  const startNew = () => { setData(emptyData()); setStep(0); setScreen("wizard"); };
+  const startNew = () => { setData(emptyData()); setOriginalKey(null); setStep(0); setScreen("wizard"); };
 
   // ── Import helpers ─────────────────────────────────────────────────────────
   async function downloadTemplate() {
@@ -7986,6 +8014,35 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
         return label + ": " + prevStr + " to $" + v.toLocaleString() + " (" + (diff>=0?"+":"") + diff.toLocaleString() + ", " + pct + "%)";
       }).join("; ");
     }).join("\n");
+
+    // Load full sheet data for each comparison year to compute projected income /
+    // expenses / debt service. compSheets only has balance-sheet totals, so without
+    // this the AI has no way to see the budget page and ends up saying "no
+    // projected income" even though the budget is populated.
+    const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
+    const budgetRows = [];
+    for (const s of compSheets) {
+      try {
+        const item = await storage.get(s.key);
+        if (!item) continue;
+        const p = JSON.parse(item.value);
+        const cropInc      = (p.budgetCrops||[]).reduce((a,r) => a + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
+        const livestockInc = (p.budgetLivestock||[]).reduce((a,r) => a + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
+        const miscInc      = (p.budgetMisc||[]).reduce((a,r) => a + nm(r.amount), 0);
+        const totalInc     = cropInc + livestockInc + miscInc;
+        const opEx         = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((a,r) => a + nm(r.amount), 0);
+        const debtSvc      = (p.intermediatDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
+                           + (p.reCurrent||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
+                           + (p.budgetProposedDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0);
+        const dscr = debtSvc > 0 ? ((totalInc - opEx) / debtSvc).toFixed(2) : 'n/a';
+        const fmtM = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
+        budgetRows.push(`- ${s.date} (${p.clientName || 'unknown'}): projected income ${fmtM(totalInc)} (crop ${fmtM(cropInc)}, livestock ${fmtM(livestockInc)}, misc ${fmtM(miscInc)}), operating exp ${fmtM(opEx)}, debt service ${fmtM(debtSvc)}, DSCR ${dscr}`);
+      } catch {}
+    }
+    const budgetBlock = budgetRows.length
+      ? "\n\nBUDGET / PROJECTED CASH FLOW (per year):\n" + budgetRows.join("\n")
+      : "\n\nBUDGET: no budget data available on these sheets.";
+
     try {
       // Call our Netlify proxy function (avoids CORS + keeps API key private)
       const apiEndpoint = '/.netlify/functions/analyze';
@@ -7996,11 +8053,13 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
         system: "You are an agricultural loan officer analyst at First Bank of Montana. "
           + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
           + "Focus on significant changes, trends, working capital, debt load, and net worth. "
-          + "Write in plain language. Use simple headers. Max 5 key observations.",
+          + "Write in plain language. Use simple headers. Max 5 key observations. "
+          + "Only claim data is missing if it is explicitly absent from what was provided.",
         messages: [{
           role: "user",
           content: "Client: " + data.clientName + "\nYears: " + years
-            + "\n\nChanges:\n" + rows
+            + "\n\nBalance-sheet changes:\n" + rows
+            + budgetBlock
             + "\n\nProvide insights on the most significant changes and financial health."
         }]
       };
