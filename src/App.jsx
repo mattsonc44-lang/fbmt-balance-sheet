@@ -1419,7 +1419,11 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
             const issueCount = (sheetForY?.issues || []).length;
             const folder = sheetForY?.folderPath?.length ? sheetForY.folderPath.join(' / ') : 'Unfiled';
             const savedAt = sheetForY?.savedAt ? new Date(sheetForY.savedAt).toLocaleDateString() : '?';
+            // Detect if the folder has mixed client names (typos/variants)
+            const uniqueClientNames = Array.from(new Set(compSheets.map(s => s.clientName).filter(Boolean)));
+            const nameMismatch = uniqueClientNames.length > 1 && sheetForY?.clientName && sheetForY.clientName !== clientName;
             const tooltip = [
+              sheetForY?.clientName && `Client: ${sheetForY.clientName}`,
               `Folder: ${folder}`,
               `Saved: ${savedAt}`,
               wouldBeLast && 'At least 2 sheets are required for a comparison.',
@@ -1438,7 +1442,7 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
                     background: on ? '#6B0E1E' : 'white',
                     color:       on ? 'white'   : '#6B0E1E',
                     fontFamily:'inherit'}}>
-                  {on ? '✓ ' : ''}{y}{issueCount ? ' ⚠' : ''}
+                  {on ? '✓ ' : ''}{y}{issueCount ? ' ⚠' : ''}{nameMismatch ? ' *' : ''}
                 </button>
                 {onDeleteSheet && sheetForY?.key && (
                   <button
@@ -1457,6 +1461,13 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
         </div>
         <div style={{fontSize:11,color:'#6b7280',marginTop:6}}>
           Hover a chip to see which folder each sheet lives in. Use × to remove a stray sheet from the database.
+          {(() => {
+            const uniq = Array.from(new Set(compSheets.map(s => s.clientName).filter(Boolean)));
+            if (uniq.length > 1) {
+              return <span style={{marginLeft:6,color:'#b45309'}}>* = client name differs from currently-open sheet (folder groups them together anyway).</span>;
+            }
+            return null;
+          })()}
         </div>
 
         {/* Data-quality notes for selected sheets */}
@@ -7902,40 +7913,49 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
   }, [JSON.stringify(data.linkedEntities), savedSheets.length]);
 
 
+  // Comparison groups sheets by FOLDER (using the already-loaded savedSheets metadata)
+  // rather than by exact client-name match. That way if a client's sheets got
+  // saved under slightly-different names (typos, punctuation), they still compare
+  // together as long as they live in the same folder. Also includes any sheets
+  // outside the folder that DO share the exact client name, for backwards compat.
   const loadComparisonSheets = async () => {
-    if (!data.clientName) return;
+    if (!data.clientName && (!data.folderPath || !data.folderPath.length)) return;
     setCompLoading(true); setCompInsight("");
     try {
-      const prefix = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":";
-      const result = await storage.list(prefix);
-      if (result && result.keys && result.keys.length > 0) {
-        const sheets = [];
-        for (const key of result.keys) {
-          try {
-            const item = await storage.get(key);
-            if (item) {
-              const p = JSON.parse(item.value);
-              const totals = sheetTotals(p);
-              // Only flag warnings on saved sheets (info-level is noisy retroactively;
-              // errors would have blocked the save).
-              const issues = validateSheet(p).filter(i => i.severity === 'warning');
-              sheets.push({
-                date: p.asOfDate, totals, issues,
-                key,                                    // so we can delete strays from the selector
-                folderPath: p.folderPath || [],         // for tooltip / "which folder is this in"
-                savedAt: p._savedAt || null,
-              });
-            }
-          } catch {}
-        }
-        sheets.sort((a,b) => a.date.localeCompare(b.date));
-        // Second pass: add YoY-swing info issues comparing each sheet to its predecessor.
-        for (let i = 1; i < sheets.length; i++) {
-          const swings = validateAgainstPrior(sheets[i].totals, sheets[i-1].totals, sheets[i-1].date);
-          sheets[i].issues = [...(sheets[i].issues||[]), ...swings];
-        }
-        setCompSheets(sheets);
-      } else { setCompSheets([]); }
+      const currentFolderKey = JSON.stringify(data.folderPath || []);
+      // Candidates: any saved sheet that either lives in the current folder OR
+      // matches the current client name exactly. Deduplicated by key.
+      const candidateKeys = new Set();
+      savedSheets.forEach(s => {
+        const sameFolder = (data.folderPath && data.folderPath.length > 0)
+          && JSON.stringify(s.folderPath || []) === currentFolderKey;
+        const sameClient = s.clientName === data.clientName;
+        if (sameFolder || sameClient) candidateKeys.add(s.key);
+      });
+      const sheets = [];
+      for (const key of candidateKeys) {
+        try {
+          const item = await storage.get(key);
+          if (item) {
+            const p = JSON.parse(item.value);
+            const totals = sheetTotals(p);
+            const issues = validateSheet(p).filter(i => i.severity === 'warning');
+            sheets.push({
+              date: p.asOfDate, totals, issues,
+              key,
+              folderPath: p.folderPath || [],
+              savedAt: p._savedAt || null,
+              clientName: p.clientName || '',
+            });
+          }
+        } catch {}
+      }
+      sheets.sort((a,b) => (a.date||'').localeCompare(b.date||''));
+      for (let i = 1; i < sheets.length; i++) {
+        const swings = validateAgainstPrior(sheets[i].totals, sheets[i-1].totals, sheets[i-1].date);
+        sheets[i].issues = [...(sheets[i].issues||[]), ...swings];
+      }
+      setCompSheets(sheets);
     } catch {}
     setCompLoading(false);
   };
