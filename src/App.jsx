@@ -1235,18 +1235,18 @@ function ComparisonView({
   onDeleteSheet, currentFolderPath,
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
-  const [showAllFolders, setShowAllFolders] = React.useState(false);
-
-  // Filter compSheets to only those in the currently-open sheet's folder — unless
-  // the user explicitly wants to see across folders. Fixes the "why is this old
-  // sheet showing up" surprise for clients whose sheets got moved between folders.
+  // Default: show every sheet for this client (matches how comparison always worked).
+  // If the user wants to narrow, they can tick "only this folder" and it filters to
+  // whichever folder the currently-open sheet lives in.
+  const [scopeToFolder, setScopeToFolder] = React.useState(false);
   const folderKey = JSON.stringify(currentFolderPath || []);
   const currentFolderLabel = (currentFolderPath && currentFolderPath.length)
     ? currentFolderPath.join(' / ') : 'Unfiled';
-  const otherFolderSheets = rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) !== folderKey);
-  const compSheets = showAllFolders
-    ? rawCompSheets
-    : rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) === folderKey);
+  const inFolderCount = rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) === folderKey).length;
+  const otherFolderCount = rawCompSheets.length - inFolderCount;
+  const compSheets = scopeToFolder
+    ? rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) === folderKey)
+    : rawCompSheets;
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
   const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
 
@@ -1381,12 +1381,15 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6,flexWrap:'wrap'}}>
           <span style={{fontSize:13,color:'#374151',fontWeight:700}}>Compare which sheets?</span>
           <span style={{fontSize:12,color:'#888'}}>
-            {activeYears.length} of {allYears.length} · scoped to <strong style={{color:'#374151'}}>{currentFolderLabel}</strong>
+            {activeYears.length} of {allYears.length} selected
+            {scopeToFolder && <> · scoped to <strong style={{color:'#374151'}}>{currentFolderLabel}</strong></>}
           </span>
-          {otherFolderSheets.length > 0 && (
-            <label style={{fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer',marginLeft:'auto'}}>
-              <input type="checkbox" checked={showAllFolders} onChange={e=>{setShowAllFolders(e.target.checked);setSelectedYears(null);}} style={{margin:0}}/>
-              Include {otherFolderSheets.length} sheet{otherFolderSheets.length!==1?'s':''} from other folders
+          {otherFolderCount > 0 && (
+            <label style={{fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer',marginLeft:'auto'}}
+              title={`${inFolderCount} sheet${inFolderCount!==1?'s':''} in ${currentFolderLabel}, ${otherFolderCount} in other folders`}>
+              <input type="checkbox" checked={scopeToFolder} onChange={e=>{setScopeToFolder(e.target.checked);setSelectedYears(null);}} style={{margin:0}}/>
+              Only sheets in <strong style={{color:'#374151',marginLeft:2}}>{currentFolderLabel}</strong>
+              <span style={{color:'#9ca3af',marginLeft:4}}>({inFolderCount})</span>
             </label>
           )}
         </div>
