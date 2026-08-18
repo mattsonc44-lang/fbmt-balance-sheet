@@ -7140,6 +7140,9 @@ Question: ${q}`,
 
         if (!response.ok) {
           const errText = await response.text();
+          if (response.status === 504 || /timeout/i.test(errText)) {
+            throw new Error("Extraction timed out — the PDF may be too long or complex. Try splitting it into just the balance-sheet pages, or contact support to enable background processing.");
+          }
           throw new Error(`Server returned ${response.status}: ${errText.slice(0, 200)}`);
         }
         const result = await response.json();
