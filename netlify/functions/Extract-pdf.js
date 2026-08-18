@@ -3,7 +3,10 @@
 // Accepts { base64, mediaType, model? } and returns the raw Anthropic response body.
 // The caller extracts JSON from result.content[0].text and merges it into the app's data shape.
 
-const DEFAULT_MODEL = 'claude-sonnet-5';
+// Haiku is ~3-5x faster than Sonnet for structured extraction and still very
+// accurate on tabular balance-sheet data. Sonnet was blowing Netlify's function
+// timeout (10s free / 26s Pro) on multi-page PDFs.
+const DEFAULT_MODEL = 'claude-haiku-4-5';
 
 const EXTRACTION_PROMPT = `You are a financial data extractor for First Bank of Montana (FBMT).
 This PDF is an agricultural balance sheet or loan package. Extract ALL financial data into a JSON object matching the exact structure below.
@@ -110,7 +113,7 @@ export const handler = async (event) => {
 
   const requestBody = {
     model: model || DEFAULT_MODEL,
-    max_tokens: 8000,
+    max_tokens: 4000,
     messages: [{
       role: 'user',
       content: [
