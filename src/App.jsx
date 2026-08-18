@@ -7110,10 +7110,14 @@ Question: ${q}`,
     setImportData(null);
     const ext = file.name.split(".").pop().toLowerCase();
 
-    // ── PDF import via Claude API ──────────────────────────────────────────
+    // ── PDF import via Claude API (Extract-pdf Netlify function) ───────────
+    // The dedicated function keeps the extraction prompt server-side and matches
+    // the app's data schema exactly. Handles both text-selectable and scanned
+    // PDFs — Claude's document understanding does OCR when needed.
     if (ext === "pdf") {
       setImportError("Reading PDF...");
       try {
+        // 1. Read file → base64
         const base64 = await new Promise((res, rej) => {
           const r = new FileReader();
           r.onload = () => res(r.result.split(",")[1]);
@@ -7121,66 +7125,45 @@ Question: ${q}`,
           r.readAsDataURL(file);
         });
 
-
-        const response = await fetch('/.netlify/functions/analyze', {
+        // 2. POST to Extract-pdf function (auth via shared secret, same as analyze.js)
+        const response = await fetch('/.netlify/functions/Extract-pdf', {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-fbmt-secret": window.FBMT_FUNCTION_SECRET || '',
+          },
           body: JSON.stringify({
-            model: "claude-sonnet-4-6",
-            max_tokens: 4000,
-            messages: [{
-              role: "user",
-              content: [
-                { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-                { type: "text", text: `You are a financial data extractor. This is an agricultural balance sheet or loan package PDF. Extract ALL financial data into a JSON object matching this exact structure. Return ONLY valid JSON, no markdown, no explanation.
-
-{
-  "clientName": "string",
-  "asOfDate": "YYYY-MM-DD",
-  "cashGlacier": "number as string",
-  "cashOther": [{"bank":"","amount":""}],
-  "receivables": [{"description":"","amount":""}],
-  "federalPayments": [{"description":"","amount":""}],
-  "livestockMarket": [{"number":"","kind":"","weight":"","pricePerHead":"","value":""}],
-  "farmProducts": [{"kind":"","quantity":"","unit":"bu","pricePerUnit":"","share":"100"}],
-  "cropInvestment": [{"cropType":"","acres":"","valuePerAcre":""}],
-  "supplies": [{"description":"","value":""}],
-  "otherCurrent": [{"description":"","amount":""}],
-  "breedingStock": [{"number":"","kind":"","value":""}],
-  "realEstate": [{"description":"","acres":"","valuePerAcre":"","reType":"","legal":""}],
-  "vehicles": [{"year":"","make":"","vin":"","condition":"","value":""}],
-  "machinery": [{"year":"","make":"","size":"","serial":"","condition":"","value":""}],
-  "otherAssets": [{"description":"","amount":""}],
-  "operatingNotes": [{"creditor":"","balance":"","dueDate":""}],
-  "accountsDue": [{"creditor":"","amount":"","dueDate":""}],
-  "intermediatDebt": [{"creditor":"","security":"","principal":"","rate":"","annualPmt":"","dueDate":""}],
-  "reCurrent": [{"creditor":"","annualPmt":""}],
-  "taxesDue": [{"description":"","amount":""}],
-  "reMortgages": [{"lienHolder":"","terms":"","principal":"","rate":""}],
-  "otherLiabilities": [{"description":"","balance":""}]
-}
-
-Rules: all numeric values as strings without dollar signs or commas. Use empty string or empty array if not found. Dates as YYYY-MM-DD. For real estate, valuePerAcre = total value divided by acres if not stated directly.` }
-              ]
-            }]
-          })
+            base64,
+            mediaType: 'application/pdf',
+          }),
         });
 
-        if (!response.ok) throw new Error("API error: " + response.status);
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Server returned ${response.status}: ${errText.slice(0, 200)}`);
+        }
         const result = await response.json();
+        if (result.error) throw new Error(result.error);
+
+        // 3. Extract JSON from Claude's response
         const text = result.content?.find(b=>b.type==="text")?.text || "";
         const clean = text.replace(/```json|```/g,"").trim();
-        const parsed = JSON.parse(clean);
+        let parsed;
+        try { parsed = JSON.parse(clean); }
+        catch { throw new Error("Extracted data wasn't valid JSON. The PDF may not be a balance sheet, or the extraction hit its size limit."); }
 
-        // Merge with emptyData so all required fields exist
+        // 4. Merge with emptyData so every required field exists
         const base = emptyData();
         const merged = { ...base, ...parsed };
 
-        // Fix arrays — ensure they have at least one empty row where needed
-        const arrayFields = ["cashOther","receivables","federalPayments","livestockMarket","farmProducts",
-          "cropInvestment","supplies","otherCurrent","breedingStock","realEstate","vehicles","machinery",
-          "otherAssets","operatingNotes","accountsDue","intermediatDebt","reCurrent","taxesDue",
-          "reMortgages","otherLiabilities"];
+        // 5. Backfill any empty arrays with the empty-row skeleton so the wizard
+        //    doesn't crash on `.map` over an empty array.
+        const arrayFields = [
+          "cashOther","receivables","federalPayments","livestockMarket","farmProducts",
+          "cropInvestment","supplies","otherCurrent","breedingStock","realEstate","reContracts",
+          "vehicles","machinery","otherAssets","operatingNotes","accountsDue","intermediatDebt",
+          "reCurrent","otherCurrentLiab","reMortgages","otherLiabilities",
+        ];
         arrayFields.forEach(f => {
           if (!Array.isArray(merged[f]) || merged[f].length === 0) merged[f] = base[f];
         });
@@ -7189,7 +7172,7 @@ Rules: all numeric values as strings without dollar signs or commas. Use empty s
         if (merged.asOfDate) setImportDate(merged.asOfDate);
         setImportError("");
       } catch(err) {
-        setImportError("PDF extraction failed: " + err.message);
+        setImportError("PDF extraction failed: " + (err.message || err));
       }
       return;
     }
@@ -10039,6 +10022,7 @@ ${extraPages}
                   <ul style={{margin:"6px 0 0 16px",lineHeight:1.8}}>
                     <li><strong>FBMT Excel format</strong> — the existing First Bank of Montana balance sheet Excel file (.xlsx). Just drag it in as-is.</li>
                     <li><strong>Import template</strong> — download the template below, fill it in, drag it back.</li>
+                    <li><strong>PDF from any lender</strong> — drop a balance-sheet PDF (any bank's format, text or scanned). AI extracts the numbers into a review screen you can edit before applying.</li>
                   </ul>
                 </div>
 
@@ -10215,6 +10199,9 @@ ${extraPages}
                         <span>Vehicles: <strong>{importData.vehicles.filter(r=>r.make).length} items</strong></span>
                         <span>Term Debt: <strong>{importData.intermediatDebt.filter(r=>r.creditor).length} loans</strong></span>
                         <span>RE Mortgages: <strong>{importData.reMortgages.filter(r=>r.lienHolder).length} mortgages</strong></span>
+                      </div>
+                      <div style={{fontSize:".78rem",color:"#4b6f4d",marginTop:10,paddingTop:10,borderTop:"1px solid #b8dfc0"}}>
+                        You'll land in the wizard where every field is editable — review the extracted numbers there before you save. Nothing is written to the database until you hit Save.
                       </div>
                     </div>
 
