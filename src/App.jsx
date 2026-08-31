@@ -6343,6 +6343,38 @@ export default function BalanceSheet() {
   const [caOpenShare, setCaOpenShare] = useState(null);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
+
+  // ── Browser back-button → in-app navigation ────────────────────────────────
+  // Without this, hitting Back inside the wizard or a client dashboard would
+  // leave the site entirely (whatever page the user came from). We push a
+  // history entry on every logical screen change, and popstate restores the
+  // matching in-app state instead of unloading the SPA.
+  const backSyncRef = React.useRef(false);   // true when a setScreen came from popstate — don't re-push
+  React.useEffect(() => {
+    // Seed the initial history entry with our marker so popstate returns a
+    // usable object even on the first back-press.
+    if (!window.history.state?.fbmt) {
+      window.history.replaceState({ fbmt: true, screen: "home", dashboardClient: null }, "");
+    }
+    const onPop = (e) => {
+      const s = e.state;
+      if (s && s.fbmt) {
+        backSyncRef.current = true;
+        setScreen(s.screen || "home");
+        setDashboardClient(s.dashboardClient || null);
+        // Give React a tick to apply state before allowing new pushes
+        setTimeout(() => { backSyncRef.current = false; }, 0);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  React.useEffect(() => {
+    if (backSyncRef.current) return;                  // popstate just set us — don't push
+    const cur = window.history.state;
+    if (cur && cur.fbmt && cur.screen === screen && cur.dashboardClient === dashboardClient) return;
+    window.history.pushState({ fbmt: true, screen, dashboardClient }, "");
+  }, [screen, dashboardClient]);
   const [homeSearch, setHomeSearch] = useState('');            // filter box on home
   const [clientNotesMap, setClientNotesMap] = useState({});     // { [clientName]: { renewal_date, renewal_reminder_sent_at } }
   const [homeUserMenu, setHomeUserMenu] = useState(false);      // dropdown next to the user avatar
