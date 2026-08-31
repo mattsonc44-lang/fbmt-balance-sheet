@@ -8619,14 +8619,22 @@ Question: ${q}`,
     const totalAssets = totalCurrentAssets + totalLTAssets;
     const opNotesTot = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)
       +(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
-    const totalLiabilities = opNotesTot
-      +(d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0)
-      +(d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0)
-      +(d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0)
-      +(d.otherLiabilities||[]).reduce((s,r)=>s+n(r.amount),0)
-      +(d.taxesDue||[]).reduce((s,r)=>s+n(r.amount),0);
-    const netWorth = totalAssets - totalLiabilities;
-    const workingCapital = totalCurrentAssets - opNotesTot;
+    // Current-portion of term debt + RE current-portion + taxes flow into
+    // "current liabilities" bucket on the printed sheet.
+    const intermedCurrent = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const reCurrentTot    = (d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    // taxesDue is a plain string in the app schema, not an array.
+    const taxesDueVal     = n(d.taxesDue);
+    const otherCurLiabTot = (d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
+    const totalCurrentLiab = opNotesTot + intermedCurrent + reCurrentTot + taxesDueVal + otherCurLiabTot;
+    // Long-term portions: intermediate-debt principal minus current-portion, RE mortgages, other liabilities.
+    const intermedPrincipal = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0);
+    const reMortTot         = (d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0);
+    const otherLiabTot      = (d.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
+    const totalLTLiab       = Math.max(intermedPrincipal - intermedCurrent, 0) + reMortTot + otherLiabTot;
+    const totalLiabilities  = totalCurrentLiab + totalLTLiab;
+    const netWorth          = totalAssets - totalLiabilities;
+    const workingCapital    = totalCurrentAssets - totalCurrentLiab;
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
@@ -8791,11 +8799,22 @@ ${extraPages}
 
   const handlePrint = (withCover=false, extraPages='') => {
     const W = window.open("","_blank","width=850,height=1100");
-    if (!W) return;
-    W.document.write(makeBSHTML(data, withCover, extraPages, linkedEntityNWMap));
+    if (!W) { alert('Print window was blocked — please allow popups for this site.'); return; }
+    let html = '';
+    try {
+      html = makeBSHTML(data, withCover, extraPages, linkedEntityNWMap);
+    } catch (e) {
+      console.error('Print HTML build failed:', e);
+      html = `<html><body style="font:14px system-ui;padding:24px;color:#7a1a1a">
+        <h2>Print failed</h2>
+        <p>Couldn't build the printable page. Please screenshot this message and send it to support.</p>
+        <pre style="background:#f5f5f5;padding:12px;border-radius:6px;overflow:auto;white-space:pre-wrap">${(e && e.stack) || e || 'unknown error'}</pre>
+      </body></html>`;
+    }
+    W.document.write(html);
     W.document.close();
     W.focus();
-    setTimeout(() => W.print(), 400);
+    setTimeout(() => { try { W.print(); } catch {} }, 400);
   };
 
     const buildBudgetHTML = () => {
