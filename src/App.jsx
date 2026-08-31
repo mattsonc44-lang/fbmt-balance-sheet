@@ -6369,11 +6369,19 @@ export default function BalanceSheet() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  // Debounce so intermediate transitions (e.g. setDashboardClient(null) followed
+  // in the same tick by setScreen("wizard")) collapse into ONE history entry.
+  // Otherwise back-once lands on a phantom intermediate page.
+  const pushTimerRef = React.useRef(null);
   React.useEffect(() => {
-    if (backSyncRef.current) return;                  // popstate just set us — don't push
-    const cur = window.history.state;
-    if (cur && cur.fbmt && cur.screen === screen && cur.dashboardClient === dashboardClient) return;
-    window.history.pushState({ fbmt: true, screen, dashboardClient }, "");
+    if (backSyncRef.current) return;
+    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+    pushTimerRef.current = setTimeout(() => {
+      const cur = window.history.state;
+      if (cur && cur.fbmt && cur.screen === screen && cur.dashboardClient === dashboardClient) return;
+      window.history.pushState({ fbmt: true, screen, dashboardClient }, "");
+    }, 60);
+    return () => { if (pushTimerRef.current) clearTimeout(pushTimerRef.current); };
   }, [screen, dashboardClient]);
   const [homeSearch, setHomeSearch] = useState('');            // filter box on home
   const [clientNotesMap, setClientNotesMap] = useState({});     // { [clientName]: { renewal_date, renewal_reminder_sent_at } }
