@@ -8540,26 +8540,33 @@ Question: ${q}`,
       const result = await storage.list(STORAGE_PREFIX);
       if (!result || !result.keys) return;
       const corpDebts = [];
+      const me = data.clientName.trim().toLowerCase();
       for (const key of result.keys) {
         try {
           const item = await storage.get(key);
           if (!item) continue;
           const p = JSON.parse(item.value);
-          // Only sheets linked to this client
+          // linkedEntities can be either strings (legacy) or {name,date,ownership} objects.
+          // Extract names uniformly and only include sheets that link to the currently-open client.
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
-          if (!linkedArr.some(e => e.trim().toLowerCase() === data.clientName.trim().toLowerCase())) continue;
+          const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(s => s.trim().toLowerCase());
+          if (!linkedNames.includes(me)) continue;
           const ownerName = p.clientName || "Unknown";
-          // Corp-paid term debt (corp = ownerName; new corpPaidBy takes precedence)
+          // A debt is "for me" if corpPaidBy explicitly names me, OR (legacy) corpPaid is true.
+          // Legacy corpPaid without corpPaidBy is ambiguous when multiple corps are linked —
+          // we still include it so behavior degrades gracefully to the old "any linked corp"
+          // rollup, but it will show under whichever corp sheet is opened.
+          const routedToMe = r => {
+            if (r.corpPaidBy) return r.corpPaidBy.trim().toLowerCase() === me;
+            return !!r.corpPaid;
+          };
           (p.intermediatDebt || []).forEach(r => {
-            const isPaid = !!(r.corpPaidBy || r.corpPaid);
-            if (isPaid && r.creditor && numVal(r.annualPmt) > 0) {
+            if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
               corpDebts.push({ creditor: r.creditor, security: r.security || "", annualPmt: r.annualPmt, owner: ownerName, type: "term" });
             }
           });
-          // Corp-paid RE current portion
           (p.reCurrent || []).forEach(r => {
-            const isPaid = !!(r.corpPaidBy || r.corpPaid);
-            if (isPaid && r.creditor && numVal(r.annualPmt) > 0) {
+            if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
               corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re" });
             }
           });
