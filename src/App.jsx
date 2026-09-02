@@ -7883,10 +7883,12 @@ Question: ${q}`,
   const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
-  const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!r.corpPaid);
-  const debtServiceTermsCorp = debtServiceTerms.filter(r=>r.corpPaid);
-  const debtServiceREPersonal = debtServiceRE.filter(r=>!r.corpPaid);
-  const debtServiceRECorp = debtServiceRE.filter(r=>r.corpPaid);
+  // "corp pays" is any row with either the new corpPaidBy name string OR the legacy corpPaid boolean.
+  const _isCorpPaid = r => !!(r.corpPaidBy || r.corpPaid);
+  const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!_isCorpPaid(r));
+  const debtServiceTermsCorp = debtServiceTerms.filter(_isCorpPaid);
+  const debtServiceREPersonal = debtServiceRE.filter(r=>!_isCorpPaid(r));
+  const debtServiceRECorp = debtServiceRE.filter(_isCorpPaid);
   const budgetTermDebtTotal = debtServiceTermsPersonal.reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetREDebtTotal = debtServiceREPersonal.reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetProposedDebtTotal = (data.budgetProposedDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
@@ -8547,15 +8549,17 @@ Question: ${q}`,
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
           if (!linkedArr.some(e => e.trim().toLowerCase() === data.clientName.trim().toLowerCase())) continue;
           const ownerName = p.clientName || "Unknown";
-          // Corp-paid term debt
+          // Corp-paid term debt (corp = ownerName; new corpPaidBy takes precedence)
           (p.intermediatDebt || []).forEach(r => {
-            if (r.corpPaid && r.creditor && numVal(r.annualPmt) > 0) {
+            const isPaid = !!(r.corpPaidBy || r.corpPaid);
+            if (isPaid && r.creditor && numVal(r.annualPmt) > 0) {
               corpDebts.push({ creditor: r.creditor, security: r.security || "", annualPmt: r.annualPmt, owner: ownerName, type: "term" });
             }
           });
           // Corp-paid RE current portion
           (p.reCurrent || []).forEach(r => {
-            if (r.corpPaid && r.creditor && numVal(r.annualPmt) > 0) {
+            const isPaid = !!(r.corpPaidBy || r.corpPaid);
+            if (isPaid && r.creditor && numVal(r.annualPmt) > 0) {
               corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re" });
             }
           });
@@ -8622,8 +8626,8 @@ Question: ${q}`,
       const bInc=bCrop+bLS+bMisc;
       const bIncInsured=bInsTotal+bLS+bMisc;
       const bExp=(d.budgetExpenses||[]).reduce((s,r)=>s+n2(r.amount),0);
-      const bDebt=(d.intermediatDebt||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
-               +(d.reCurrent||[]).filter(r=>!r.corpPaid).reduce((s,r)=>s+n2(r.annualPmt),0)
+      const bDebt=(d.intermediatDebt||[]).filter(r=>!(r.corpPaidBy||r.corpPaid)).reduce((s,r)=>s+n2(r.annualPmt),0)
+               +(d.reCurrent||[]).filter(r=>!(r.corpPaidBy||r.corpPaid)).reduce((s,r)=>s+n2(r.annualPmt),0)
                +(d.budgetProposedDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
       const bNet=bInc-bExp-bDebt;
       const bNetInsured=bIncInsured-bExp-bDebt;
@@ -9561,7 +9565,12 @@ ${extraPages}
       case "intermediate_debt": return (
         <div className="step-content">
           <SecHdr icon="📅" title="Intermediate Term and Installment Debt" subtitle="Equipment loans, livestock loans, term notes" color="#4a0810" />
-          {data.intermediatDebt.map((r,i) => (
+          {(() => { return null; })()}
+          {data.intermediatDebt.map((r,i) => {
+            const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
+            // Backward compat: legacy r.corpPaid=true → default to first linked corp when picking.
+            const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            return (
             <div key={i} className="row-entry" data-rowkey={`intermediatDebt-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("intermediatDebt",i,"creditor",v)} placeholder="Lender" />
@@ -9570,38 +9579,53 @@ ${extraPages}
               <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
               <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
-              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:70}}>
-                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Corp Pays</span>
-                <input type="checkbox" checked={!!r.corpPaid}
-                  onChange={e=>setArr("intermediatDebt",i,"corpPaid",e.target.checked)}
-                  style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
-              </div>
+              {linkedCorpNames.length > 0 && (
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130}}>
+                  <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}} title="Which linked entity pays this debt (leave Personal if the client pays)">Paid by</span>
+                  <select value={currentPayer}
+                    onChange={e=>{ setArr("intermediatDebt",i,"corpPaidBy",e.target.value); setArr("intermediatDebt",i,"corpPaid", !!e.target.value); }}
+                    style={{border:"1px solid #ddd",borderRadius:5,padding:"3px 6px",fontSize:".8rem",fontFamily:"inherit",background:"white",cursor:"pointer",maxWidth:130}}>
+                    <option value="">Personal</option>
+                    {linkedCorpNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              )}
               <button className="remove-btn" onClick={()=>removeRow("intermediatDebt",i)}>x</button>
             </div>
-          ))}
-          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:"",corpPaid:false})}>+ Add Loan</button>
+            );
+          })}
+          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Loan</button>
           <div className="subtotal-row"><span>Total Intermediate Debt</span><strong className="red">{fmt(intermedTotal)}</strong></div>
         </div>
       );
       case "re_current": return (
         <div className="step-content">
           <SecHdr icon="🏠" title="Current Portion — Real Estate Mortgages" subtitle="Mortgage payments due within the next 12 months" color="#4a0810" />
-          {data.reCurrent.map((r,i) => (
+          {data.reCurrent.map((r,i) => {
+            const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
+            const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            return (
             <div key={i} className="row-entry" data-rowkey={`reCurrent-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("reCurrent",i,"creditor",v)} placeholder="Mortgage holder" />
               <Inp label="Annual Payment" prefix="$" value={r.annualPmt} onChange={v=>setArr("reCurrent",i,"annualPmt",v)} />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reCurrent",i,"rate",v)} />
-              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:70}}>
-                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Corp Pays</span>
-                <input type="checkbox" checked={!!r.corpPaid}
-                  onChange={e=>setArr("reCurrent",i,"corpPaid",e.target.checked)}
-                  style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
-              </div>
+              {linkedCorpNames.length > 0 && (
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130}}>
+                  <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Paid by</span>
+                  <select value={currentPayer}
+                    onChange={e=>{ setArr("reCurrent",i,"corpPaidBy",e.target.value); setArr("reCurrent",i,"corpPaid", !!e.target.value); }}
+                    style={{border:"1px solid #ddd",borderRadius:5,padding:"3px 6px",fontSize:".8rem",fontFamily:"inherit",background:"white",cursor:"pointer",maxWidth:130}}>
+                    <option value="">Personal</option>
+                    {linkedCorpNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              )}
               <button className="remove-btn" onClick={()=>removeRow("reCurrent",i)}>x</button>
             </div>
-          ))}
-          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:"",rate:"",corpPaid:false})}>+ Add Mortgage</button>
+            );
+          })}
+          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total Current RE Portion</span><strong className="red">{fmt(reCurrentTotal)}</strong></div>
         </div>
       );
@@ -9631,23 +9655,32 @@ ${extraPages}
       case "re_mortgages": return (
         <div className="step-content">
           <SecHdr icon="📜" title="Real Estate Mortgages and Contracts" subtitle="Long-term mortgage balances — principal due beyond 12 months" color="#4a0810" />
-          {data.reMortgages.map((r,i) => (
+          {data.reMortgages.map((r,i) => {
+            const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
+            const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            return (
             <div key={i} className="row-entry" data-rowkey={`reMortgages-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reMortgages",i,"rate",v)} />
               <Inp label="Principal (beyond 12 mo)" prefix="$" value={r.principal} onChange={v=>setArr("reMortgages",i,"principal",v)} />
-              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:70}}>
-                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Corp Pays</span>
-                <input type="checkbox" checked={!!r.corpPaid}
-                  onChange={e=>setArr("reMortgages",i,"corpPaid",e.target.checked)}
-                  style={{width:16,height:16,accentColor:"#6B0E1E",cursor:"pointer"}} />
-              </div>
+              {linkedCorpNames.length > 0 && (
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130}}>
+                  <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Paid by</span>
+                  <select value={currentPayer}
+                    onChange={e=>{ setArr("reMortgages",i,"corpPaidBy",e.target.value); setArr("reMortgages",i,"corpPaid", !!e.target.value); }}
+                    style={{border:"1px solid #ddd",borderRadius:5,padding:"3px 6px",fontSize:".8rem",fontFamily:"inherit",background:"white",cursor:"pointer",maxWidth:130}}>
+                    <option value="">Personal</option>
+                    {linkedCorpNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              )}
               <button className="remove-btn" onClick={()=>removeRow("reMortgages",i)}>x</button>
             </div>
-          ))}
-          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:"",corpPaid:false})}>+ Add Mortgage</button>
+            );
+          })}
+          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total RE Mortgages (LT)</span><strong className="red">{fmt(reMortTotal)}</strong></div>
         </div>
       );
@@ -9752,7 +9785,22 @@ ${extraPages}
                     <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"white",border:"1px solid #c0d8f0",borderRadius:8,padding:"8px 12px"}}>
                       <span style={{fontSize:"1rem"}}>🏢</span>
                       <div style={{flex:1}}>
-                        <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>
+                        {(() => {
+                          // Find the matching saved sheet — exact date if given, else the newest.
+                          const matches = savedSheets.filter(s => s.clientName === entry.name)
+                            .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+                          const target = entry.date ? matches.find(s => s.asOfDate === entry.date) : matches[0];
+                          if (target) {
+                            return (
+                              <button onClick={()=>loadSheet(target.key)}
+                                title={`Open ${entry.name}'s balance sheet as of ${target.asOfDate}`}
+                                style={{background:"none",border:"none",padding:0,cursor:"pointer",fontWeight:700,fontSize:".88rem",color:"#2d5a8e",textDecoration:"underline",fontFamily:"inherit",textAlign:"left"}}>
+                                {entry.name}
+                              </button>
+                            );
+                          }
+                          return <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>;
+                        })()}
                         <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
                           {entry.date ? `As of ${entry.date}` : "Latest available"}
                           {nw !== undefined && (
