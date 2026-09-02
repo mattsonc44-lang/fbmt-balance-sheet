@@ -6445,8 +6445,9 @@ export default function BalanceSheet() {
       .progress-track { flex: 1; height: 3px !important; background: #f0f0f0 !important; border-radius: 2px; }
       .progress-fill { background: #6B0E1E !important; border-radius: 2px; }
 
-      /* Main layout — center at 1200px, more breathing room */
-      .main { max-width: 1200px !important; padding: 20px 24px !important; }
+      /* Main layout — wider so long fields (farm product Kind, RE description,
+         creditor names, etc.) aren't cramped. */
+      .main { max-width: 1500px !important; padding: 20px 24px !important; }
 
       /* Sidebar — cleaner rows, subtle active state */
       .sidebar-section-label { color: #9ca3af !important; font-size: 10px !important; letter-spacing: .4px !important; padding: 4px 8px !important; }
@@ -6462,7 +6463,7 @@ export default function BalanceSheet() {
       .card-nav { border-bottom: none !important; padding: 12px 26px !important; margin: 0 !important; border-top: 0.5px solid #f0f0f0; background: transparent; }
 
       /* Right panel — cards with hairline borders, muted labels */
-      .right-panel { width: 220px !important; }
+      .right-panel { width: 200px !important; }
       .running-total { background: white !important; color: #111 !important; border: 0.5px solid #e5e7eb; border-radius: 8px !important; padding: 14px 16px !important; box-shadow: none !important; }
       .running-total .rt-item span { color: #9ca3af !important; opacity: 1 !important; font-size: 10px !important; letter-spacing: .4px !important; }
       .running-total .rt-item strong { color: #111 !important; font-size: 18px !important; font-weight: 500 !important; letter-spacing: -0.2px; }
