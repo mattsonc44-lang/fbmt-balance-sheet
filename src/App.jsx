@@ -814,8 +814,9 @@ function BudgetView({
           </div>
           {data.budgetCrops.map((r, i) => {
             const share = numVal(r.share || "100");
-            const defaultPrice = !r.contracted ? lookupPrice(r.crop) : null;
-            const effectivePrice = r.contracted ? r.price : (defaultPrice || r.price);
+            // customPrice → user-typed / imported price; do not fall back to commodity list.
+            const defaultPrice = (!r.contracted && !r.customPrice) ? lookupPrice(r.crop) : null;
+            const effectivePrice = (r.contracted || r.customPrice) ? r.price : (defaultPrice || r.price);
             const rv = numVal(r.acres) * numVal(r.yieldPerAcre) * numVal(effectivePrice) * (share / 100);
             const insTotal = numVal(r.acres) * numVal(r.insYield) * numVal(r.insPrice) * (share / 100);
             return (
@@ -850,9 +851,12 @@ function BudgetView({
                   </select>
                 </div>
                 <div className="input-group" style={{width:82,flexShrink:0}}>
-                  <div className="input-wrap" title={!r.contracted&&defaultPrice?"Price from commodity list":""}>
+                  <div className="input-wrap" title={
+                    !r.contracted && !r.customPrice && defaultPrice ? "Price from commodity list" :
+                    r.customPrice ? "Price from import (or entered manually)" : ""
+                  }>
                     <span className="prefix">$</span>
-                    {r.contracted ? (
+                    {(r.contracted || r.customPrice) ? (
                       <input type="text" value={r.price} placeholder="0.00"
                         onChange={e => setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                     ) : (
@@ -862,8 +866,11 @@ function BudgetView({
                         onChange={e => !defaultPrice && setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
                     )}
                   </div>
-                  {!r.contracted && defaultPrice && (
+                  {!r.contracted && !r.customPrice && defaultPrice && (
                     <div style={{fontSize:".62rem",color:"#888",textAlign:"center",marginTop:1}}>list</div>
+                  )}
+                  {r.customPrice && !r.contracted && (
+                    <div style={{fontSize:".62rem",color:"#6B0E1E",textAlign:"center",marginTop:1}}>custom</div>
                   )}
                 </div>
                 <div className="input-group" style={{width:60,flexShrink:0}}>
@@ -6837,10 +6844,18 @@ Question: ${q}`,
       const fp = folderPathOverride !== undefined ? folderPathOverride : (data.folderPath || []);
       const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString() };
       await storage.set(key, JSON.stringify(savePayload));
-      // If we loaded from a different key (user renamed client or changed
-      // as-of date), delete the old row so we don't leave a stale duplicate.
+      // Only delete the OLD key when this is a pure rename — client name
+      // changed but the as-of date is unchanged. Changing the date means the
+      // user is creating a NEW dated sheet (yearly / period snapshot) and the
+      // old one should be preserved as history.
       if (originalKey && originalKey !== key) {
-        try { await storage.delete(originalKey); } catch {}
+        // Parse original key: `fbmt_bs:{name}:{yyyy-mm-dd}`
+        const origParts = originalKey.slice(STORAGE_PREFIX.length).split(':');
+        const origDate  = origParts[origParts.length - 1]; // last segment is date
+        const dateUnchanged = origDate === data.asOfDate;
+        if (dateUnchanged) {
+          try { await storage.delete(originalKey); } catch {}
+        }
       }
       setOriginalKey(key);
       set("folderPath", fp);
@@ -7241,7 +7256,10 @@ Question: ${q}`,
         }
         // Crop rows: col 0=acres(num), col 1=variety, col 2=yield, col 3=price, col 4=value
         if (inCrops && typeof r[0]==='number' && r[0]>0 && col(r,1)) {
-          budgetCrops.push({acres:String(r[0]),crop:col(r,1).trim(),yieldPerAcre:num(r,2)||'',unit:'bu',price:num(r,3)||'',share:'100',contracted:false});
+          // customPrice: any price coming in from an import is user-supplied
+          // and takes precedence over the commodity-list default (so imports
+          // don't get silently rewritten to today's list price).
+          budgetCrops.push({acres:String(r[0]),crop:col(r,1).trim(),yieldPerAcre:num(r,2)||'',unit:'bu',price:num(r,3)||'',share:'100',contracted:false,customPrice:!!num(r,3)});
         }
         // Livestock rows: col 0=number, col 1=type, col 2=lbs, col 3=price
         if (inLivestock && typeof r[0]==='number' && r[0]>0 && col(r,1)) {
@@ -7747,6 +7765,7 @@ Question: ${q}`,
       Object.assign(d, importBudget);
     }
     setData(d);
+    setOriginalKey(null);         // fresh import — never associated with a prior sheet
     setStep(0);
     setScreen("wizard");
     setShowImport(false);
@@ -7760,6 +7779,7 @@ Question: ${q}`,
     if (!budgetOnlyClient.trim()) { setImportError("Enter a client name to create a new sheet."); return; }
     const d = { ...emptyData(), ...importBudget, clientName: budgetOnlyClient.trim(), asOfDate: importDate };
     setData(d);
+    setOriginalKey(null);         // fresh import — brand-new sheet
     setStep(0);
     setActiveTab('budget'); // jump straight to the budget tab since that's what was imported
     setScreen("wizard");
@@ -7779,6 +7799,7 @@ Question: ${q}`,
       const merged = { ...existing, ...importBudget };
       await storage.set(budgetOnlyTargetKey, JSON.stringify(merged));
       setData(merged);
+      setOriginalKey(budgetOnlyTargetKey);   // now editing this specific sheet
       setStep(0);
       setActiveTab('budget');
       setScreen("wizard");
@@ -7837,7 +7858,8 @@ Question: ${q}`,
 
   // Budget calcs
   const budgetCropTotal = data.budgetCrops.reduce((s,r)=>{
-    const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+    // Skip commodity-list lookup for contracted rows AND for imported/custom-price rows.
+    const cp = (!r.contracted && !r.customPrice) ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
     const effectivePrice = (cp ? cp.price : null) || r.price;
     return s+n(r.acres)*n(r.yieldPerAcre)*n(effectivePrice)*(n(r.share||"100")/100);
   },0);
@@ -8560,7 +8582,7 @@ Question: ${q}`,
     const entityBudgetPages = linkedData.map(d => {
       const insEnabled = !!d.budgetInsuranceEnabled;
       const bCrop=(d.budgetCrops||[]).reduce((s,r)=>{
-        const cp=!r.contracted?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
+        const cp=(!r.contracted&&!r.customPrice)?commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()):null;
         return s+n2(r.acres)*n2(r.yieldPerAcre)*(n2(cp?cp.price:null)||n2(r.price))*(n2(r.share||'100')/100);
       },0);
       const bInsTotal = insEnabled ? (d.budgetCrops||[]).reduce((s,r)=>s+n2(r.acres)*n2(r.insYield)*n2(r.insPrice)*(n2(r.share||'100')/100),0) : 0;
@@ -8864,8 +8886,8 @@ ${extraPages}
     const netIncInsured = budgetTotalIncomeInsured - totalExp;
     const insEnabled = data.budgetInsuranceEnabled;
     const cropRows = data.budgetCrops.filter(r=>r.crop||r.acres).map(r=>{
-      const cp = !r.contracted ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
-      const effectivePrice = r.contracted ? numVal(r.price) : (cp ? numVal(cp.price) : numVal(r.price));
+      const cp = (!r.contracted && !r.customPrice) ? commodityPrices.find(p=>p.name&&r.crop&&p.name.toLowerCase()===r.crop.toLowerCase()) : null;
+      const effectivePrice = (r.contracted || r.customPrice) ? numVal(r.price) : (cp ? numVal(cp.price) : numVal(r.price));
       const rv = numVal(r.acres)*numVal(r.yieldPerAcre)*effectivePrice*(numVal(r.share||"100")/100);
       const insTotal = insEnabled ? numVal(r.acres)*numVal(r.insYield)*numVal(r.insPrice)*(numVal(r.share||"100")/100) : 0;
       return "<tr>"
