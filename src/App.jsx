@@ -8257,6 +8257,33 @@ Question: ${q}`,
     setEditingFolder(null);
   };
 
+  // Delete a folder. Refuses if the folder still contains any sheets or
+  // subfolders — user must empty it first (move sheets, delete subfolders).
+  const deleteFolder = async (path) => {
+    const pathKey = JSON.stringify(path);
+    // Any sheet whose folderPath starts with this path counts as content.
+    const hasSheets = savedSheets.some(s => {
+      const fp = s.folderPath || [];
+      return fp.length >= path.length && JSON.stringify(fp.slice(0, path.length)) === pathKey;
+    });
+    // Any user-created folder deeper than this one counts as a subfolder.
+    const hasSubfolders = userFolders.some(f => {
+      return f.length > path.length && JSON.stringify(f.slice(0, path.length)) === pathKey;
+    });
+    if (hasSheets || hasSubfolders) {
+      alert(
+        `Can't delete "${path.join(' / ')}" — it still contains ${hasSheets ? 'balance sheets' : ''}` +
+        `${hasSheets && hasSubfolders ? ' and ' : ''}${hasSubfolders ? 'subfolders' : ''}.\n\n` +
+        `Move or delete everything inside it first, then try again.`
+      );
+      return;
+    }
+    if (!window.confirm(`Delete the folder "${path.join(' / ')}"?`)) return;
+    const updated = userFolders.filter(f => JSON.stringify(f) !== pathKey);
+    setUserFolders(updated);
+    try { localStorage.setItem(`fbmt_userFolders_${currentSession?.user?.id||"default"}`, JSON.stringify(updated)); } catch {}
+  };
+
   // ── Corp Personal Debt Loader ──────────────────────────────────────────────
   const lookupPrice = (name) => {
     if (!name) return null;
@@ -10850,10 +10877,13 @@ ${extraPages}
                         <div style={{...rowBase, background:'#fdfcfa', cursor: isEditing ? 'default' : 'pointer'}}
                           onClick={()=> {
                             if (isEditing) return;
-                            if (dashboardTarget) setDashboardClient(dashboardTarget);
-                            else toggleFolder(fKey);
+                            // Clicking a folder always toggles expand/collapse — even
+                            // when the folder resolves to a single client. Opening the
+                            // client dashboard is now a dedicated action button on the
+                            // right so nested folders reveal their contents naturally.
+                            toggleFolder(fKey);
                           }}
-                          title={dashboardTarget ? `Open dashboard for ${dashboardTarget}` : (fOpen ? 'Collapse folder' : 'Expand folder')}>
+                          title={fOpen ? 'Collapse folder' : 'Expand folder'}>
                           <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft: depth * 16}}>
                             <button onClick={e=>{e.stopPropagation();toggleFolder(fKey);}}
                               title={fOpen ? 'Collapse' : 'Expand'}
@@ -10893,6 +10923,12 @@ ${extraPages}
                           <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4,whiteSpace:'nowrap'}} onClick={e=>e.stopPropagation()}>
                             {!isEditing && (
                               <>
+                                {dashboardTarget && (
+                                  <button title={`Open dashboard for ${dashboardTarget}`} onClick={e=>{e.stopPropagation();setDashboardClient(dashboardTarget);}}
+                                    style={{background:'transparent',border:'none',color:'#6B0E1E',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
+                                    Dashboard
+                                  </button>
+                                )}
                                 <button title="Rename" onClick={e=>{e.stopPropagation();setEditingFolder({path,newName:folderName});}}
                                   style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
                                   Rename
@@ -10900,6 +10936,10 @@ ${extraPages}
                                 <button title="Add subfolder" onClick={e=>{e.stopPropagation();setShowCreateFolder(path);setNewFolderName("");}}
                                   style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
                                   + Sub
+                                </button>
+                                <button title="Delete folder (must be empty)" onClick={e=>{e.stopPropagation();deleteFolder(path);}}
+                                  style={{background:'transparent',border:'none',color:'#dc2626',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>
+                                  Delete
                                 </button>
                               </>
                             )}
