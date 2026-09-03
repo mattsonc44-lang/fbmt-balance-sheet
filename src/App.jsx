@@ -1246,14 +1246,24 @@ function ComparisonView({
   // If the user wants to narrow, they can tick "only this folder" and it filters to
   // whichever folder the currently-open sheet lives in.
   const [scopeToFolder, setScopeToFolder] = React.useState(false);
+  // Consolidated-view toggle. When ON, we swap each sheet's `totals` with
+  // `consolidatedTotals` (personal + linked entities × ownership%). Lets the
+  // lender see the whole picture when land is personal but the operation is a corp.
+  const [includeLinked, setIncludeLinked] = React.useState(false);
   const folderKey = JSON.stringify(currentFolderPath || []);
   const currentFolderLabel = (currentFolderPath && currentFolderPath.length)
     ? currentFolderPath.join(' / ') : 'Unfiled';
   const inFolderCount = rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) === folderKey).length;
   const otherFolderCount = rawCompSheets.length - inFolderCount;
-  const compSheets = scopeToFolder
+  const filteredCompSheets = scopeToFolder
     ? rawCompSheets.filter(s => JSON.stringify(s.folderPath || []) === folderKey)
     : rawCompSheets;
+  // Are ANY of the visible sheets tied to a linked entity? If not, hide the toggle.
+  const anyHaveLinked = filteredCompSheets.some(s => (s.linkedSummary || []).some(x => x.matched));
+  // Swap totals when consolidation is on. Keep other fields intact.
+  const compSheets = (includeLinked && anyHaveLinked)
+    ? filteredCompSheets.map(s => ({ ...s, totals: s.consolidatedTotals || s.totals }))
+    : filteredCompSheets;
   const fmt = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
   const pct = (a, b) => b !== 0 ? ((a - b) / Math.abs(b) * 100) : null;
 
@@ -1390,16 +1400,41 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
           <span style={{fontSize:12,color:'#888'}}>
             {activeYears.length} of {allYears.length} selected
             {scopeToFolder && <> · scoped to <strong style={{color:'#374151'}}>{currentFolderLabel}</strong></>}
+            {includeLinked && anyHaveLinked && <> · <strong style={{color:'#6B0E1E'}}>consolidated</strong></>}
           </span>
-          {otherFolderCount > 0 && (
-            <label style={{fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer',marginLeft:'auto'}}
-              title={`${inFolderCount} sheet${inFolderCount!==1?'s':''} in ${currentFolderLabel}, ${otherFolderCount} in other folders`}>
-              <input type="checkbox" checked={scopeToFolder} onChange={e=>{setScopeToFolder(e.target.checked);setSelectedYears(null);}} style={{margin:0}}/>
-              Only sheets in <strong style={{color:'#374151',marginLeft:2}}>{currentFolderLabel}</strong>
-              <span style={{color:'#9ca3af',marginLeft:4}}>({inFolderCount})</span>
-            </label>
-          )}
+          <div style={{marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+            {anyHaveLinked && (
+              <label style={{fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                title="Add each linked entity's balance sheet (scaled by ownership %) into the totals. Useful when the operation runs through a corp but land is held personally.">
+                <input type="checkbox" checked={includeLinked} onChange={e=>setIncludeLinked(e.target.checked)} style={{margin:0}}/>
+                Include linked entities
+              </label>
+            )}
+            {otherFolderCount > 0 && (
+              <label style={{fontSize:11,color:'#6b7280',display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                title={`${inFolderCount} sheet${inFolderCount!==1?'s':''} in ${currentFolderLabel}, ${otherFolderCount} in other folders`}>
+                <input type="checkbox" checked={scopeToFolder} onChange={e=>{setScopeToFolder(e.target.checked);setSelectedYears(null);}} style={{margin:0}}/>
+                Only sheets in <strong style={{color:'#374151',marginLeft:2}}>{currentFolderLabel}</strong>
+                <span style={{color:'#9ca3af',marginLeft:4}}>({inFolderCount})</span>
+              </label>
+            )}
+          </div>
         </div>
+        {includeLinked && anyHaveLinked && (() => {
+          const latestSummary = filteredCompSheets[filteredCompSheets.length-1]?.linkedSummary || [];
+          return latestSummary.length > 0 && (
+            <div style={{fontSize:11,color:'#6b7280',background:'#fdf7f7',border:'1px solid #f0dcdf',borderRadius:6,padding:'6px 10px',marginBottom:6}}>
+              Consolidated with:{' '}
+              {latestSummary.map((e, i) => (
+                <span key={i} style={{marginRight:8}}>
+                  <strong style={{color:'#374151'}}>{e.name}</strong>
+                  <span style={{color:'#9ca3af'}}> ({e.ownership.toFixed(0)}%)</span>
+                  {!e.matched && <span style={{color:'#b45309',marginLeft:3}} title="No saved sheet found for this entity — nothing to consolidate">⚠</span>}
+                </span>
+              ))}
+            </div>
+          );
+        })()}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8,flexWrap:'wrap'}}>
           <div style={{marginLeft:'auto',display:'flex',gap:6}}>
             <button onClick={()=>setSelectedYears(allYears)}
@@ -1694,7 +1729,7 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
               Claude analyzes year-over-year changes and explains what they mean
             </div>
           </div>
-          <button className="btn-insight" onClick={generateInsights}
+          <button className="btn-insight" onClick={()=>generateInsights(includeLinked && anyHaveLinked)}
             disabled={compInsightLoading}>
             {compInsightLoading ? 'Analyzing...' : compInsight ? 'Re-analyze' : 'Generate Insights'}
           </button>
@@ -8012,6 +8047,29 @@ Question: ${q}`,
         if (sameFolder || sameClient) candidateKeys.add(s.key);
       });
       const sheets = [];
+      // Cache linked-entity sheet lookups (they can be pulled multiple times if
+      // several comparison years link the same corp).
+      const entityCache = new Map();  // key = `${name}::${date||''}` → parsed sheet
+      const loadEntitySheet = async (name, date) => {
+        const ck = `${name}::${date || ''}`;
+        if (entityCache.has(ck)) return entityCache.get(ck);
+        const candidates = savedSheets.filter(s => s.clientName === name);
+        if (!candidates.length) { entityCache.set(ck, null); return null; }
+        // Prefer exact-date match; else pick the nearest date not after the target.
+        let pick = date ? candidates.find(s => s.asOfDate === date) : null;
+        if (!pick && date) {
+          const asOf = date;
+          const sorted = [...candidates].sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+          pick = sorted.find(s => (s.asOfDate||'') <= asOf) || sorted[0];
+        }
+        if (!pick) pick = [...candidates].sort((a,b)=>(b.asOfDate||'').localeCompare(a.asOfDate||''))[0];
+        try {
+          const it = await storage.get(pick.key);
+          const parsed = it ? JSON.parse(it.value) : null;
+          entityCache.set(ck, parsed);
+          return parsed;
+        } catch { entityCache.set(ck, null); return null; }
+      };
       for (const key of candidateKeys) {
         try {
           const item = await storage.get(key);
@@ -8019,8 +8077,35 @@ Question: ${q}`,
             const p = JSON.parse(item.value);
             const totals = sheetTotals(p);
             const issues = validateSheet(p).filter(i => i.severity === 'warning');
+            // Build consolidated view — personal totals + Σ (linked entity totals × ownership%).
+            // We compute one contribution number per label so the view can flip
+            // between "personal only" and "consolidated" per user preference.
+            const linkedContrib = {};
+            const linkedSummary = [];
+            const linked = normalizeLinked(p.linkedEntities || []);
+            for (const entry of linked) {
+              const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
+              const eSheet = await loadEntitySheet(entry.name, entry.date || p.asOfDate);
+              if (!eSheet) {
+                linkedSummary.push({ name: entry.name, ownership: pct*100, matched: false });
+                continue;
+              }
+              const eTotals = sheetTotals(eSheet);
+              Object.entries(eTotals).forEach(([lbl, v]) => {
+                linkedContrib[lbl] = (linkedContrib[lbl] || 0) + (Number(v) || 0) * pct;
+              });
+              linkedSummary.push({
+                name: entry.name, ownership: pct*100, matched: true,
+                asOfDate: eSheet.asOfDate,
+                netWorth: (eTotals['NET WORTH'] || 0) * pct,
+              });
+            }
+            const consolidatedTotals = {};
+            Object.keys(totals).forEach(lbl => {
+              consolidatedTotals[lbl] = (totals[lbl] || 0) + (linkedContrib[lbl] || 0);
+            });
             sheets.push({
-              date: p.asOfDate, totals, issues,
+              date: p.asOfDate, totals, consolidatedTotals, linkedContrib, linkedSummary, issues,
               key,
               folderPath: p.folderPath || [],
               savedAt: p._savedAt || null,
@@ -8051,12 +8136,14 @@ Question: ${q}`,
     }
   };
 
-  const generateInsights = async () => {
+  const generateInsights = async (useConsolidated = false) => {
     if (compSheets.length < 2) return;
     setCompInsightLoading(true); setCompInsight("");
+    // Choose totals per-year — consolidated when the caller asked for it AND the data has linked entities.
+    const totalsFor = (s) => (useConsolidated && s.consolidatedTotals) ? s.consolidatedTotals : s.totals;
     const years = compSheets.map(s => s.date).join(", ");
     const rows = Object.keys(compSheets[0].totals).map(label => {
-      const vals = compSheets.map(s => s.totals[label] || 0);
+      const vals = compSheets.map(s => totalsFor(s)[label] || 0);
       return vals.slice(1).map((v,i) => {
         const prev = vals[i];
         const diff = v - prev;
@@ -8065,33 +8152,82 @@ Question: ${q}`,
         return label + ": " + prevStr + " to $" + v.toLocaleString() + " (" + (diff>=0?"+":"") + diff.toLocaleString() + ", " + pct + "%)";
       }).join("; ");
     }).join("\n");
+    // If consolidated, also describe which entities are folded in so the AI can name them.
+    const consolidationHeader = useConsolidated
+      ? "\n\nCONSOLIDATION SCOPE: figures include this client plus each linked entity scaled by ownership %. Entities included:\n"
+        + (compSheets[compSheets.length-1]?.linkedSummary || []).map(e =>
+            `- ${e.name} (${e.ownership.toFixed(0)}%)${e.matched ? ` — ${e.asOfDate}` : ' — NO SHEET FOUND'}`
+          ).join('\n')
+      : "";
 
     // Load full sheet data for each comparison year to compute projected income /
     // expenses / debt service. compSheets only has balance-sheet totals, so without
     // this the AI has no way to see the budget page and ends up saying "no
     // projected income" even though the budget is populated.
     const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
+    const fmtM = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
+    // Helper — pull budget numbers out of a raw sheet blob.
+    const budgetOf = (p) => {
+      const cropInc      = (p.budgetCrops||[]).reduce((a,r) => a + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
+      const livestockInc = (p.budgetLivestock||[]).reduce((a,r) => a + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
+      const miscInc      = (p.budgetMisc||[]).reduce((a,r) => a + nm(r.amount), 0);
+      const opEx         = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((a,r) => a + nm(r.amount), 0);
+      const debtSvc      = (p.intermediatDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
+                         + (p.reCurrent||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
+                         + (p.budgetProposedDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0);
+      return { cropInc, livestockInc, miscInc, opEx, debtSvc, totalInc: cropInc+livestockInc+miscInc };
+    };
     const budgetRows = [];
     for (const s of compSheets) {
       try {
         const item = await storage.get(s.key);
         if (!item) continue;
         const p = JSON.parse(item.value);
-        const cropInc      = (p.budgetCrops||[]).reduce((a,r) => a + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
-        const livestockInc = (p.budgetLivestock||[]).reduce((a,r) => a + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
-        const miscInc      = (p.budgetMisc||[]).reduce((a,r) => a + nm(r.amount), 0);
-        const totalInc     = cropInc + livestockInc + miscInc;
-        const opEx         = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((a,r) => a + nm(r.amount), 0);
-        const debtSvc      = (p.intermediatDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
-                           + (p.reCurrent||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
-                           + (p.budgetProposedDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0);
-        const dscr = debtSvc > 0 ? ((totalInc - opEx) / debtSvc).toFixed(2) : 'n/a';
-        const fmtM = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
-        budgetRows.push(`- ${s.date} (${p.clientName || 'unknown'}): projected income ${fmtM(totalInc)} (crop ${fmtM(cropInc)}, livestock ${fmtM(livestockInc)}, misc ${fmtM(miscInc)}), operating exp ${fmtM(opEx)}, debt service ${fmtM(debtSvc)}, DSCR ${dscr}`);
+        const own = budgetOf(p);
+        // In consolidated mode, also fold in each linked entity's budget × ownership %.
+        // Cache lookups to avoid re-fetching the same entity for each year.
+        let entityLines = [];
+        let comboInc = own.totalInc, comboCrop = own.cropInc, comboLs = own.livestockInc, comboMisc = own.miscInc, comboOpEx = own.opEx, comboDebt = own.debtSvc;
+        if (useConsolidated) {
+          for (const entry of normalizeLinked(p.linkedEntities || [])) {
+            const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
+            const candidates = savedSheets.filter(x => x.clientName === entry.name)
+              .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+            let pick = entry.date ? candidates.find(x => x.asOfDate === entry.date) : candidates[0];
+            if (!pick) pick = candidates.find(x => (x.asOfDate||'') <= (entry.date||p.asOfDate)) || candidates[0];
+            if (!pick) { entityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%) — no sheet on file`); continue; }
+            try {
+              const ei = await storage.get(pick.key);
+              if (!ei) continue;
+              const ep = JSON.parse(ei.value);
+              const eb = budgetOf(ep);
+              comboInc  += eb.totalInc * pct;
+              comboCrop += eb.cropInc * pct;
+              comboLs   += eb.livestockInc * pct;
+              comboMisc += eb.miscInc * pct;
+              comboOpEx += eb.opEx * pct;
+              comboDebt += eb.debtSvc * pct;
+              entityLines.push(`${entry.name} (${(pct*100).toFixed(0)}% of ${ep.asOfDate}): income ${fmtM(eb.totalInc)}, opEx ${fmtM(eb.opEx)}, debt svc ${fmtM(eb.debtSvc)}`);
+            } catch {}
+          }
+        }
+        const dscrCombo = comboDebt > 0 ? ((comboInc - comboOpEx) / comboDebt).toFixed(2) : 'n/a';
+        if (useConsolidated && entityLines.length) {
+          budgetRows.push(
+            `- ${s.date} (${p.clientName || 'unknown'}) CONSOLIDATED: projected income ${fmtM(comboInc)} (crop ${fmtM(comboCrop)}, livestock ${fmtM(comboLs)}, misc ${fmtM(comboMisc)}), operating exp ${fmtM(comboOpEx)}, debt service ${fmtM(comboDebt)}, DSCR ${dscrCombo}`
+            + `\n    · Personal own: income ${fmtM(own.totalInc)}, opEx ${fmtM(own.opEx)}, debt svc ${fmtM(own.debtSvc)}`
+            + entityLines.map(l => `\n    · ${l}`).join('')
+          );
+        } else {
+          const dscrOwn = own.debtSvc > 0 ? ((own.totalInc - own.opEx) / own.debtSvc).toFixed(2) : 'n/a';
+          budgetRows.push(`- ${s.date} (${p.clientName || 'unknown'}): projected income ${fmtM(own.totalInc)} (crop ${fmtM(own.cropInc)}, livestock ${fmtM(own.livestockInc)}, misc ${fmtM(own.miscInc)}), operating exp ${fmtM(own.opEx)}, debt service ${fmtM(own.debtSvc)}, DSCR ${dscrOwn}`);
+        }
       } catch {}
     }
     const budgetBlock = budgetRows.length
-      ? "\n\nBUDGET / PROJECTED CASH FLOW (per year):\n" + budgetRows.join("\n")
+      ? "\n\nBUDGET / PROJECTED CASH FLOW (per year)"
+        + (useConsolidated ? " — consolidated (personal + linked entities × ownership %)" : "")
+        + ":\n" + budgetRows.join("\n")
       : "\n\nBUDGET: no budget data available on these sheets.";
 
     try {
@@ -8109,9 +8245,12 @@ Question: ${q}`,
         messages: [{
           role: "user",
           content: "Client: " + data.clientName + "\nYears: " + years
+            + (useConsolidated ? "\nMODE: consolidated (personal + linked entities scaled by ownership %)" : "")
             + "\n\nBalance-sheet changes:\n" + rows
+            + consolidationHeader
             + budgetBlock
             + "\n\nProvide insights on the most significant changes and financial health."
+            + (useConsolidated ? " Because these figures consolidate the individual and their linked entities, discuss the combined operation as a whole (e.g. how the operating entity supports the land base held personally, or vice versa)." : "")
         }]
       };
 
