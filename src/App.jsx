@@ -8290,17 +8290,16 @@ Question: ${q}`,
       const apiEndpoint = '/.netlify/functions/analyze';
 
       const requestBody = {
-        // Haiku 4.5 is ~3-5× faster than Sonnet on structured analytical tasks and
-        // stays well under Netlify's function-timeout ceiling (10s free / 26s Pro),
-        // which was blowing up with Sonnet at 3000 max_tokens.
+        // Haiku 4.5 + tighter token budget so the whole response completes inside
+        // Netlify's 10-second free-tier function timeout. If we ever move to a
+        // streaming netlify function we can safely bump this back up.
         model: "claude-haiku-4-5",
-        max_tokens: 3000,
+        max_tokens: 1500,
         system: "You are an agricultural loan officer analyst at First Bank of Montana. "
-          + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
-          + "Focus on significant changes, trends, working capital, debt load, net worth, DSCR, "
-          + "and the post-harvest liquidation → operating-line coverage → carry-over sequence. "
-          + "Write in plain language. Use simple headers. Cover every relevant observation — "
-          + "do not cap the number of points, but do NOT pad; if there's nothing to say, say nothing. "
+          + "Analyze year-over-year balance sheet changes and provide practical insights. "
+          + "Cover: significant balance-sheet changes, working capital, debt load, net worth trend, DSCR, "
+          + "and the post-harvest liquidation → operating-line coverage → carry-over margin sequence. "
+          + "Be concise — 4-6 short sections with tight bullets. Cite specific numbers. "
           + "Only claim data is missing if it is explicitly absent from what was provided.",
         messages: [{
           role: "user",
