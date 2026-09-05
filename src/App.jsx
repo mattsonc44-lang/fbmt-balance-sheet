@@ -8177,13 +8177,62 @@ Question: ${q}`,
                          + (p.budgetProposedDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0);
       return { cropInc, livestockInc, miscInc, opEx, debtSvc, totalInc: cropInc+livestockInc+miscInc };
     };
+    // Post-harvest liquidation snapshot: stored grain + livestock-for-market on the
+    // balance sheet vs the operating note balance. If crop-on-hand > op line, the
+    // difference is carry-over the client can use to seed next year's operating
+    // needs (working-capital tailwind). If it's negative, they still owe after
+    // selling everything they've stored — a real red flag.
+    const liquidationOf = (p) => {
+      const stored = (p.farmProducts||[]).reduce((a,r) => a + nm(r.quantity)*nm(r.pricePerUnit)*(nm(r.share||'100')/100), 0);
+      const feeders = (p.livestockMarket||[]).reduce((a,r) => a + nm(r.value), 0);
+      const opLine  = (p.operatingNotes||[]).reduce((a,r) => a + nm(r.balance), 0);
+      const acctsDue = (p.accountsDue||[]).reduce((a,r) => a + nm(r.amount), 0);
+      const liquid  = stored + feeders;
+      const shortTerm = opLine + acctsDue;
+      return { stored, feeders, opLine, acctsDue, liquid, shortTerm, carryOver: liquid - shortTerm };
+    };
     const budgetRows = [];
+    const liquidationRows = [];
     for (const s of compSheets) {
       try {
         const item = await storage.get(s.key);
         if (!item) continue;
         const p = JSON.parse(item.value);
         const own = budgetOf(p);
+        // ── Post-harvest liquidation for this year (personal + linked when consolidated)
+        let liqOwn = liquidationOf(p);
+        let liqCombo = { ...liqOwn };
+        let liqEntityLines = [];
+        if (useConsolidated) {
+          for (const entry of normalizeLinked(p.linkedEntities || [])) {
+            const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
+            const candidates = savedSheets.filter(x => x.clientName === entry.name)
+              .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+            let pick = entry.date ? candidates.find(x => x.asOfDate === entry.date) : candidates[0];
+            if (!pick) pick = candidates.find(x => (x.asOfDate||'') <= (entry.date||p.asOfDate)) || candidates[0];
+            if (!pick) continue;
+            try {
+              const ei = await storage.get(pick.key);
+              if (!ei) continue;
+              const ep = JSON.parse(ei.value);
+              const el = liquidationOf(ep);
+              liqCombo.stored    += el.stored * pct;
+              liqCombo.feeders   += el.feeders * pct;
+              liqCombo.opLine    += el.opLine * pct;
+              liqCombo.acctsDue  += el.acctsDue * pct;
+              liqCombo.liquid    += el.liquid * pct;
+              liqCombo.shortTerm += el.shortTerm * pct;
+              liqCombo.carryOver += el.carryOver * pct;
+              liqEntityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%): stored ${fmtM(el.stored)}, opLine ${fmtM(el.opLine)}, carry-over ${fmtM(el.carryOver)}`);
+            } catch {}
+          }
+        }
+        const active = useConsolidated ? liqCombo : liqOwn;
+        const coveragePct = active.shortTerm > 0 ? ((active.liquid / active.shortTerm) * 100).toFixed(0) + '%' : 'n/a';
+        liquidationRows.push(
+          `- ${s.date}: crop-on-hand ${fmtM(active.stored)} + market livestock ${fmtM(active.feeders)} = liquid ${fmtM(active.liquid)} vs op line ${fmtM(active.opLine)} + accts due ${fmtM(active.acctsDue)} = ${fmtM(active.shortTerm)} short-term → coverage ${coveragePct} → post-payoff carry-over ${fmtM(active.carryOver)}`
+          + (useConsolidated && liqEntityLines.length ? liqEntityLines.map(l => `\n    · ${l}`).join('') : '')
+        );
         // In consolidated mode, also fold in each linked entity's budget × ownership %.
         // Cache lookups to avoid re-fetching the same entity for each year.
         let entityLines = [];
@@ -8229,6 +8278,12 @@ Question: ${q}`,
         + (useConsolidated ? " — consolidated (personal + linked entities × ownership %)" : "")
         + ":\n" + budgetRows.join("\n")
       : "\n\nBUDGET: no budget data available on these sheets.";
+    const liquidationBlock = liquidationRows.length
+      ? "\n\nPOST-HARVEST LIQUIDATION & OPERATING-LINE CARRY-OVER (per year)"
+        + (useConsolidated ? " — consolidated" : "")
+        + ":\nIf the client sold their stored grain + market livestock at listed values, would it pay off the operating note & accounts due? What margin is left to seed next year's operating cycle?\n"
+        + liquidationRows.join("\n")
+      : "";
 
     try {
       // Call our Netlify proxy function (avoids CORS + keeps API key private)
@@ -8249,7 +8304,11 @@ Question: ${q}`,
             + "\n\nBalance-sheet changes:\n" + rows
             + consolidationHeader
             + budgetBlock
+            + liquidationBlock
             + "\n\nProvide insights on the most significant changes and financial health."
+            + " In the analysis, EXPLICITLY connect the post-harvest liquidation line above to next year's outlook —"
+            + " i.e., if crop-on-hand covers the operating line with margin, note the carry-over as a working-capital tailwind going into the next cycle;"
+            + " if it doesn't cover, flag the roll-over debt risk."
             + (useConsolidated ? " Because these figures consolidate the individual and their linked entities, discuss the combined operation as a whole (e.g. how the operating entity supports the land base held personally, or vice versa)." : "")
         }]
       };
