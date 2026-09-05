@@ -8291,11 +8291,13 @@ Question: ${q}`,
 
       const requestBody = {
         model: "claude-sonnet-4-5",
-        max_tokens: 1000,
+        max_tokens: 3000,
         system: "You are an agricultural loan officer analyst at First Bank of Montana. "
           + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
-          + "Focus on significant changes, trends, working capital, debt load, and net worth. "
-          + "Write in plain language. Use simple headers. Max 5 key observations. "
+          + "Focus on significant changes, trends, working capital, debt load, net worth, DSCR, "
+          + "and the post-harvest liquidation → operating-line coverage → carry-over sequence. "
+          + "Write in plain language. Use simple headers. Cover every relevant observation — "
+          + "do not cap the number of points, but do NOT pad; if there's nothing to say, say nothing. "
           + "Only claim data is missing if it is explicitly absent from what was provided.",
         messages: [{
           role: "user",
