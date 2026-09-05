@@ -6527,6 +6527,18 @@ export default function BalanceSheet() {
         outline: 2px solid #6B0E1E !important;
         outline-offset: 2px !important;
       }
+
+      /* AI Insights panel — the base stylesheet sometimes caps the panel/body
+         height, which visually chops off long analyses even though the text is
+         present. Force these to grow to whatever the content needs. */
+      .insight-panel,
+      .insight-body {
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+      }
+      .insight-heading { margin-top: 14px !important; font-weight: 700 !important; }
+      .insight-bullet  { margin-left: 18px !important; }
     `;
     if (!document.getElementById("fbmt-modern")) document.head.appendChild(modern);
   }, []);
