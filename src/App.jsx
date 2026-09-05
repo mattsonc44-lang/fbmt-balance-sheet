@@ -8285,59 +8285,97 @@ Question: ${q}`,
         + liquidationRows.join("\n")
       : "";
 
+    // Stream the response from analyze-stream so long analytical responses don't
+    // hit Netlify's inactivity-timeout ceiling. Text appears progressively as the
+    // model generates it, so we can safely run at full verbosity.
+    const requestBody = {
+      model: "claude-haiku-4-5",
+      max_tokens: 3000,
+      system: "You are an agricultural loan officer analyst at First Bank of Montana. "
+        + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
+        + "Cover: significant balance-sheet changes, working capital, debt load, net worth trend, DSCR, "
+        + "and the post-harvest liquidation → operating-line coverage → carry-over margin sequence. "
+        + "Write in plain language with simple ## headings and short bullets. Cite specific numbers. "
+        + "Cover every relevant observation — do not cap the number of points, but do NOT pad; "
+        + "if there's nothing to say, say nothing. "
+        + "Only claim data is missing if it is explicitly absent from what was provided.",
+      messages: [{
+        role: "user",
+        content: "Client: " + data.clientName + "\nYears: " + years
+          + (useConsolidated ? "\nMODE: consolidated (personal + linked entities scaled by ownership %)" : "")
+          + "\n\nBalance-sheet changes:\n" + rows
+          + consolidationHeader
+          + budgetBlock
+          + liquidationBlock
+          + "\n\nProvide insights on the most significant changes and financial health."
+          + " In the analysis, EXPLICITLY connect the post-harvest liquidation line above to next year's outlook —"
+          + " i.e., if crop-on-hand covers the operating line with margin, note the carry-over as a working-capital tailwind going into the next cycle;"
+          + " if it doesn't cover, flag the roll-over debt risk."
+          + (useConsolidated ? " Because these figures consolidate the individual and their linked entities, discuss the combined operation as a whole (e.g. how the operating entity supports the land base held personally, or vice versa)." : "")
+      }]
+    };
     try {
-      // Call our Netlify proxy function (avoids CORS + keeps API key private)
-      const apiEndpoint = '/.netlify/functions/analyze';
-
-      const requestBody = {
-        // Haiku 4.5 + tighter token budget so the whole response completes inside
-        // Netlify's 10-second free-tier function timeout. If we ever move to a
-        // streaming netlify function we can safely bump this back up.
-        model: "claude-haiku-4-5",
-        max_tokens: 1500,
-        system: "You are an agricultural loan officer analyst at First Bank of Montana. "
-          + "Analyze year-over-year balance sheet changes and provide practical insights. "
-          + "Cover: significant balance-sheet changes, working capital, debt load, net worth trend, DSCR, "
-          + "and the post-harvest liquidation → operating-line coverage → carry-over margin sequence. "
-          + "Be concise — 4-6 short sections with tight bullets. Cite specific numbers. "
-          + "Only claim data is missing if it is explicitly absent from what was provided.",
-        messages: [{
-          role: "user",
-          content: "Client: " + data.clientName + "\nYears: " + years
-            + (useConsolidated ? "\nMODE: consolidated (personal + linked entities scaled by ownership %)" : "")
-            + "\n\nBalance-sheet changes:\n" + rows
-            + consolidationHeader
-            + budgetBlock
-            + liquidationBlock
-            + "\n\nProvide insights on the most significant changes and financial health."
-            + " In the analysis, EXPLICITLY connect the post-harvest liquidation line above to next year's outlook —"
-            + " i.e., if crop-on-hand covers the operating line with margin, note the carry-over as a working-capital tailwind going into the next cycle;"
-            + " if it doesn't cover, flag the roll-over debt risk."
-            + (useConsolidated ? " Because these figures consolidate the individual and their linked entities, discuss the combined operation as a whole (e.g. how the operating entity supports the land base held personally, or vice versa)." : "")
-        }]
-      };
-
-      const resp = await fetch(apiEndpoint, {
+      const resp = await fetch('/.netlify/functions/analyze-stream', {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-fbmt-secret": window.FBMT_FUNCTION_SECRET || '',
-        },
-        body: JSON.stringify(requestBody)
+        headers: { "Content-Type": "application/json", "x-fbmt-secret": window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify(requestBody),
       });
-      if (!resp.ok) {
-        const errText = await resp.text();
+      if (!resp.ok || !resp.body) {
+        // If the streaming function isn't deployed yet or errored, fall back to non-streaming analyze.js
+        const errText = await resp.text().catch(()=>'');
+        if (resp.status === 404) {
+          // Fallback path — reduces max_tokens so we don't hit the timeout on the non-streaming route.
+          const fbBody = { ...requestBody, max_tokens: 1500 };
+          const fb = await fetch('/.netlify/functions/analyze', {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-fbmt-secret": window.FBMT_FUNCTION_SECRET || '' },
+            body: JSON.stringify(fbBody),
+          });
+          if (!fb.ok) { setCompInsight("Error from server (" + fb.status + "): " + (await fb.text())); setCompInsightLoading(false); return; }
+          const json = await fb.json();
+          setCompInsight(json.content?.filter(b=>b.type==="text").map(b=>b.text).join("") || "Unable to generate insights.");
+          setCompInsightLoading(false);
+          return;
+        }
         setCompInsight("Error from server (" + resp.status + "): " + errText);
         setCompInsightLoading(false);
         return;
       }
-      const json = await resp.json();
-      const text = json.content?.filter(b=>b.type==="text").map(b=>b.text).join("")
-        || json.error
-        || "Unable to generate insights.";
-      setCompInsight(text);
+      // Parse SSE stream — Anthropic emits `event: content_block_delta` with JSON
+      // `{"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}`
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "", buf = "";
+      setCompInsight(""); // clear placeholder; text will stream in
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // Process complete SSE messages (separated by double-newline)
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          // Each chunk may contain `event: xyz` and `data: {...}` lines.
+          const dataLine = chunk.split('\n').find(l => l.startsWith('data: '));
+          if (!dataLine) continue;
+          const raw = dataLine.slice(6);
+          if (raw === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
+              acc += evt.delta.text;
+              setCompInsight(acc);
+            } else if (evt.type === 'error' && evt.error) {
+              setCompInsight("Model error: " + (evt.error.message || 'unknown'));
+            }
+          } catch { /* ignore malformed lines */ }
+        }
+      }
+      if (!acc) setCompInsight("Model returned no text — try again.");
     } catch (err) {
-      setCompInsight("Connection error: " + err.message + ". Check that ANTHROPIC_API_KEY is set in Netlify environment variables.");
+      setCompInsight("Connection error: " + err.message + ".");
     }
     setCompInsightLoading(false);
   };
