@@ -1759,7 +1759,7 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
           </div>
         )}
         {compInsight && !compInsightLoading && (
-          <div className="insight-body">
+          <div className="insight-body" style={{maxHeight:'none',height:'auto',overflow:'visible',display:'block'}}>
             {compInsight.split("\n").map((line, i) => {
               const t = line.trim();
               if (!t) return <div key={i} className="insight-gap" />;
@@ -8324,7 +8324,7 @@ Question: ${q}`,
     // model generates it, so we can safely run at full verbosity.
     const requestBody = {
       model: "claude-haiku-4-5",
-      max_tokens: 4000,
+      max_tokens: 6000,
       system: "You are an agricultural loan officer analyst at First Bank of Montana. "
         + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
         + "Cover: significant balance-sheet changes, working capital, debt load, net worth trend, DSCR, "
@@ -8377,21 +8377,20 @@ Question: ${q}`,
       }
       // Parse SSE stream — Anthropic emits `event: content_block_delta` with JSON
       // `{"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}`
+      // and a final `message_delta` with the stop_reason.
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
-      let acc = "", buf = "";
+      let acc = "", buf = "", stopReason = null;
       setCompInsight(""); // clear placeholder; text will stream in
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        // Process complete SSE messages (separated by double-newline)
         let idx;
         while ((idx = buf.indexOf('\n\n')) !== -1) {
           const chunk = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
-          // Each chunk may contain `event: xyz` and `data: {...}` lines.
           const dataLine = chunk.split('\n').find(l => l.startsWith('data: '));
           if (!dataLine) continue;
           const raw = dataLine.slice(6);
@@ -8401,11 +8400,17 @@ Question: ${q}`,
             if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
               acc += evt.delta.text;
               setCompInsight(acc);
+            } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
+              stopReason = evt.delta.stop_reason;
             } else if (evt.type === 'error' && evt.error) {
               setCompInsight("Model error: " + (evt.error.message || 'unknown'));
             }
           } catch { /* ignore malformed lines */ }
         }
+      }
+      // If the model was cut off by the token cap, tell the user explicitly.
+      if (stopReason === 'max_tokens' && acc) {
+        setCompInsight(acc + "\n\n---\n\n⚠️ **Analysis was cut off at the token limit.** Ask a lender-admin to bump max_tokens higher, or click Re-analyze after narrowing to fewer years / turning off consolidation.");
       }
       if (!acc) setCompInsight("Model returned no text — try again.");
     } catch (err) {
