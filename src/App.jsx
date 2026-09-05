@@ -8290,7 +8290,10 @@ Question: ${q}`,
       const apiEndpoint = '/.netlify/functions/analyze';
 
       const requestBody = {
-        model: "claude-sonnet-4-5",
+        // Haiku 4.5 is ~3-5× faster than Sonnet on structured analytical tasks and
+        // stays well under Netlify's function-timeout ceiling (10s free / 26s Pro),
+        // which was blowing up with Sonnet at 3000 max_tokens.
+        model: "claude-haiku-4-5",
         max_tokens: 3000,
         system: "You are an agricultural loan officer analyst at First Bank of Montana. "
           + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
