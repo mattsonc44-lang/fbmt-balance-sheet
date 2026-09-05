@@ -1235,6 +1235,20 @@ function BudgetView({
   );
 }
 
+// Inline-markdown renderer used inside the AI insight body — turns `**bold**`
+// into <strong> and leaves everything else as plain text. Kept intentionally
+// tiny so we don't drag a full markdown library in.
+function renderInlineMd(str) {
+  if (!str) return str;
+  const parts = String(str).split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) => {
+    if (/^\*\*[^*]+\*\*$/.test(p)) {
+      return <strong key={i}>{p.slice(2, -2)}</strong>;
+    }
+    return <React.Fragment key={i}>{p}</React.Fragment>;
+  });
+}
+
 // ─── ComparisonView ───────────────────────────────────────────────────────────
 function ComparisonView({
   compSheets: rawCompSheets, compLoading, compInsight, compInsightLoading,
@@ -1749,15 +1763,23 @@ ${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e
             {compInsight.split("\n").map((line, i) => {
               const t = line.trim();
               if (!t) return <div key={i} className="insight-gap" />;
-              if (t.startsWith("##") || (t.startsWith("**") && t.endsWith("**"))) {
+              // Headings — accept any number of leading # (# through ######) or
+              // a fully-bolded line (**Section Title**).
+              if (/^#{1,6}\s+/.test(t) || (t.startsWith("**") && t.endsWith("**") && t.length > 4)) {
                 return <div key={i} className="insight-heading">
-                  {t.replace(/\*\*/g,"").replace(/##/g,"").trim()}
+                  {t.replace(/^#{1,6}\s+/, "").replace(/\*\*/g,"").trim()}
                 </div>;
               }
-              if (t.startsWith("- ") || t.startsWith("• ")) {
-                return <div key={i} className="insight-bullet">{t.slice(2)}</div>;
+              // Bullets — accept -, *, • (with a space after)
+              if (/^([-*•])\s+/.test(t)) {
+                const body = t.replace(/^([-*•])\s+/, "");
+                return <div key={i} className="insight-bullet">{renderInlineMd(body)}</div>;
               }
-              return <div key={i} className="insight-line">{line}</div>;
+              // Numbered list
+              if (/^\d+\.\s+/.test(t)) {
+                return <div key={i} className="insight-bullet">{renderInlineMd(t)}</div>;
+              }
+              return <div key={i} className="insight-line">{renderInlineMd(line)}</div>;
             })}
           </div>
         )}
@@ -8302,7 +8324,7 @@ Question: ${q}`,
     // model generates it, so we can safely run at full verbosity.
     const requestBody = {
       model: "claude-haiku-4-5",
-      max_tokens: 3000,
+      max_tokens: 4000,
       system: "You are an agricultural loan officer analyst at First Bank of Montana. "
         + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
         + "Cover: significant balance-sheet changes, working capital, debt load, net worth trend, DSCR, "
