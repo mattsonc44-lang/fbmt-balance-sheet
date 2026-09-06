@@ -1418,9 +1418,17 @@ function ComparisonView({
       const safeLatest = safeSheets[safeSheets.length - 1];
       const safePrior  = safeSheets[safeSheets.length - 2];
       const fmtP = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+      // BOLD_ROWS / SECTION_BREAKS are Sets (not arrays) — use a helper that
+      // supports either shape so we don't blow up with "includes is not a function".
+      const isIn = (coll, label) => {
+        if (!coll) return false;
+        if (typeof coll.has === 'function') return coll.has(label);
+        if (typeof coll.includes === 'function') return coll.includes(label);
+        return false;
+      };
       const rows = labels.map(label => {
-        const isBold = BOLD_ROWS && BOLD_ROWS.includes(label);
-        const isBreak = SECTION_BREAKS && SECTION_BREAKS.includes(label);
+        const isBold = isIn(BOLD_ROWS, label);
+        const isBreak = isIn(SECTION_BREAKS, label);
         const header = SECTION_HEADERS && SECTION_HEADERS[label];
         const latestVal = (safeLatest && safeLatest.totals && safeLatest.totals[label]) || 0;
         const priorVal  = (safePrior  && safePrior.totals  && safePrior.totals[label])  || 0;
