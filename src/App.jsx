@@ -6559,8 +6559,35 @@ export default function BalanceSheet() {
         height: auto !important;
         overflow: visible !important;
       }
-      .insight-heading { margin-top: 14px !important; font-weight: 700 !important; }
-      .insight-bullet  { margin-left: 18px !important; }
+      .insight-body {
+        font-size: 14px !important;
+        line-height: 1.55 !important;
+        color: #111 !important;
+      }
+      .insight-heading {
+        margin: 18px 0 6px !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        color: #6B0E1E !important;
+        text-transform: uppercase !important;
+        letter-spacing: .5px !important;
+        border-bottom: 1px solid #e5e7eb !important;
+        padding-bottom: 3px !important;
+      }
+      .insight-heading:first-child { margin-top: 0 !important; }
+      .insight-bullet {
+        position: relative !important;
+        padding-left: 16px !important;
+        margin: 2px 0 !important;
+      }
+      .insight-bullet::before {
+        content: "•" !important;
+        position: absolute !important;
+        left: 4px !important;
+        color: #6B0E1E !important;
+      }
+      .insight-line { margin: 4px 0 !important; }
+      .insight-gap  { height: 6px !important; }
     `;
     if (!document.getElementById("fbmt-modern")) document.head.appendChild(modern);
   }, []);
@@ -8325,14 +8352,47 @@ Question: ${q}`,
     const requestBody = {
       model: "claude-haiku-4-5",
       max_tokens: 6000,
-      system: "You are an agricultural loan officer analyst at First Bank of Montana. "
-        + "Analyze year-over-year balance sheet changes and provide clear practical insights. "
-        + "Cover: significant balance-sheet changes, working capital, debt load, net worth trend, DSCR, "
-        + "and the post-harvest liquidation → operating-line coverage → carry-over margin sequence. "
-        + "Write in plain language with simple ## headings and short bullets. Cite specific numbers. "
-        + "Cover every relevant observation — do not cap the number of points, but do NOT pad; "
-        + "if there's nothing to say, say nothing. "
-        + "Only claim data is missing if it is explicitly absent from what was provided.",
+      system:
+`You are an agricultural loan officer analyst at First Bank of Montana writing a briefing for another lender.
+
+Write a clean, scannable report using EXACTLY this structure and formatting — no deviations:
+
+## Bottom Line
+One or two sentences. What's the overall story?
+
+## Balance Sheet Trend
+- Net worth: $X → $Y (+Z%)
+- Total assets: $X → $Y (+Z%)
+- Total liabilities: $X → $Y (change)
+- Working capital: $X → $Y (change)
+
+## Cash Flow & Repayment
+- DSCR: value(s), what it means in plain English
+- Operating margin: income minus expenses
+- Debt service coverage story
+
+## Post-Harvest Position
+- Crop on hand + market livestock vs operating line + accts due
+- Coverage % and carry-over margin into next year
+- What that means for the working-capital cushion
+
+## Strengths
+- 2 to 4 short bullets
+
+## Concerns
+- 2 to 4 short bullets, most serious first
+
+## Recommendation
+One or two sentences. What should the lender do?
+
+FORMAT RULES — follow exactly:
+- Use "## " (two hashes + space) for every heading. Never use single #.
+- Use "- " (dash + space) for every bullet. Never use * or numbered lists.
+- Wrap key numbers or terms in **double asterisks** for emphasis. Use sparingly.
+- One blank line between sections. No blank lines inside a section.
+- Cite specific dollar amounts and percentages from the data — no hand-waving.
+- If a section genuinely has nothing to report (e.g. no prior year), write one sentence saying so. Do not skip the heading.
+- Do NOT include a preamble, disclaimer, or sign-off. Start with "## Bottom Line".`,
       messages: [{
         role: "user",
         content: "Client: " + data.clientName + "\nYears: " + years
