@@ -1401,22 +1401,44 @@ function ComparisonView({
       return;
     }
     try {
-      const labels = Object.keys(sheets[0].totals);
+      // Defensive: skip any sheet whose totals object didn't materialize (older
+      // cached comparison rows can look like this after a consolidated-view swap).
+      const safeSheets = (sheets || []).filter(s => s && s.totals && typeof s.totals === 'object');
+      if (!safeSheets.length) {
+        W.document.open();
+        W.document.write('<html><body style="font:14px system-ui;padding:24px">No comparison data to print. Try re-loading the comparison view.</body></html>');
+        W.document.close();
+        return;
+      }
+      // Union of all label keys — any sheet missing a label just prints $0 for that cell.
+      const labelSet = new Set();
+      safeSheets.forEach(s => Object.keys(s.totals || {}).forEach(k => labelSet.add(k)));
+      const labels = Array.from(labelSet);
+      const safeYears = safeSheets.map(s => s.date);
+      const safeLatest = safeSheets[safeSheets.length - 1];
+      const safePrior  = safeSheets[safeSheets.length - 2];
       const fmtP = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
       const rows = labels.map(label => {
         const isBold = BOLD_ROWS && BOLD_ROWS.includes(label);
         const isBreak = SECTION_BREAKS && SECTION_BREAKS.includes(label);
         const header = SECTION_HEADERS && SECTION_HEADERS[label];
-        const chg = (latest?.totals[label]||0) - (prior?.totals[label]||0);
+        const latestVal = (safeLatest && safeLatest.totals && safeLatest.totals[label]) || 0;
+        const priorVal  = (safePrior  && safePrior.totals  && safePrior.totals[label])  || 0;
+        const chg = latestVal - priorVal;
         let html = '';
-        if (header) html += `<tr><td colspan="${years.length+2}" style="background:#6B0E1E;color:white;font-weight:700;padding:4pt 8pt;font-size:8pt;letter-spacing:.5px">${escHtml(header)}</td></tr>`;
+        if (header) html += `<tr><td colspan="${safeYears.length+2}" style="background:#6B0E1E;color:white;font-weight:700;padding:4pt 8pt;font-size:8pt;letter-spacing:.5px">${escHtml(header)}</td></tr>`;
         html += `<tr style="${isBold?'font-weight:700;background:#f5f0f0;':''}${isBreak?'border-top:1.5pt solid #6B0E1E;':''}">
           <td style="padding:3pt 8pt;border-bottom:.5pt dotted #ddd;font-size:7.5pt">${escHtml(label)}</td>
-          ${years.map(y=>`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7.5pt;font-weight:${isBold?700:400}">${fmtP(sheets.find(s=>s.date===y)?.totals[label]||0)}</td>`).join('')}
-          ${years.length>1?`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7pt;color:${chg>0?'#15803d':chg<0?'#dc2626':'#555'}">${(chg>0?'+':'')+fmtP(chg)}</td>`:''}
+          ${safeYears.map(y => {
+            const s = safeSheets.find(x => x.date === y);
+            const v = (s && s.totals && s.totals[label]) || 0;
+            return `<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7.5pt;font-weight:${isBold?700:400}">${fmtP(v)}</td>`;
+          }).join('')}
+          ${safeYears.length>1?`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7pt;color:${chg>0?'#15803d':chg<0?'#dc2626':'#555'}">${(chg>0?'+':'')+fmtP(chg)}</td>`:''}
         </tr>`;
         return html;
       }).join('');
+      const yearsForHeader = safeYears;
       const insightHtml = compInsight
         ? `<div style="margin-top:16pt;padding:10pt 14pt;border:1pt solid #e0c0c5;border-radius:6pt;background:#fdf8f8;page-break-inside:avoid">
              <div style="font-weight:700;font-size:9.5pt;color:#6B0E1E;margin-bottom:6pt;border-bottom:1pt solid #e0c0c5;padding-bottom:3pt">AI Financial Insights</div>
@@ -1439,8 +1461,8 @@ function ComparisonView({
 <table>
   <thead><tr>
     <th style="text-align:left;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Category</th>
-    ${years.map(y=>`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">${escHtml(y)}</th>`).join('')}
-    ${years.length>1?`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Change</th>`:''}
+    ${yearsForHeader.map(y=>`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">${escHtml(y)}</th>`).join('')}
+    ${yearsForHeader.length>1?`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Change</th>`:''}
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
