@@ -1353,26 +1353,76 @@ function ComparisonView({
     return {};
   };
 
+  // Escape user/model text before injecting into the print document.
+  const escHtml = (s) => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // Convert the same markdown subset the on-screen insight uses (headings ##,
+  // bullets -/*/•, numbered items, **bold**) into printable HTML.
+  const mdToPrintHtml = (md) => {
+    const lines = String(md || '').split('\n');
+    const boldize = s => escHtml(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    let html = '', inList = false;
+    const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+    for (const raw of lines) {
+      const t = raw.trim();
+      if (!t) { closeList(); html += '<div style="height:4pt"></div>'; continue; }
+      if (/^#{1,6}\s+/.test(t)) {
+        closeList();
+        const text = boldize(t.replace(/^#{1,6}\s+/, ''));
+        html += `<div style="margin:10pt 0 3pt;font-weight:700;font-size:8.5pt;color:#6B0E1E;text-transform:uppercase;letter-spacing:.5px;border-bottom:.5pt solid #e0c0c5;padding-bottom:2pt">${text}</div>`;
+        continue;
+      }
+      if (/^([-*•])\s+/.test(t)) {
+        if (!inList) { html += '<ul style="margin:2pt 0 2pt 18pt;padding:0">'; inList = true; }
+        html += `<li style="margin:1pt 0;font-size:7.5pt;line-height:1.5">${boldize(t.replace(/^([-*•])\s+/, ''))}</li>`;
+        continue;
+      }
+      if (/^\d+\.\s+/.test(t)) {
+        closeList();
+        html += `<div style="margin:2pt 0;font-size:7.5pt;line-height:1.5">${boldize(t)}</div>`;
+        continue;
+      }
+      closeList();
+      html += `<div style="margin:2pt 0;font-size:7.5pt;line-height:1.5">${boldize(t)}</div>`;
+    }
+    closeList();
+    return html;
+  };
+
   const handlePrintComparison = () => {
-    const W = window.open("","_blank","width=950,height=1100");
-    if (!W) return;
-    const labels = Object.keys(sheets[0].totals);
-    const fmtP = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
-    const rows = labels.map(label => {
-      const isBold = BOLD_ROWS && BOLD_ROWS.includes(label);
-      const isBreak = SECTION_BREAKS && SECTION_BREAKS.includes(label);
-      const header = SECTION_HEADERS && SECTION_HEADERS[label];
-      const chg = (latest?.totals[label]||0) - (prior?.totals[label]||0);
-      let html = '';
-      if (header) html += `<tr><td colspan="${years.length+2}" style="background:#6B0E1E;color:white;font-weight:700;padding:4pt 8pt;font-size:8pt;letter-spacing:.5px">${header}</td></tr>`;
-      html += `<tr style="${isBold?'font-weight:700;background:#f5f0f0;':''}${isBreak?'border-top:1.5pt solid #6B0E1E;':''}">
-        <td style="padding:3pt 8pt;border-bottom:.5pt dotted #ddd;font-size:7.5pt">${label}</td>
-        ${years.map(y=>`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7.5pt;font-weight:${isBold?700:400}">${fmtP(sheets.find(s=>s.date===y)?.totals[label]||0)}</td>`).join('')}
-        ${years.length>1?`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7pt;color:${chg>0?'#15803d':chg<0?'#dc2626':'#555'}">${(chg>0?'+':'')+fmtP(chg)}</td>`:''}
-      </tr>`;
-      return html;
-    }).join('');
-    W.document.write(`<!DOCTYPE html><html><head><title>Year Comparison — ${clientName}</title>
+    let W;
+    try {
+      W = window.open("","_blank","width=950,height=1100");
+    } catch (e) {
+      alert('Could not open the print window: ' + e.message);
+      return;
+    }
+    if (!W) {
+      alert('Print window was blocked — allow popups for this site and try again.');
+      return;
+    }
+    try {
+      const labels = Object.keys(sheets[0].totals);
+      const fmtP = v => v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+      const rows = labels.map(label => {
+        const isBold = BOLD_ROWS && BOLD_ROWS.includes(label);
+        const isBreak = SECTION_BREAKS && SECTION_BREAKS.includes(label);
+        const header = SECTION_HEADERS && SECTION_HEADERS[label];
+        const chg = (latest?.totals[label]||0) - (prior?.totals[label]||0);
+        let html = '';
+        if (header) html += `<tr><td colspan="${years.length+2}" style="background:#6B0E1E;color:white;font-weight:700;padding:4pt 8pt;font-size:8pt;letter-spacing:.5px">${escHtml(header)}</td></tr>`;
+        html += `<tr style="${isBold?'font-weight:700;background:#f5f0f0;':''}${isBreak?'border-top:1.5pt solid #6B0E1E;':''}">
+          <td style="padding:3pt 8pt;border-bottom:.5pt dotted #ddd;font-size:7.5pt">${escHtml(label)}</td>
+          ${years.map(y=>`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7.5pt;font-weight:${isBold?700:400}">${fmtP(sheets.find(s=>s.date===y)?.totals[label]||0)}</td>`).join('')}
+          ${years.length>1?`<td style="padding:3pt 8pt;text-align:right;border-bottom:.5pt dotted #ddd;font-size:7pt;color:${chg>0?'#15803d':chg<0?'#dc2626':'#555'}">${(chg>0?'+':'')+fmtP(chg)}</td>`:''}
+        </tr>`;
+        return html;
+      }).join('');
+      const insightHtml = compInsight
+        ? `<div style="margin-top:16pt;padding:10pt 14pt;border:1pt solid #e0c0c5;border-radius:6pt;background:#fdf8f8;page-break-inside:avoid">
+             <div style="font-weight:700;font-size:9.5pt;color:#6B0E1E;margin-bottom:6pt;border-bottom:1pt solid #e0c0c5;padding-bottom:3pt">AI Financial Insights</div>
+             ${mdToPrintHtml(compInsight)}
+           </div>` : '';
+      const doc = `<!DOCTYPE html><html><head><title>Year Comparison — ${escHtml(clientName)}</title>
 <style>
   body{font-family:Arial,sans-serif;font-size:8pt;margin:.45in .4in;color:#000}
   table{width:100%;border-collapse:collapse}
@@ -1381,7 +1431,7 @@ function ComparisonView({
 <button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8pt;border-bottom:2pt solid #6B0E1E;padding-bottom:6pt">
   <div>
-    <div style="font-size:12pt;font-weight:700">${clientName}</div>
+    <div style="font-size:12pt;font-weight:700">${escHtml(clientName)}</div>
     <div style="font-size:8pt;color:#555">Year-Over-Year Balance Sheet Comparison</div>
   </div>
   <div style="font-size:8pt;color:#555;text-align:right">First Bank of Montana<br/>Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
@@ -1389,19 +1439,27 @@ function ComparisonView({
 <table>
   <thead><tr>
     <th style="text-align:left;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Category</th>
-    ${years.map(y=>`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">${y}</th>`).join('')}
+    ${years.map(y=>`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">${escHtml(y)}</th>`).join('')}
     ${years.length>1?`<th style="text-align:right;padding:4pt 8pt;background:#1a1a1a;color:white;font-size:8pt">Change</th>`:''}
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
-${compInsight?`<div style="margin-top:16pt;padding:10pt 12pt;border:1pt solid #e0c0c5;border-radius:6pt;background:#fdf8f8">
-  <div style="font-weight:700;font-size:9pt;color:#6B0E1E;margin-bottom:6pt">AI Financial Insights</div>
-  <div style="font-size:7.5pt;line-height:1.5;color:#333;white-space:pre-wrap">${compInsight}</div>
-</div>`:''}
-</body></html>`);
-    W.document.close();
-    W.focus();
-    setTimeout(()=>W.print(),400);
+${insightHtml}
+</body></html>`;
+      W.document.open();
+      W.document.write(doc);
+      W.document.close();
+      W.focus();
+      setTimeout(() => { try { W.print(); } catch {} }, 400);
+    } catch (e) {
+      console.error('Print comparison failed:', e);
+      W.document.open();
+      W.document.write(`<html><body style="font:14px system-ui;padding:24px;color:#7a1a1a">
+        <h2>Print failed</h2>
+        <pre style="background:#f5f5f5;padding:12px;border-radius:6px;overflow:auto;white-space:pre-wrap">${escHtml((e && e.stack) || String(e))}</pre>
+      </body></html>`);
+      W.document.close();
+    }
   };
 
   return (
