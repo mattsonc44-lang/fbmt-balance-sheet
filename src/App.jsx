@@ -7053,15 +7053,22 @@ Question: ${q}`,
     }
   };
   const loadSheet = async (key) => {
+    if (!key) { alert("Couldn't open that sheet — no storage key was provided."); return; }
     try {
       const item = await storage.get(key);
-      if (item) {
-        const p = JSON.parse(item.value); delete p._savedAt;
-        setData({ ...emptyData(), ...p });
-        setOriginalKey(key);           // remember where we loaded from
-        setStep(0); setScreen("wizard");
-      }
-    } catch {}
+      if (!item) { alert("That sheet wasn't found in storage. It may have been renamed or deleted."); return; }
+      const p = JSON.parse(item.value); delete p._savedAt;
+      setData({ ...emptyData(), ...p });
+      setOriginalKey(key);           // remember where we loaded from
+      setStep(0); setScreen("wizard");
+      // If we're already in the wizard, the compare tab (if open) will show stale
+      // linked-entity data until the totals refresh. Bump the active tab back to
+      // the balance-sheet step so the user lands on the newly-loaded sheet's data.
+      setActiveTab('balance');
+    } catch (e) {
+      console.error('loadSheet failed:', e);
+      alert('Could not open that sheet: ' + (e?.message || e));
+    }
   };
   const startNew = () => { setData(emptyData()); setOriginalKey(null); setStep(0); setScreen("wizard"); };
 
@@ -10220,20 +10227,25 @@ ${extraPages}
                       <span style={{fontSize:"1rem"}}>🏢</span>
                       <div style={{flex:1}}>
                         {(() => {
-                          // Find the matching saved sheet — exact date if given, else the newest.
+                          // Find the matching saved sheet — exact date if given, else newest.
                           const matches = savedSheets.filter(s => s.clientName === entry.name)
                             .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
-                          const target = entry.date ? matches.find(s => s.asOfDate === entry.date) : matches[0];
-                          if (target) {
+                          // Try exact date first, then fall back to newest so a stale
+                          // linked-date reference still lands somewhere useful.
+                          const target = (entry.date && matches.find(s => s.asOfDate === entry.date))
+                            || matches[0];
+                          if (target && target.key) {
                             return (
-                              <button onClick={()=>loadSheet(target.key)}
+                              <button
+                                type="button"
+                                onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); loadSheet(target.key); }}
                                 title={`Open ${entry.name}'s balance sheet as of ${target.asOfDate}`}
                                 style={{background:"none",border:"none",padding:0,cursor:"pointer",fontWeight:700,fontSize:".88rem",color:"#2d5a8e",textDecoration:"underline",fontFamily:"inherit",textAlign:"left"}}>
                                 {entry.name}
                               </button>
                             );
                           }
-                          return <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}}>{entry.name}</div>;
+                          return <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}} title="No saved sheet found for this entity">{entry.name}</div>;
                         })()}
                         <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
                           {entry.date ? `As of ${entry.date}` : "Latest available"}
