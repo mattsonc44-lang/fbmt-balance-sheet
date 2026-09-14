@@ -2863,7 +2863,7 @@ function CustomerBalanceSheetForm({shareId}) {
   const [budgetExpenses,setBudgetExpenses]=React.useState([]);
   const [expenseList]=React.useState(()=>loadExpenseList());
   const [customExpense,setCustomExpense]=React.useState('');
-  const [open,setOpen]=React.useState({cash:true,farmProducts:true,livestock:true,cropInv:true,breeding:false,re:true,vehicles:false,machinery:false,otherA:false,opNotes:true,termDebt:true,reMort:false,otherL:false});
+  const [open,setOpen]=React.useState({cash:true,receivables:false,fedPay:false,farmProducts:true,livestock:true,cropInv:true,supplies:false,otherCur:false,breeding:false,re:true,reContracts:false,vehicles:false,machinery:false,otherA:false,opNotes:true,acctsDue:false,termDebt:true,reCurrent:false,otherCurLiab:false,reMort:false,otherL:false});
   const toggle = k => setOpen(o=>({...o,[k]:!o[k]}));
   const n = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
   const fmt = v => v===''||v===null||v===undefined?'$0':'$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
@@ -2980,13 +2980,19 @@ function CustomerBalanceSheetForm({shareId}) {
   const fedPay = Array.isArray(data.federalPayments)?(data.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0):n(data.federalPayments);
   const supTot = (data.supplies||[]).reduce((s,r)=>s+n(r.value),0);
   const otherCurTot = (data.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
-  const totalAssets = cashTot+farmProdTot+lsMktTot+cropInvTot+fedPay+supTot+otherCurTot+breedTot+reTot+vehTot+machTot+otherATot;
+  const recTot = (data.receivables||[]).reduce((s,r)=>s+n(r.amount),0);
+  const reContractsTotAsset = (data.reContracts||[]).reduce((s,r)=>s+n(r.amount),0);
+  const totalAssets = cashTot+recTot+farmProdTot+lsMktTot+cropInvTot+fedPay+supTot+otherCurTot+breedTot+reTot+reContractsTotAsset+vehTot+machTot+otherATot;
   const opNotesTot = (data.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0);
   const termTot = (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
   const reMortTot = (data.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0);
   const otherLTot = (data.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
   const taxTot = n(data.taxesDue);
-  const totalLiab = opNotesTot+termTot+reMortTot+otherLTot+taxTot;
+  const acctsDueTot = (data.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
+  const reCurTot = (data.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+  const otherCurLiabTot = (data.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
+  const reContractsTot = (data.reContracts||[]).reduce((s,r)=>s+n(r.amount),0);
+  const totalLiab = opNotesTot+termTot+reMortTot+otherLTot+taxTot+acctsDueTot+reCurTot+otherCurLiabTot;
   const netWorth = totalAssets-totalLiab;
 
   const rowStyle={display:'flex',gap:8,alignItems:'center',marginBottom:8,padding:'8px 10px',background:'#f9f5f5',borderRadius:6};
@@ -3041,6 +3047,28 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total Cash: {fmt(cashTot)}</div>
         </CustSec>
 
+        <CustSec title="Receivables" open={open.receivables} onToggle={()=>toggle('receivables')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Money owed to you — custom work, hedging accounts, unpaid contracts, etc.</div>
+          {(data.receivables||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.description} onChange={v=>setArr('receivables',i,'description',v)} placeholder="Description" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.amount} onChange={v=>setArr('receivables',i,'amount',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('receivables',i)}
+          </div>)}
+          {addBtn('receivables',{description:'',amount:''},'Add Receivable')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(recTot)}</div>
+        </CustSec>
+
+        <CustSec title="Federal Payments" open={open.fedPay} onToggle={()=>toggle('fedPay')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>FSA, ARC/PLC, CRP, disaster payments, LDPs — anything owed by USDA / federal ag programs.</div>
+          {(Array.isArray(data.federalPayments)?data.federalPayments:[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.program} onChange={v=>setArr('federalPayments',i,'program',v)} placeholder="Program (e.g., ARC-CO 2024)" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.amount} onChange={v=>setArr('federalPayments',i,'amount',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('federalPayments',i)}
+          </div>)}
+          {addBtn('federalPayments',{program:'',amount:''},'Add Federal Payment')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(fedPay)}</div>
+        </CustSec>
+
         <CustSec title="Farm Products on Hand" open={open.farmProducts} onToggle={()=>toggle('farmProducts')}>
           {(data.farmProducts||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.kind} onChange={v=>setArr('farmProducts',i,'kind',v)} placeholder="e.g. Wheat, Barley" style={{flex:'1 1 120px'}}/>
@@ -3067,6 +3095,28 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(cropInvTot)}</div>
         </CustSec>
 
+        <CustSec title="Supplies & Prepaid" open={open.supplies} onToggle={()=>toggle('supplies')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Fuel, chemical, fertilizer, seed on hand.</div>
+          {(data.supplies||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.description} onChange={v=>setArr('supplies',i,'description',v)} placeholder="Description" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.value} onChange={v=>setArr('supplies',i,'value',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('supplies',i)}
+          </div>)}
+          {addBtn('supplies',{description:'',value:''},'Add Supply')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(supTot)}</div>
+        </CustSec>
+
+        <CustSec title="Other Current Assets" open={open.otherCur} onToggle={()=>toggle('otherCur')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Anything else convertible to cash within 12 months not covered above.</div>
+          {(data.otherCurrent||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.description} onChange={v=>setArr('otherCurrent',i,'description',v)} placeholder="Description" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.amount} onChange={v=>setArr('otherCurrent',i,'amount',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('otherCurrent',i)}
+          </div>)}
+          {addBtn('otherCurrent',{description:'',amount:''},'Add Item')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(otherCurTot)}</div>
+        </CustSec>
+
         <CustSec title="Breeding Stock" open={open.breeding} onToggle={()=>toggle('breeding')}>
           {(data.breedingStock||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.number} onChange={v=>setArr('breedingStock',i,'number',v)} placeholder="# head" style={{width:80,flex:'none'}}/><CustInp value={r.kind} onChange={v=>setArr('breedingStock',i,'kind',v)} placeholder="Kind" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('breedingStock',i,'value',v)} placeholder="Total value" style={{flex:1}}/>{remBtn('breedingStock',i)}</div>)}
           {addBtn('breedingStock',{number:'',kind:'',value:''},'Add Breeding Stock')}
@@ -3083,6 +3133,17 @@ function CustomerBalanceSheetForm({shareId}) {
           </div>)}
           {addBtn('realEstate',{acres:'',reType:'',description:'',valuePerAcre:''},'Add Tract')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(reTot)}</div>
+        </CustSec>
+
+        <CustSec title="Contracts for Deed (owed to you)" open={open.reContracts} onToggle={()=>toggle('reContracts')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Land you're selling on contract — balance still owed to you.</div>
+          {(data.reContracts||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.description} onChange={v=>setArr('reContracts',i,'description',v)} placeholder="Description" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.amount} onChange={v=>setArr('reContracts',i,'amount',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('reContracts',i)}
+          </div>)}
+          {addBtn('reContracts',{description:'',amount:''},'Add Contract')}
+          <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(reContractsTot)}</div>
         </CustSec>
 
         <CustSec title="Titled Vehicles" open={open.vehicles} onToggle={()=>toggle('vehicles')}>
@@ -3123,6 +3184,39 @@ function CustomerBalanceSheetForm({shareId}) {
           </div>)}
           {addBtn('operatingNotes',{creditor:'',dueDate:'',pmt:'',balance:'',security:''},'Add Note')}
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(opNotesTot)}</div>
+        </CustSec>
+
+        <CustSec title="Accounts Due (Trade Payables)" open={open.acctsDue} onToggle={()=>toggle('acctsDue')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Amounts you owe suppliers — fuel dealer, elevator, feed store, vet, etc.</div>
+          {(data.accountsDue||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.creditor} onChange={v=>setArr('accountsDue',i,'creditor',v)} placeholder="Supplier" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.amount} onChange={v=>setArr('accountsDue',i,'amount',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('accountsDue',i)}
+          </div>)}
+          {addBtn('accountsDue',{creditor:'',amount:''},'Add Account')}
+          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(acctsDueTot)}</div>
+        </CustSec>
+
+        <CustSec title="Current-Year Real Estate Payments" open={open.reCurrent} onToggle={()=>toggle('reCurrent')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Annual payment on real-estate mortgages (the principal + interest coming due in the next 12 months).</div>
+          {(data.reCurrent||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.creditor} onChange={v=>setArr('reCurrent',i,'creditor',v)} placeholder="Lender" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.annualPmt} onChange={v=>setArr('reCurrent',i,'annualPmt',v)} placeholder="Annual pmt" style={{flex:1}}/>
+            {remBtn('reCurrent',i)}
+          </div>)}
+          {addBtn('reCurrent',{creditor:'',annualPmt:'',rate:''},'Add Payment')}
+          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(reCurTot)}</div>
+        </CustSec>
+
+        <CustSec title="Other Current Liabilities" open={open.otherCurLiab} onToggle={()=>toggle('otherCurLiab')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Anything else due within 12 months not covered above.</div>
+          {(data.otherCurrentLiab||[]).map((r,i)=><div key={i} style={rowStyle}>
+            <CustInp value={r.description} onChange={v=>setArr('otherCurrentLiab',i,'description',v)} placeholder="Description" style={{flex:2}}/>
+            <CustInp prefix="$" value={r.amount} onChange={v=>setArr('otherCurrentLiab',i,'amount',v)} placeholder="0" style={{flex:1}}/>
+            {remBtn('otherCurrentLiab',i)}
+          </div>)}
+          {addBtn('otherCurrentLiab',{description:'',amount:''},'Add Liability')}
+          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(otherCurLiabTot)}</div>
         </CustSec>
 
         <CustSec title="Term Debt / Equipment Loans" open={open.termDebt} onToggle={()=>toggle('termDebt')}>
