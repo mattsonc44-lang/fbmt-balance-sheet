@@ -2,8 +2,11 @@
 // Sends email via Resend when a customer submits a form, or when a CA proposes edits.
 // Uses RESEND_API_KEY env var (already set in Netlify dashboard)
 // Uses NOTIFY_EMAIL env var — fallback recipient when the request doesn't include lenderEmail
+//
+// ESM — the repo's package.json declares "type": "module", so this file has
+// to use export syntax rather than exports.handler = ...
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
