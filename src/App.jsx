@@ -8898,6 +8898,41 @@ FORMAT RULES — follow exactly:
         budgetInsuranceEnabled: data.budgetInsuranceEnabled,
         budgetProposedDebt: data.budgetProposedDebt,
       };
+      // Bake in the corp-paid personal debt aggregation. The CA doesn't have
+      // access to our full sheet list, so if we don't snapshot this now, the
+      // debts linked to this entity won't appear in their view of the budget.
+      // Scan every saved sheet that links to THIS corp and pick up any term
+      // debt or RE-current row that routes to us (new corpPaidBy takes
+      // precedence over the legacy corpPaid boolean).
+      const meName = (sheetData.clientName || '').trim().toLowerCase();
+      const corpPersonalDebtSnapshot = [];
+      if (meName) {
+        for (const s of savedSheets) {
+          if (s.key === sheetKey) continue;
+          try {
+            const it = await storage.get(s.key);
+            if (!it) continue;
+            const p = JSON.parse(it.value);
+            const linkedNames = (Array.isArray(p.linkedEntities) ? p.linkedEntities : [])
+              .map(e => (typeof e === 'string' ? e : (e && e.name) || ''))
+              .map(x => x.trim().toLowerCase());
+            if (!linkedNames.includes(meName)) continue;
+            const owner = p.clientName || 'Unknown';
+            const routedToMe = r => (r.corpPaidBy ? r.corpPaidBy.trim().toLowerCase() === meName : !!r.corpPaid);
+            (p.intermediatDebt || []).forEach(r => {
+              if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
+                corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: r.security || '', annualPmt: r.annualPmt, owner, type: 'term' });
+              }
+            });
+            (p.reCurrent || []).forEach(r => {
+              if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
+                corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: '', annualPmt: r.annualPmt, owner, type: 're' });
+              }
+            });
+          } catch {}
+        }
+      }
+      fullData.corpPersonalDebtSnapshot = corpPersonalDebtSnapshot;
       const sheet = savedSheets.find(s=>s.key===sheetKey);
       const resp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
         method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
@@ -9068,6 +9103,11 @@ FORMAT RULES — follow exactly:
 
   const loadCorpPersonalDebt = async () => {
     if (!data.clientName) return;
+    // CA viewers see only the sheet the lender shared with them — the shared
+    // snapshot already includes any corp-paid personal debt aggregated by the
+    // lender at share time. Running the cross-sheet scan here would return
+    // empty and wipe out that snapshot. Skip.
+    if (profile?.role === 'ca' || caOpenShare) return;
     try {
       const result = await storage.list(STORAGE_PREFIX);
       if (!result || !result.keys) return;
@@ -10542,6 +10582,10 @@ ${extraPages}
       onOpen={(share) => {
         const sheetData = share.sheet_data || {};
         setData({...emptyData(), ...sheetData});
+        // Seed corp-personal debt from the snapshot the lender baked into the share.
+        // The regular loader can't populate this for the CA because they don't
+        // have access to the lender's other clients' sheets.
+        setCorpPersonalDebt(Array.isArray(sheetData.corpPersonalDebtSnapshot) ? sheetData.corpPersonalDebtSnapshot : []);
         setCaOpenShare(share);
         setScreen('wizard');
         setStep(0);
