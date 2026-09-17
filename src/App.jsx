@@ -6594,6 +6594,11 @@ export default function BalanceSheet() {
   const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [caOpenShare, setCaOpenShare] = useState(null);
+  // Declared here (up top) rather than next to caDirectSave() because there's
+  // an early return for the CA portal further down. Adding a useState below
+  // that early return violates Rules of Hooks (hook count changes between
+  // renders) → white screen when the CA opens a share.
+  const [caDirectSaving, setCaDirectSaving] = useState(false);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
 
@@ -11755,7 +11760,9 @@ ${extraPages}
   // a service-role netlify function that verifies the CA has an active share.
   // The Submit-for-Review path is still available for cases where the CA
   // prefers the approval workflow.
-  const [caDirectSaving, setCaDirectSaving] = React.useState(false);
+  // (caDirectSaving state is declared up at the top of the component with the
+  //  other useState calls — declaring it here would trip the Rules of Hooks
+  //  because there's an early return for CAPortal above this line.)
   const caDirectSave = async () => {
     if (!caOpenShare) return;
     if (!data.clientName || !data.asOfDate) {
