@@ -863,7 +863,14 @@ function BudgetView({
                       <input type="text" value={defaultPrice||r.price} placeholder="0.00"
                         readOnly={!!defaultPrice}
                         style={{background:defaultPrice?"#f5f5f5":undefined,color:defaultPrice?"#555":undefined,cursor:defaultPrice?"not-allowed":"text"}}
-                        onChange={e => !defaultPrice && setArr("budgetCrops",i,"price",e.target.value.replace(/[^0-9.]/g,""))} />
+                        onChange={e => {
+                          if (defaultPrice) return;
+                          const v = e.target.value.replace(/[^0-9.]/g,"");
+                          setArr("budgetCrops",i,"price",v);
+                          // Any manually-entered price sticks: mark it so a
+                          // later commodity-list update can't stomp on it.
+                          if (v) setArr("budgetCrops",i,"customPrice",true);
+                        }} />
                     )}
                   </div>
                   {!r.contracted && !r.customPrice && defaultPrice && (
@@ -8155,9 +8162,9 @@ Question: ${q}`,
   },0) : 0;
   const budgetLivestockTotal = data.budgetLivestock.reduce((s,r)=>{
     const needle = (r.type||'').toLowerCase().trim();
+    // Exact match only — see note in lookupPrice.
     const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
-    const fuzzy = (!exact&&needle) ? commodityPrices.find(p=>p.name&&(needle.includes(p.name.toLowerCase())||p.name.toLowerCase().includes(needle))) : null;
-    const ep = (exact||fuzzy) ? (exact||fuzzy).price : r.price;
+    const ep = exact ? exact.price : r.price;
     return s+n(r.head)*n(r.lbs)*n(ep);
   },0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
@@ -8818,14 +8825,11 @@ FORMAT RULES — follow exactly:
   const lookupPrice = (name) => {
     if (!name) return null;
     const needle = name.toLowerCase().trim();
-    // Exact match first
-    const exact = commodityPrices.find(p => p.name.toLowerCase().trim() === needle);
-    if (exact) return exact.price;
-    // Fall back to fuzzy match only if no exact match exists
-    const match = commodityPrices.find(p =>
-      needle.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(needle)
-    );
-    return match ? match.price : null;
+    // Exact match ONLY. Fuzzy substring matching (e.g. "beans" → "Soybeans")
+    // caused user-typed crops to inherit the wrong list price and lock the
+    // price input, so the user's own value never got used.
+    const exact = commodityPrices.find(p => p.name && p.name.toLowerCase().trim() === needle);
+    return exact ? exact.price : null;
   };
 
   const generateBSShare = async (includeBudget = false) => {
