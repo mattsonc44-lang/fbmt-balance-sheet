@@ -8888,16 +8888,25 @@ FORMAT RULES — follow exactly:
     try {
       const item = await storage.get(sheetKey);
       const sheetData = item ? JSON.parse(item.value) : {};
-      // Merge current budget data from state into the snapshot
-      const fullData = {
-        ...sheetData,
-        budgetCrops: data.budgetCrops,
-        budgetLivestock: data.budgetLivestock,
-        budgetMisc: data.budgetMisc,
-        budgetExpenses: data.budgetExpenses,
-        budgetInsuranceEnabled: data.budgetInsuranceEnabled,
-        budgetProposedDebt: data.budgetProposedDebt,
-      };
+      // Only fold in the wizard's live budget state if the wizard is CURRENTLY
+      // showing THIS same sheet (so we pick up unsaved edits). Otherwise trust
+      // what's on disk — sharing from the dashboard used to clobber the saved
+      // budget with the empty default because `data` was for a different sheet.
+      const wizardIsThisSheet =
+        data && data.clientName && data.asOfDate &&
+        data.clientName === sheetData.clientName &&
+        data.asOfDate === sheetData.asOfDate;
+      const fullData = wizardIsThisSheet
+        ? {
+            ...sheetData,
+            budgetCrops: data.budgetCrops,
+            budgetLivestock: data.budgetLivestock,
+            budgetMisc: data.budgetMisc,
+            budgetExpenses: data.budgetExpenses,
+            budgetInsuranceEnabled: data.budgetInsuranceEnabled,
+            budgetProposedDebt: data.budgetProposedDebt,
+          }
+        : { ...sheetData };
       // Bake in the corp-paid personal debt aggregation. The CA doesn't have
       // access to our full sheet list, so if we don't snapshot this now, the
       // debts linked to this entity won't appear in their view of the budget.
