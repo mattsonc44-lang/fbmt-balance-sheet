@@ -10493,9 +10493,15 @@ ${extraPages}
                 submit path. */}
             {caOpenShare ? (
               <>
-                <button className="btn btn-save" onClick={submitCaEditFromWizard}
-                  style={{background:'#fbbf24',color:'#1a1a1a'}}>
-                  ✅ Submit Changes to Lender
+                <button className="btn btn-save" onClick={caDirectSave}
+                  disabled={caDirectSaving}
+                  title="Save straight to the lender's sheet — no review step. Requires an active share.">
+                  {caDirectSaving ? 'Saving…' : '💾 Save Balance Sheet'}
+                </button>
+                <button className="btn" onClick={submitCaEditFromWizard}
+                  style={{background:'#fbbf24',color:'#1a1a1a'}}
+                  title="Send this as a proposed edit for lender review — original stays untouched until approved.">
+                  📝 Submit for Review
                 </button>
                 <button className="btn btn-secondary"
                   onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}>
@@ -11714,12 +11720,68 @@ ${extraPages}
     }
   };
 
+  // ── CA direct-save — full edit powers. Writes straight to the lender's row via
+  // a service-role netlify function that verifies the CA has an active share.
+  // The Submit-for-Review path is still available for cases where the CA
+  // prefers the approval workflow.
+  const [caDirectSaving, setCaDirectSaving] = React.useState(false);
+  const caDirectSave = async () => {
+    if (!caOpenShare) return;
+    if (!data.clientName || !data.asOfDate) {
+      alert('Client name and as-of date are required before saving.');
+      return;
+    }
+    if (!window.confirm(
+      `Save these changes DIRECTLY to ${caOpenShare.client_name}'s sheet?\n\n` +
+      `This overwrites the lender's copy — no review step. Click Cancel if you'd rather Submit for Review instead.`
+    )) return;
+    setCaDirectSaving(true);
+    try {
+      const resp = await fetch('/.netlify/functions/ca-save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (session?.access_token || ''),
+        },
+        body: JSON.stringify({
+          sheet_key: caOpenShare.sheet_key,
+          sheet_data: data,
+        }),
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text();
+        throw new Error(`Server ${resp.status}: ${errBody.slice(0, 300)}`);
+      }
+      // Fire-and-forget: tell the lender the CA saved directly, so they can
+      // see the changes reflected in their own view.
+      try {
+        await fetch('/.netlify/functions/notify-submission', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            type:'ca_edit',
+            clientName: caOpenShare.client_name,
+            shareId: caOpenShare.id,
+            submittedAt: new Date().toISOString(),
+            lenderEmail: caOpenShare.lender_email || '',
+            caName: (profile?.full_name || session?.user?.email || '') + ' (direct save)',
+          }),
+        });
+      } catch {}
+      alert('Saved directly to the lender\'s sheet.');
+      setCaOpenShare(null); setData(emptyData()); setScreen("home");
+    } catch (e) {
+      alert('Direct save failed: ' + (e.message || e) + '\n\nIf the ca-save function isn\'t deployed yet, use "Submit for Review" instead.');
+    }
+    setCaDirectSaving(false);
+  };
+
   // ── Wizard / Budget / Compare ──────────────────────────────────────────────
   return (
     <div className="app">
       {caOpenShare && (
         <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13,gap:12,flexWrap:'wrap'}}>
-          <span>📝 <strong>CA Review Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Edit any fields, then submit for lender review</span>
+          <span>📝 <strong>CA Full-Edit Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Edit any field. Use <strong>Save</strong> to write directly to the lender's sheet, or <strong>Submit for Review</strong> for the approval workflow.</span>
           <div style={{display:'flex',gap:8}}>
             <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}
               style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
