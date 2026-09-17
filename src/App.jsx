@@ -8253,6 +8253,10 @@ Question: ${q}`,
   // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
   useEffect(() => {
     async function fetchAllLinkedNW() {
+      // CA viewers see snapshotted linked-entity net worths from the share
+      // payload — the live scan across savedSheets returns nothing for them
+      // and would overwrite the seeded snapshot. Skip.
+      if (profile?.role === 'ca' || caOpenShare) return;
       const entities = normalizeLinked(data.linkedEntities);
       if (!entities.length) { setLinkedEntityNWMap({}); return; }
       const newMap = {};
@@ -8942,6 +8946,31 @@ FORMAT RULES — follow exactly:
         }
       }
       fullData.corpPersonalDebtSnapshot = corpPersonalDebtSnapshot;
+
+      // Snapshot each linked entity's net worth so the CA can see the linked
+      // entities card populated. They don't have access to the lender's other
+      // sheets, so without this the "Investment in Related Entities" line
+      // shows $0 and clicking a name has nothing to open.
+      const linkedEntityNWSnapshot = {};
+      const linkedEntitySnapshots = {};  // full sheet data keyed by name, so the CA can view the linked entity's sheet if we later wire it up
+      const entries = normalizeLinked(fullData.linkedEntities || []);
+      for (const entry of entries) {
+        try {
+          const cands = savedSheets.filter(x => x.clientName === entry.name)
+            .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+          let pick = entry.date ? cands.find(x => x.asOfDate === entry.date) : cands[0];
+          if (!pick) pick = cands.find(x => (x.asOfDate||'') <= (entry.date||fullData.asOfDate)) || cands[0];
+          if (!pick) continue;
+          const it = await storage.get(pick.key);
+          if (!it) continue;
+          const p = JSON.parse(it.value);
+          const totals = sheetTotals(p);
+          linkedEntityNWSnapshot[entry.name] = totals['NET WORTH'] || 0;
+          linkedEntitySnapshots[entry.name] = { data: p, asOfDate: p.asOfDate };
+        } catch {}
+      }
+      fullData.linkedEntityNWSnapshot = linkedEntityNWSnapshot;
+      fullData.linkedEntitySnapshots  = linkedEntitySnapshots;
       const sheet = savedSheets.find(s=>s.key===sheetKey);
       const resp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
         method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
@@ -10597,10 +10626,12 @@ ${extraPages}
       onOpen={(share) => {
         const sheetData = share.sheet_data || {};
         setData({...emptyData(), ...sheetData});
-        // Seed corp-personal debt from the snapshot the lender baked into the share.
-        // The regular loader can't populate this for the CA because they don't
-        // have access to the lender's other clients' sheets.
+        // Seed CA-visible cross-sheet aggregations from snapshots the lender
+        // baked into the share (the live loaders can't find them — the CA
+        // doesn't have access to the lender's other clients' sheets).
         setCorpPersonalDebt(Array.isArray(sheetData.corpPersonalDebtSnapshot) ? sheetData.corpPersonalDebtSnapshot : []);
+        setLinkedEntityNWMap(sheetData.linkedEntityNWSnapshot && typeof sheetData.linkedEntityNWSnapshot === 'object'
+          ? sheetData.linkedEntityNWSnapshot : {});
         setCaOpenShare(share);
         setScreen('wizard');
         setStep(0);
