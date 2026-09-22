@@ -10550,7 +10550,7 @@ ${extraPages}
                 </button>
                 <button className="btn btn-secondary" onClick={()=>setScreen("home")}>All Clients</button>
                 {data.clientName && (
-                  <button onClick={()=>{ setSharePreType('bs'); setShowSharePre(true); }}
+                  <button onClick={()=>generateBSShare(true)}
                     style={{padding:"10px 18px",background:"#2d5a8e",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:".88rem",cursor:"pointer",fontFamily:"inherit"}}>
                     🔗 Share with Customer
                   </button>
@@ -12185,7 +12185,7 @@ ${extraPages}
                 📝 Expense List
               </button>
             )}
-            <button onClick={()=>{ setSharePreType('budget'); setShowSharePre(true); }}
+            <button onClick={()=>generateBudgetShare(true)}
               style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
               🔗 Share with Customer
             </button>
