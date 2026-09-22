@@ -2879,6 +2879,17 @@ function CustomerBalanceSheetForm({shareId}) {
   // Derived from shareRow — must be available throughout render
   const budgetIncluded = !!(shareRow?.original_data?.budgetIncluded);
 
+  // Budget-tab helpers — the input handlers in the budget tab reference these.
+  // They were originally only defined inside CustomerBudgetForm; the shared
+  // form was crashing on every keystroke with `ReferenceError: budSave is not defined`
+  // (silently in the browser console) so nothing typed into the budget stuck.
+  const uid = () => Math.random().toString(36).slice(2,8);
+  const budSave = (c,l,m,e) => {
+    setBudgetCrops(c); setBudgetLivestock(l); setBudgetMisc(m); setBudgetExpenses(e);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveDraft(data), 1500);
+  };
+
   const verifyPin = async () => {
     setPinErr('');
     try {
