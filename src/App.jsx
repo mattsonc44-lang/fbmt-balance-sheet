@@ -3982,7 +3982,7 @@ function BSCompareModal({review, onAccept, onDiscard}) {
         </div>
         <div style={{padding:'20px 24px'}}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:14}}>
-            Submitted {review.review?.submitted_at ? new Date(review.review.submitted_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
+            Submitted {review.review?.submitted_at ? new Date(review.review.submitted_at).toLocaleString('en-US',{month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : ''}
             {' · '}As of {review.review?.as_of_date||''}
           </div>
           <div style={{overflowX:'auto'}}>
@@ -4071,7 +4071,7 @@ function BudgetCompareModal({ review, savedSheets, targetKey, setTargetKey, onAc
 
         <div style={{padding:'18px 22px'}}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:14}}>
-            Submitted {review.submitted_at ? new Date(review.submitted_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : ''}
+            Submitted {review.submitted_at ? new Date(review.submitted_at).toLocaleString('en-US',{month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : ''}
             {review.as_of_date ? ' · As of ' + review.as_of_date : ''}
           </div>
 
@@ -5276,7 +5276,7 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
                     <div style={{width:3,height:26,background:'#1d4ed8',borderRadius:1,flexShrink:0}}></div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:12,color:TEXT_PRI}}>CA edit from {edit.ca_name}</div>
-                      <div style={{fontSize:11,color:TEXT_SEC}}>{edit.submitted_at?new Date(edit.submitted_at).toLocaleDateString():'—'}</div>
+                      <div style={{fontSize:11,color:TEXT_SEC}}>{edit.submitted_at?new Date(edit.submitted_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}):'—'}</div>
                     </div>
                     <button onClick={()=>onOpenCADiff(edit)}
                       style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>Review →</button>
@@ -5287,7 +5287,7 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
                     <div style={{width:3,height:26,background:POS,borderRadius:1,flexShrink:0}}></div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:12,color:TEXT_PRI}}>Customer submitted {review.type==='balance_sheet'?'balance sheet':'budget'}</div>
-                      <div style={{fontSize:11,color:TEXT_SEC}}>{review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}</div>
+                      <div style={{fontSize:11,color:TEXT_SEC}}>{review.submitted_at?new Date(review.submitted_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}):'—'}</div>
                     </div>
                     <button onClick={()=>onOpenReview(review)}
                       style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>Review →</button>
@@ -11075,7 +11075,7 @@ ${extraPages}
                   <span style={{fontSize:"1.2rem"}}>📝</span>
                   <div style={{flex:1}}>
                     <div style={{fontWeight:600,fontSize:".88rem"}}>{edit.client_name}</div>
-                    <div style={{fontSize:".78rem",color:"#555"}}>Changes by {edit.ca_name} · {edit.submitted_at ? new Date(edit.submitted_at).toLocaleDateString() : '—'}</div>
+                    <div style={{fontSize:".78rem",color:"#555"}}>Changes by {edit.ca_name} · {edit.submitted_at ? new Date(edit.submitted_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}) : '—'}</div>
                   </div>
                   <button onClick={async()=>{
                     try {
@@ -11116,7 +11116,7 @@ ${extraPages}
                         {review.status==='saved'&&<span style={{fontSize:10,background:"#d1fae5",color:"#065f46",padding:"1px 7px",borderRadius:10,fontWeight:700}}>✓ Saved</span>}
                       </div>
                       <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>
-                        {review.type==='balance_sheet'?'Balance Sheet':'Budget'} · Submitted {review.submitted_at?new Date(review.submitted_at).toLocaleDateString():'—'}
+                        {review.type==='balance_sheet'?'Balance Sheet':'Budget'} · Submitted {review.submitted_at?new Date(review.submitted_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}):'—'}
                       </div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -11237,7 +11237,7 @@ ${extraPages}
               items.push({
                 kind:'ca_edit', priority:1, color:'#1d4ed8',
                 title:`CA edit from ${e.ca_name} for ${e.client_name}`,
-                sub: e.submitted_at ? `Submitted ${new Date(e.submitted_at).toLocaleDateString()}` : 'Awaiting review',
+                sub: e.submitted_at ? `Submitted ${new Date(e.submitted_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}` : 'Awaiting review',
                 onClick: async () => {
                   try {
                     const item = await storage.get(e.sheet_key);
@@ -11254,7 +11254,7 @@ ${extraPages}
               items.push({
                 kind:'customer_review', priority:1, color:'#15803d',
                 title:`Customer submitted ${label} for ${review.client_name}`,
-                sub: review.submitted_at ? `Submitted ${new Date(review.submitted_at).toLocaleDateString()}` : 'Awaiting review',
+                sub: review.submitted_at ? `Submitted ${new Date(review.submitted_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}` : 'Awaiting review',
                 onClick: () => {
                   if (review.type === 'budget') {
                     setBudgetCompare({...review, draft: review.customer_draft || {}});
