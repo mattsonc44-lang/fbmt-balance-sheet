@@ -7950,20 +7950,38 @@ Question: ${q}`,
           if (reSupplement.length) {
             realEstate.length = 0;
             realEstate.push(...reSupplement);
-            // Strip any RE summary/total rows that the main-page parser pushed
-            // into reImprovements (which flows into otherAssets). Otherwise
-            // we'd double-count: full RE value in Real Estate + same value
-            // again in Other Assets. Keep genuine building line items
-            // (grain bin, shop, house, barn, etc.) so those still show up.
-            const isTotalLike = s => {
-              const t = String(s || '').toLowerCase();
-              return /(^|\W)(total|subtotal|sum|real estate)($|\W|:)/.test(t)
-                  || t.trim() === 're —'
-                  || t.replace(/^re — /,'').trim() === '';
-            };
-            for (let k = reImprovements.length - 1; k >= 0; k--) {
-              if (isTotalLike(reImprovements[k].description)) reImprovements.splice(k, 1);
+          }
+
+          // Unconditional post-hoc filter — the main-page parser (and to a
+          // lesser extent the supplement one) can pick up summary rows like
+          // "Total Real Estate" or "Real Estate" as if they were tracts /
+          // improvements, which double-counts against the per-tract detail.
+          // Strip anything that looks like a total, subtotal, or a bare
+          // "Real Estate" label from BOTH the realEstate array and the
+          // reImprovements/otherAssets list. Keep genuine building line
+          // items (grain bin, shop, house, barn, etc.).
+          const isRETotalLike = s => {
+            const t = String(s || '').toLowerCase().trim();
+            if (!t) return true;
+            if (t === 're —' || t === 're—' || t.replace(/^re\s*[—-]\s*/, '') === '') return true;
+            // "Total ...", "Subtotal ...", "Sum ..." — any leading total-ish word
+            if (/^(total|subtotal|sum)\b/.test(t)) return true;
+            // "... total" trailing
+            if (/\btotal\s*(re|real estate)?\s*:?\s*$/.test(t)) return true;
+            // Bare label matching the section header itself
+            if (/^(re\s*[—-]\s*)?(real estate|re owned|land)\s*:?\s*$/.test(t)) return true;
+            return false;
+          };
+          for (let k = realEstate.length - 1; k >= 0; k--) {
+            if (isRETotalLike(realEstate[k].description) && !realEstate[k].acres) realEstate.splice(k, 1);
+            else if (isRETotalLike(realEstate[k].description) && Number(realEstate[k].acres) > 10000) {
+              // "10,000,000 Real Estate" with the value living in the acres slot
+              // is almost certainly the total mis-parsed as a tract.
+              realEstate.splice(k, 1);
             }
+          }
+          for (let k = reImprovements.length - 1; k >= 0; k--) {
+            if (isRETotalLike(reImprovements[k].description)) reImprovements.splice(k, 1);
           }
 
           // ── VEHICLES (supplement schedule) ────────────────────────────────
