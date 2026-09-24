@@ -7963,13 +7963,18 @@ Question: ${q}`,
           const isRETotalLike = s => {
             const t = String(s || '').toLowerCase().trim();
             if (!t) return true;
-            if (t === 're —' || t === 're—' || t.replace(/^re\s*[—-]\s*/, '') === '') return true;
-            // "Total ...", "Subtotal ...", "Sum ..." — any leading total-ish word
-            if (/^(total|subtotal|sum)\b/.test(t)) return true;
-            // "... total" trailing
-            if (/\btotal\s*(re|real estate)?\s*:?\s*$/.test(t)) return true;
-            // Bare label matching the section header itself
-            if (/^(re\s*[—-]\s*)?(real estate|re owned|land)\s*:?\s*$/.test(t)) return true;
+            // Strip a leading "RE — " / "RE - " prefix before testing so the
+            // pattern list stays short and reads left-to-right.
+            const stripped = t.replace(/^re\s*[—-]\s*/, '').trim();
+            if (!stripped) return true;
+            // Any of these words are strong signals that the row is a
+            // summary/label/reference, not a real per-item entry:
+            //   total, subtotal, sum, supplement, schedule, see (schedule/supplement)
+            if (/\b(total|subtotal|sum)\b/.test(stripped)) return true;
+            if (/\b(supplement|schedule)\b/.test(stripped)) return true;
+            if (/\bsee\b\s*(re|real estate|supplement|schedule|attached|page|pg)?/.test(stripped)) return true;
+            // Bare RE label
+            if (/^(real estate|re owned|land|re)\s*:?\s*$/.test(stripped)) return true;
             return false;
           };
           for (let k = realEstate.length - 1; k >= 0; k--) {
