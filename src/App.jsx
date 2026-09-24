@@ -11812,7 +11812,10 @@ ${extraPages}
       });
       if (!resp.ok) {
         const errBody = await resp.text();
-        throw new Error(`Server ${resp.status}: ${errBody.slice(0, 300)}`);
+        // Try to pull a friendly message out of the JSON error body.
+        let msg = errBody;
+        try { const j = JSON.parse(errBody); if (j && j.error) msg = j.error; } catch {}
+        throw new Error(`Server returned ${resp.status}: ${String(msg).slice(0, 400)}`);
       }
       // Fire-and-forget: tell the lender the CA saved directly, so they can
       // see the changes reflected in their own view.
