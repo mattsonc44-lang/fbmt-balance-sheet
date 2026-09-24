@@ -7983,6 +7983,13 @@ Question: ${q}`,
           for (let k = reImprovements.length - 1; k >= 0; k--) {
             if (isRETotalLike(reImprovements[k].description)) reImprovements.splice(k, 1);
           }
+          // Same filter on otherAssets — reImprovements was already merged in
+          // above (see `otherAssets.push(...reImprovements)`), so entries that
+          // ARE the RE total need to be stripped from there too. Also catches
+          // any RE-summary row the OTHER ASSETS parser itself may have picked up.
+          for (let k = otherAssets.length - 1; k >= 0; k--) {
+            if (isRETotalLike(otherAssets[k].description)) otherAssets.splice(k, 1);
+          }
 
           // ── VEHICLES (supplement schedule) ────────────────────────────────
           const vehicles=[];
