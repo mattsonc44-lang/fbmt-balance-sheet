@@ -7872,6 +7872,86 @@ Question: ${q}`,
             }
           }
 
+          // ── REAL ESTATE (supplement schedule) ─────────────────────────────
+          // The main balance-sheet page usually shows a summary total for
+          // real estate; the per-tract detail lives on a "Real Estate Schedule"
+          // (or "Real Estate Supplement") section further down — or on a
+          // separate sheet in the workbook. We prefer that detail over the
+          // one-line summary the main-page parser above pulled.
+          const reSupplement = [];
+          // Path A: separate sheet named "Real Estate" / "RE Schedule" / etc.
+          const reSheetName = wb ? wb.SheetNames.find(s => /real ?estate|re[ _]?schedule|re[ _]?supplement/i.test(s) && !/balance sheet/i.test(s)) : null;
+          if (reSheetName) {
+            const reWs = wb.Sheets[reSheetName];
+            const reRows = window.XLSX.utils.sheet_to_json(reWs, { header: 1, defval: '' });
+            const R2 = i => reRows[i] || [];
+            // Find the header row so we can start below it.
+            let dataStart = 0;
+            for (let i = 0; i < Math.min(reRows.length, 20); i++) {
+              const rr = R2(i).map(v => String(v||'').toLowerCase());
+              if (rr.some(v => v.includes('acres')) && rr.some(v => v.includes('description') || v.includes('type'))) { dataStart = i + 1; break; }
+            }
+            for (let i = dataStart; i < reRows.length; i++) {
+              const rr = R2(i);
+              if (!rr.length) continue;
+              const rowStr = rr.map(v => String(v||'').toLowerCase()).join(' ');
+              if (/^total/i.test(rowStr.trim()) || rowStr.includes('total real estate')) break;
+              let acres='', desc='', reType='', vpa='', total='';
+              for (let c=0; c<rr.length; c++) {
+                const v = rr[c];
+                if (!acres && typeof v==='number' && v>0 && v<20000) { acres=String(v); continue; }
+                if (typeof v==='string' && v.trim() && !isSkip(v)) {
+                  if (!reType && /(cropland|pasture|hay|dryland|irrigated|farmstead|native|crp|range)/i.test(v)) reType = v.trim();
+                  else if (!desc) desc = v.trim();
+                }
+                if (typeof v==='number' && v>=50) {
+                  if (!vpa && v < 30000) vpa = String(v);
+                  else if (!total) total = String(v);
+                }
+              }
+              if (acres && (desc || reType)) {
+                if (!vpa && total && parseFloat(acres) > 0) vpa = String(Math.round(parseFloat(total)/parseFloat(acres)));
+                reSupplement.push({ acres, reType: reType || 'Cropland', description: desc || reType, valuePerAcre: vpa });
+              }
+            }
+          }
+          // Path B: inline "REAL ESTATE SCHEDULE" section on the same sheet.
+          if (!reSupplement.length) {
+            let inRE = false;
+            for (let i = 0; i < rows.length; i++) {
+              const r = R(i);
+              if (!inRE && hasStr(r, 'REAL ESTATE') && (hasStr(r, 'SCHEDULE') || hasStr(r, 'SUPPLEMENT'))) { inRE = true; continue; }
+              if (!inRE) continue;
+              // Stop when we hit the next major section.
+              if (hasStr(r,'TOTAL REAL ESTATE') || hasStr(r,'TITLED VEHICLES') || hasStr(r,'MACHINERY') || hasStr(r,'BREEDING STOCK')) break;
+              // Skip header rows and blanks.
+              if (isSkip(r[0]) && isSkip(r[1]) && isSkip(r[2])) continue;
+              if (hasStr(r,'Acres') && hasStr(r,'Description')) continue;
+              let acres='', desc='', reType='', vpa='', total='';
+              for (let c=0; c<r.length; c++) {
+                const v = r[c];
+                if (!acres && typeof v==='number' && v>0 && v<20000) { acres=String(v); continue; }
+                if (typeof v==='string' && v.trim() && !isSkip(v)) {
+                  if (!reType && /(cropland|pasture|hay|dryland|irrigated|farmstead|native|crp|range)/i.test(v)) reType = v.trim();
+                  else if (!desc) desc = v.trim();
+                }
+                if (typeof v==='number' && v>=50) {
+                  if (!vpa && v < 30000) vpa = String(v);
+                  else if (!total) total = String(v);
+                }
+              }
+              if (acres && (desc || reType)) {
+                if (!vpa && total && parseFloat(acres) > 0) vpa = String(Math.round(parseFloat(total)/parseFloat(acres)));
+                reSupplement.push({ acres, reType: reType || 'Cropland', description: desc || reType, valuePerAcre: vpa });
+              }
+            }
+          }
+          // Detailed supplement wins over the one-line summary.
+          if (reSupplement.length) {
+            realEstate.length = 0;
+            realEstate.push(...reSupplement);
+          }
+
           // ── VEHICLES (supplement schedule) ────────────────────────────────
           const vehicles=[];
           let inV=false;
