@@ -8936,8 +8936,17 @@ FORMAT RULES — follow exactly:
       const meName = (sheetData.clientName || '').trim().toLowerCase();
       const corpPersonalDebtSnapshot = [];
       if (meName) {
+        // Only the LATEST saved sheet per personal client — older sheets may
+        // list debts that have since been paid off.
+        const latestByClient = new Map();
         for (const s of savedSheets) {
-          if (s.key === sheetKey) continue;
+          if (s.key === sheetKey || !s.clientName) continue;
+          const existing = latestByClient.get(s.clientName);
+          if (!existing || (s.asOfDate||'').localeCompare(existing.asOfDate||'') > 0) {
+            latestByClient.set(s.clientName, s);
+          }
+        }
+        for (const s of latestByClient.values()) {
           try {
             const it = await storage.get(s.key);
             if (!it) continue;
@@ -8950,12 +8959,12 @@ FORMAT RULES — follow exactly:
             const routedToMe = r => (r.corpPaidBy ? r.corpPaidBy.trim().toLowerCase() === meName : !!r.corpPaid);
             (p.intermediatDebt || []).forEach(r => {
               if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
-                corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: r.security || '', annualPmt: r.annualPmt, owner, type: 'term' });
+                corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: r.security || '', annualPmt: r.annualPmt, owner, type: 'term', sourceAsOfDate: p.asOfDate });
               }
             });
             (p.reCurrent || []).forEach(r => {
               if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
-                corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: '', annualPmt: r.annualPmt, owner, type: 're' });
+                corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: '', annualPmt: r.annualPmt, owner, type: 're', sourceAsOfDate: p.asOfDate });
               }
             });
           } catch {}
@@ -9163,37 +9172,41 @@ FORMAT RULES — follow exactly:
     // empty and wipe out that snapshot. Skip.
     if (profile?.role === 'ca' || caOpenShare) return;
     try {
-      const result = await storage.list(STORAGE_PREFIX);
-      if (!result || !result.keys) return;
       const corpDebts = [];
       const me = data.clientName.trim().toLowerCase();
-      for (const key of result.keys) {
+      // ── Use ONLY the latest saved sheet per personal client. Older sheets
+      // may reference loans that have since been paid off — we don't want
+      // last year's balance flowing back into this year's corp budget.
+      // Group savedSheets by client name → pick the newest per group.
+      const latestByClient = new Map();
+      for (const s of savedSheets) {
+        if (!s.clientName || s.clientName === data.clientName) continue;
+        const existing = latestByClient.get(s.clientName);
+        if (!existing || (s.asOfDate||'').localeCompare(existing.asOfDate||'') > 0) {
+          latestByClient.set(s.clientName, s);
+        }
+      }
+      for (const s of latestByClient.values()) {
         try {
-          const item = await storage.get(key);
+          const item = await storage.get(s.key);
           if (!item) continue;
           const p = JSON.parse(item.value);
-          // linkedEntities can be either strings (legacy) or {name,date,ownership} objects.
-          // Extract names uniformly and only include sheets that link to the currently-open client.
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
-          const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(s => s.trim().toLowerCase());
+          const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(x => x.trim().toLowerCase());
           if (!linkedNames.includes(me)) continue;
           const ownerName = p.clientName || "Unknown";
-          // A debt is "for me" if corpPaidBy explicitly names me, OR (legacy) corpPaid is true.
-          // Legacy corpPaid without corpPaidBy is ambiguous when multiple corps are linked —
-          // we still include it so behavior degrades gracefully to the old "any linked corp"
-          // rollup, but it will show under whichever corp sheet is opened.
           const routedToMe = r => {
             if (r.corpPaidBy) return r.corpPaidBy.trim().toLowerCase() === me;
             return !!r.corpPaid;
           };
           (p.intermediatDebt || []).forEach(r => {
             if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
-              corpDebts.push({ creditor: r.creditor, security: r.security || "", annualPmt: r.annualPmt, owner: ownerName, type: "term" });
+              corpDebts.push({ creditor: r.creditor, security: r.security || "", annualPmt: r.annualPmt, owner: ownerName, type: "term", sourceAsOfDate: p.asOfDate });
             }
           });
           (p.reCurrent || []).forEach(r => {
             if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
-              corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re" });
+              corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re", sourceAsOfDate: p.asOfDate });
             }
           });
         } catch {}
