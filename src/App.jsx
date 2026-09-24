@@ -7950,6 +7950,20 @@ Question: ${q}`,
           if (reSupplement.length) {
             realEstate.length = 0;
             realEstate.push(...reSupplement);
+            // Strip any RE summary/total rows that the main-page parser pushed
+            // into reImprovements (which flows into otherAssets). Otherwise
+            // we'd double-count: full RE value in Real Estate + same value
+            // again in Other Assets. Keep genuine building line items
+            // (grain bin, shop, house, barn, etc.) so those still show up.
+            const isTotalLike = s => {
+              const t = String(s || '').toLowerCase();
+              return /(^|\W)(total|subtotal|sum|real estate)($|\W|:)/.test(t)
+                  || t.trim() === 're —'
+                  || t.replace(/^re — /,'').trim() === '';
+            };
+            for (let k = reImprovements.length - 1; k >= 0; k--) {
+              if (isTotalLike(reImprovements[k].description)) reImprovements.splice(k, 1);
+            }
           }
 
           // ── VEHICLES (supplement schedule) ────────────────────────────────
