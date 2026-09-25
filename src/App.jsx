@@ -8595,10 +8595,32 @@ Question: ${q}`,
     // projected income" even though the budget is populated.
     const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
     const fmtM = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
-    // Helper — pull budget numbers out of a raw sheet blob.
+    // Helper — pull budget numbers out of a raw sheet blob. Matches the
+    // display logic in BudgetView: if a row isn't contracted and isn't
+    // flagged customPrice, fall back to the commodity price list. Otherwise
+    // rows whose price was left blank (because the UI was showing the list
+    // price) come through here as $0 and the whole DSCR reads 0.00.
+    const cropListPrice = (name) => {
+      if (!name) return 0;
+      const needle = String(name).toLowerCase().trim();
+      const exact = commodityPrices.find(p => p.name && p.name.toLowerCase().trim() === needle);
+      return exact ? nm(exact.price) : 0;
+    };
     const budgetOf = (p) => {
-      const cropInc      = (p.budgetCrops||[]).reduce((a,r) => a + nm(r.acres)*nm(r.yieldPerAcre)*nm(r.price)*(nm(r.share||'100')/100), 0);
-      const livestockInc = (p.budgetLivestock||[]).reduce((a,r) => a + nm(r.head)*nm(r.lbs)*nm(r.price), 0);
+      const cropInc = (p.budgetCrops||[]).reduce((a,r) => {
+        // Effective price: row-level price first, else commodity list price
+        // (unless the row is marked contracted or has a custom price).
+        const rowPrice = nm(r.price);
+        const listPrice = (r.contracted || r.customPrice) ? 0 : cropListPrice(r.crop);
+        const effectivePrice = rowPrice || listPrice;
+        return a + nm(r.acres) * nm(r.yieldPerAcre) * effectivePrice * (nm(r.share||'100')/100);
+      }, 0);
+      const livestockInc = (p.budgetLivestock||[]).reduce((a,r) => {
+        const rowPrice = nm(r.price);
+        const listPrice = cropListPrice(r.type);
+        const effectivePrice = rowPrice || listPrice;
+        return a + nm(r.head) * nm(r.lbs) * effectivePrice;
+      }, 0);
       const miscInc      = (p.budgetMisc||[]).reduce((a,r) => a + nm(r.amount), 0);
       const opEx         = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((a,r) => a + nm(r.amount), 0);
       const debtSvc      = (p.intermediatDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
