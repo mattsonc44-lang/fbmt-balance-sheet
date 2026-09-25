@@ -4509,9 +4509,14 @@ function ClientDashboard({
               const entitySheets = savedSheets
                 .filter(s => s.clientName === entry.name)
                 .sort((a,b) => b.asOfDate.localeCompare(a.asOfDate));
-              const targetKey = entry.date
-                ? entitySheets.find(s => s.asOfDate === entry.date)?.key
-                : entitySheets[0]?.key;
+              // For a given personal sheet, the linked corp should reflect
+              // the SAME period — i.e., the corp sheet as of the personal
+              // sheet's as-of date. Prefer exact match, fall back to the
+              // nearest earlier corp sheet, then to newest as a last resort.
+              const targetAsOf = p && p.asOfDate;   // date on the source personal sheet
+              const exact  = targetAsOf ? entitySheets.find(s => s.asOfDate === targetAsOf) : null;
+              const nearest = targetAsOf ? entitySheets.find(s => (s.asOfDate||'') <= targetAsOf) : null;
+              const targetKey = (exact || nearest || entitySheets[0])?.key;
               if (targetKey) {
                 try {
                   const it = await storage.get(targetKey);
@@ -8486,7 +8491,8 @@ Question: ${q}`,
             const linked = normalizeLinked(p.linkedEntities || []);
             for (const entry of linked) {
               const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
-              const eSheet = await loadEntitySheet(entry.name, entry.date || p.asOfDate);
+              // Always use the newest sheet for the linked entity, regardless of any stored date.
+              const eSheet = await loadEntitySheet(entry.name, null);
               if (!eSheet) {
                 linkedSummary.push({ name: entry.name, ownership: pct*100, matched: false });
                 continue;
@@ -8609,8 +8615,13 @@ Question: ${q}`,
             const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
             const candidates = savedSheets.filter(x => x.clientName === entry.name)
               .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
-            let pick = entry.date ? candidates.find(x => x.asOfDate === entry.date) : candidates[0];
-            if (!pick) pick = candidates.find(x => (x.asOfDate||'') <= (entry.date||p.asOfDate)) || candidates[0];
+            // Match the linked corp to the personal sheet's own as-of date —
+            // so a 2026-08 personal pulls the corp's 2026-08 numbers, a 2025
+            // personal pulls the corp's 2025 numbers, etc.
+            const anchor = p.asOfDate;
+            let pick = anchor && candidates.find(x => x.asOfDate === anchor);
+            if (!pick && anchor) pick = candidates.find(x => (x.asOfDate||'') <= anchor);
+            if (!pick) pick = candidates[0];
             if (!pick) continue;
             try {
               const ei = await storage.get(pick.key);
@@ -8643,8 +8654,13 @@ Question: ${q}`,
             const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
             const candidates = savedSheets.filter(x => x.clientName === entry.name)
               .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
-            let pick = entry.date ? candidates.find(x => x.asOfDate === entry.date) : candidates[0];
-            if (!pick) pick = candidates.find(x => (x.asOfDate||'') <= (entry.date||p.asOfDate)) || candidates[0];
+            // Match the linked corp to the personal sheet's own as-of date —
+            // so a 2026-08 personal pulls the corp's 2026-08 numbers, a 2025
+            // personal pulls the corp's 2025 numbers, etc.
+            const anchor = p.asOfDate;
+            let pick = anchor && candidates.find(x => x.asOfDate === anchor);
+            if (!pick && anchor) pick = candidates.find(x => (x.asOfDate||'') <= anchor);
+            if (!pick) pick = candidates[0];
             if (!pick) { entityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%) — no sheet on file`); continue; }
             try {
               const ei = await storage.get(pick.key);
@@ -9107,8 +9123,12 @@ FORMAT RULES — follow exactly:
         try {
           const cands = savedSheets.filter(x => x.clientName === entry.name)
             .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
-          let pick = entry.date ? cands.find(x => x.asOfDate === entry.date) : cands[0];
-          if (!pick) pick = cands.find(x => (x.asOfDate||'') <= (entry.date||fullData.asOfDate)) || cands[0];
+          // Match to the personal sheet's own as-of date so the CA sees the
+          // corp figures for the same period as the personal sheet being shared.
+          const anchor = fullData.asOfDate;
+          let pick = anchor && cands.find(x => x.asOfDate === anchor);
+          if (!pick && anchor) pick = cands.find(x => (x.asOfDate||'') <= anchor);
+          if (!pick) pick = cands[0];
           if (!pick) continue;
           const it = await storage.get(pick.key);
           if (!it) continue;
@@ -10556,12 +10576,15 @@ ${extraPages}
                       <span style={{fontSize:"1rem"}}>🏢</span>
                       <div style={{flex:1}}>
                         {(() => {
-                          // Find the matching saved sheet — exact date if given, else newest.
+                          // Match the linked entity to the current sheet's
+                          // period — link jumps to the corp sheet whose
+                          // as-of date matches (or is nearest before) the
+                          // personal sheet being viewed.
                           const matches = savedSheets.filter(s => s.clientName === entry.name)
                             .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
-                          // Try exact date first, then fall back to newest so a stale
-                          // linked-date reference still lands somewhere useful.
-                          const target = (entry.date && matches.find(s => s.asOfDate === entry.date))
+                          const anchor = data.asOfDate;
+                          const target = (anchor && matches.find(s => s.asOfDate === anchor))
+                            || (anchor && matches.find(s => (s.asOfDate||'') <= anchor))
                             || matches[0];
                           if (target && target.key) {
                             return (
@@ -10577,7 +10600,17 @@ ${extraPages}
                           return <div style={{fontWeight:700,fontSize:".88rem",color:"#1a1a1a"}} title="No saved sheet found for this entity">{entry.name}</div>;
                         })()}
                         <div style={{fontSize:".78rem",color:"#2d5a8e"}}>
-                          {entry.date ? `As of ${entry.date}` : "Latest available"}
+                          {(() => {
+                            // Show the entity's matched date so it's obvious
+                            // which corp period is being reflected here.
+                            const list = savedSheets.filter(s => s.clientName === entry.name)
+                              .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+                            const anchor = data.asOfDate;
+                            const m = (anchor && list.find(s => s.asOfDate === anchor))
+                              || (anchor && list.find(s => (s.asOfDate||'') <= anchor))
+                              || list[0];
+                            return m ? `Matched to this sheet — as of ${m.asOfDate}` : "No saved sheet for this entity";
+                          })()}
                           {nw !== undefined && (
                             pct < 100
                               ? ` — ${pct}% of ${fmt(nw)} = ${fmt(owned)}`
