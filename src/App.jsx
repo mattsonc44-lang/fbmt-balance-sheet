@@ -7095,6 +7095,25 @@ Question: ${q}`,
     if (data.clientName) loadCorpPersonalDebt();
   }, [data.clientName]);
 
+  // ── Analysis-state hygiene ────────────────────────────────────────────────
+  // Whenever the sheet identity changes (open a different sheet, or the CA
+  // takes over, or as-of date changes) — wipe any cached analytical state so
+  // the next analysis run pulls FRESH data. Without this, someone could
+  // switch from Bowman's 2026 sheet to Smith's 2025 sheet, click Compare,
+  // and momentarily see Bowman's insight text next to Smith's balance sheet.
+  useEffect(() => {
+    // Comparison view state
+    setCompSheets([]);
+    setCompInsight("");
+    // Corp-personal debt aggregation (re-computed by the effect above once
+    // storage responds — clear now so no stale rows are shown in the meantime)
+    if (!(profile?.role === 'ca' || caOpenShare)) setCorpPersonalDebt([]);
+    // Linked-entity net worth map (re-computed by its own effect below)
+    if (!(profile?.role === 'ca' || caOpenShare)) setLinkedEntityNWMap({});
+    // Q&A book summary cache — force rebuild so it picks up whatever was just saved
+    if (qaBookCache && qaBookCache.current) qaBookCache.current = null;
+  }, [data.clientName, data.asOfDate]);
+
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [showLenderPkg, setShowLenderPkg] = useState(false);
