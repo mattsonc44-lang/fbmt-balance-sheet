@@ -9726,6 +9726,18 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .sig-row{display:flex;gap:20pt;margin-top:8pt;}
 .sig-line{flex:1;border-top:1pt solid #000;padding-top:2pt;}
 .page2{page-break-before:always;padding-top:.2in;}
+/* Print-safe defaults — collapse margins between sections so page breaks
+   don't create empty leftover pages between the cover, main sheet, and
+   schedule/supplement pages. */
+@page { size: letter; margin: .45in .4in; }
+@media print {
+  html, body { margin: 0 !important; padding: 0 !important; }
+  body > *:empty { display: none !important; }
+  /* Any element that is only page-break markers with no visible content
+     should be hidden so it can't push a blank page. */
+  div[style*="page-break-after"]:empty,
+  div[style*="page-break-before"]:empty { display: none !important; }
+}
 .sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
 .sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
 .sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
@@ -9739,7 +9751,7 @@ h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;ma
 .sched-client{font-size:8pt;color:#555;}
 </style></head><body>
 ${withCover ? `
-<div style="page-break-after:always;min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-family:Arial,sans-serif;padding:1in">
+<div style="page-break-after:always;break-after:page;height:9in;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-family:Arial,sans-serif;padding:0 .5in;margin:0;">
   <img src="${FBMT_LOGO}" alt="First Bank of Montana" style="width:175px;height:102px;margin-bottom:48pt"/>
   <div style="font-size:22pt;font-weight:900;color:#6B0E1E">Agricultural Loan Package</div>
   <div style="font-size:15pt;font-weight:700;margin-top:14pt">${d.clientName||""}</div>
