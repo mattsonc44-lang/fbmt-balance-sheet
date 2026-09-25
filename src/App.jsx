@@ -12177,8 +12177,12 @@ ${extraPages}
           }),
         });
       } catch {}
-      alert('Saved directly to the lender\'s sheet.');
-      setCaOpenShare(null); setData(emptyData()); setScreen("home");
+      alert('Saved. Your changes are now on the lender\'s sheet.');
+      // Stay on the wizard with the CA's edits visible — no reset. Also
+      // update caOpenShare's local copy of sheet_data so if the CA
+      // re-opens later in the session, the seed is fresh (ca-save also
+      // patches the row on Supabase so future opens see it too).
+      setCaOpenShare(prev => prev ? { ...prev, sheet_data: { ...(prev.sheet_data||{}), ...data, _lastCAEdit: new Date().toISOString() } } : prev);
     } catch (e) {
       alert('Direct save failed: ' + (e.message || e) + '\n\nIf the ca-save function isn\'t deployed yet, use "Submit for Review" instead.');
     }
