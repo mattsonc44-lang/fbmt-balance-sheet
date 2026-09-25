@@ -7102,15 +7102,14 @@ Question: ${q}`,
   // switch from Bowman's 2026 sheet to Smith's 2025 sheet, click Compare,
   // and momentarily see Bowman's insight text next to Smith's balance sheet.
   useEffect(() => {
-    // Comparison view state
-    setCompSheets([]);
+    const isCA = profile?.role === 'ca' || caOpenShare;
+    // Comparison state — for CAs, the snapshot is the source of truth so
+    // don't wipe it on identity change. For the lender, wipe so the live
+    // loader repopulates for the newly-open sheet.
+    if (!isCA) setCompSheets([]);
     setCompInsight("");
-    // Corp-personal debt aggregation (re-computed by the effect above once
-    // storage responds — clear now so no stale rows are shown in the meantime)
-    if (!(profile?.role === 'ca' || caOpenShare)) setCorpPersonalDebt([]);
-    // Linked-entity net worth map (re-computed by its own effect below)
-    if (!(profile?.role === 'ca' || caOpenShare)) setLinkedEntityNWMap({});
-    // Q&A book summary cache — force rebuild so it picks up whatever was just saved
+    if (!isCA) setCorpPersonalDebt([]);
+    if (!isCA) setLinkedEntityNWMap({});
     if (qaBookCache && qaBookCache.current) qaBookCache.current = null;
   }, [data.clientName, data.asOfDate]);
 
@@ -8459,6 +8458,10 @@ Question: ${q}`,
   // outside the folder that DO share the exact client name, for backwards compat.
   const loadComparisonSheets = async () => {
     if (!data.clientName && (!data.folderPath || !data.folderPath.length)) return;
+    // CAs use the snapshot the lender baked into the share — the live scan
+    // across savedSheets returns nothing for them and would overwrite the
+    // hydrated compSheets with an empty array.
+    if (profile?.role === 'ca' || caOpenShare) return;
     setCompLoading(true); setCompInsight("");
     try {
       const currentFolderKey = JSON.stringify(data.folderPath || []);
@@ -8619,11 +8622,19 @@ Question: ${q}`,
     };
     const budgetRows = [];
     const liquidationRows = [];
-    for (const s of compSheets) {
+    // Helper: prefer the baked-in raw sheet blob (present on CA-share
+    // snapshots) — falls back to a live storage.get for the lender.
+    const getRawSheet = async (s) => {
+      if (s && s._rawSheet && typeof s._rawSheet === 'object') return s._rawSheet;
       try {
         const item = await storage.get(s.key);
-        if (!item) continue;
-        const p = JSON.parse(item.value);
+        return item ? JSON.parse(item.value) : null;
+      } catch { return null; }
+    };
+    for (const s of compSheets) {
+      try {
+        const p = await getRawSheet(s);
+        if (!p) continue;
         const own = budgetOf(p);
         // ── Post-harvest liquidation for this year (personal + linked when consolidated)
         let liqOwn = liquidationOf(p);
@@ -8638,14 +8649,21 @@ Question: ${q}`,
             // so a 2026-08 personal pulls the corp's 2026-08 numbers, a 2025
             // personal pulls the corp's 2025 numbers, etc.
             const anchor = p.asOfDate;
-            let pick = anchor && candidates.find(x => x.asOfDate === anchor);
-            if (!pick && anchor) pick = candidates.find(x => (x.asOfDate||'') <= anchor);
-            if (!pick) pick = candidates[0];
-            if (!pick) continue;
+            // Prefer the raw sheet baked into the snapshot for this year
+            // (works for CAs who can't touch the lender's storage).
+            let ep = s._linkedRawSheets && s._linkedRawSheets[entry.name];
+            if (!ep) {
+              let pick = anchor && candidates.find(x => x.asOfDate === anchor);
+              if (!pick && anchor) pick = candidates.find(x => (x.asOfDate||'') <= anchor);
+              if (!pick) pick = candidates[0];
+              if (!pick) continue;
+              try {
+                const ei = await storage.get(pick.key);
+                if (!ei) continue;
+                ep = JSON.parse(ei.value);
+              } catch { continue; }
+            }
             try {
-              const ei = await storage.get(pick.key);
-              if (!ei) continue;
-              const ep = JSON.parse(ei.value);
               const el = liquidationOf(ep);
               liqCombo.stored    += el.stored * pct;
               liqCombo.feeders   += el.feeders * pct;
@@ -8677,14 +8695,20 @@ Question: ${q}`,
             // so a 2026-08 personal pulls the corp's 2026-08 numbers, a 2025
             // personal pulls the corp's 2025 numbers, etc.
             const anchor = p.asOfDate;
-            let pick = anchor && candidates.find(x => x.asOfDate === anchor);
-            if (!pick && anchor) pick = candidates.find(x => (x.asOfDate||'') <= anchor);
-            if (!pick) pick = candidates[0];
-            if (!pick) { entityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%) — no sheet on file`); continue; }
+            // Prefer the raw sheet baked into the CA-share snapshot for this year.
+            let ep = s._linkedRawSheets && s._linkedRawSheets[entry.name];
+            if (!ep) {
+              let pick = anchor && candidates.find(x => x.asOfDate === anchor);
+              if (!pick && anchor) pick = candidates.find(x => (x.asOfDate||'') <= anchor);
+              if (!pick) pick = candidates[0];
+              if (!pick) { entityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%) — no sheet on file`); continue; }
+              try {
+                const ei = await storage.get(pick.key);
+                if (!ei) continue;
+                ep = JSON.parse(ei.value);
+              } catch { continue; }
+            }
             try {
-              const ei = await storage.get(pick.key);
-              if (!ei) continue;
-              const ep = JSON.parse(ei.value);
               const eb = budgetOf(ep);
               comboInc  += eb.totalInc * pct;
               comboCrop += eb.cropInc * pct;
@@ -9159,6 +9183,91 @@ FORMAT RULES — follow exactly:
       }
       fullData.linkedEntityNWSnapshot = linkedEntityNWSnapshot;
       fullData.linkedEntitySnapshots  = linkedEntitySnapshots;
+
+      // ── Comparison-history snapshot ────────────────────────────────────────
+      // Bake the same shape ComparisonView expects (one row per historical
+      // sheet, with balance-sheet totals, linked-entity consolidation, and the
+      // raw sheet data blob for budget / liquidation analysis) so the CA can
+      // open Comparison + Generate Insights on their side without having to
+      // scan the lender's storage.
+      const comparisonSnapshot = [];
+      const meLower = (sheetData.clientName || '').trim().toLowerCase();
+      const currentFolderKey = JSON.stringify(sheetData.folderPath || []);
+      // Same candidate rule as the live loader: same client name OR same folder as this sheet.
+      const historyCandidates = savedSheets.filter(s => {
+        const sameName = s.clientName && s.clientName.trim().toLowerCase() === meLower;
+        const sameFolder = (sheetData.folderPath && sheetData.folderPath.length > 0)
+          && JSON.stringify(s.folderPath || []) === currentFolderKey;
+        return sameName || sameFolder;
+      });
+      // Load each candidate's full data and compute totals + linked contribution.
+      const entityCache = new Map();
+      const pickForAnchor = async (name, anchorDate) => {
+        const ck = `${name}::${anchorDate || ''}`;
+        if (entityCache.has(ck)) return entityCache.get(ck);
+        const cands = savedSheets.filter(x => x.clientName === name)
+          .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+        let pick = anchorDate && cands.find(x => x.asOfDate === anchorDate);
+        if (!pick && anchorDate) pick = cands.find(x => (x.asOfDate||'') <= anchorDate);
+        if (!pick) pick = cands[0];
+        if (!pick) { entityCache.set(ck, null); return null; }
+        try {
+          const it = await storage.get(pick.key);
+          const parsed = it ? JSON.parse(it.value) : null;
+          entityCache.set(ck, parsed);
+          return parsed;
+        } catch { entityCache.set(ck, null); return null; }
+      };
+      for (const cand of historyCandidates) {
+        try {
+          const it = await storage.get(cand.key);
+          if (!it) continue;
+          const p = JSON.parse(it.value);
+          const totals = sheetTotals(p);
+          const issues = validateSheet(p).filter(i => i.severity === 'warning');
+          // Per-linked-entity contribution for consolidatedTotals.
+          const linkedContrib = {};
+          const linkedSummary = [];
+          for (const entry of normalizeLinked(p.linkedEntities || [])) {
+            const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
+            const eSheet = await pickForAnchor(entry.name, p.asOfDate);
+            if (!eSheet) { linkedSummary.push({ name: entry.name, ownership: pct*100, matched: false }); continue; }
+            const eTotals = sheetTotals(eSheet);
+            Object.entries(eTotals).forEach(([lbl, v]) => {
+              linkedContrib[lbl] = (linkedContrib[lbl] || 0) + (Number(v) || 0) * pct;
+            });
+            linkedSummary.push({ name: entry.name, ownership: pct*100, matched: true, asOfDate: eSheet.asOfDate, netWorth: (eTotals['NET WORTH'] || 0) * pct });
+          }
+          const consolidatedTotals = {};
+          Object.keys(totals).forEach(lbl => { consolidatedTotals[lbl] = (totals[lbl] || 0) + (linkedContrib[lbl] || 0); });
+          comparisonSnapshot.push({
+            date: p.asOfDate,
+            totals,
+            consolidatedTotals,
+            linkedContrib,
+            linkedSummary,
+            issues,
+            key: cand.key,
+            folderPath: p.folderPath || [],
+            savedAt: p._savedAt || null,
+            clientName: p.clientName || '',
+            // Raw sheet data + linked-entity full sheet data for the budget /
+            // liquidation blocks generateInsights builds.
+            _rawSheet: p,
+            _linkedRawSheets: (() => {
+              const out = {};
+              for (const entry of normalizeLinked(p.linkedEntities || [])) {
+                const eKey = `${entry.name}::${p.asOfDate || ''}`;
+                if (entityCache.has(eKey) && entityCache.get(eKey)) out[entry.name] = entityCache.get(eKey);
+              }
+              return out;
+            })(),
+          });
+        } catch {}
+      }
+      comparisonSnapshot.sort((a,b) => (a.date||'').localeCompare(b.date||''));
+      fullData.comparisonSnapshot = comparisonSnapshot;
+
       const sheet = savedSheets.find(s=>s.key===sheetKey);
       const resp = await fetch(SUPABASE_URL+'/rest/v1/ca_shares', {
         method:'POST', headers:{...supaHeaders(),'Prefer':'return=minimal'},
@@ -10837,6 +10946,10 @@ ${extraPages}
         setCorpPersonalDebt(Array.isArray(sheetData.corpPersonalDebtSnapshot) ? sheetData.corpPersonalDebtSnapshot : []);
         setLinkedEntityNWMap(sheetData.linkedEntityNWSnapshot && typeof sheetData.linkedEntityNWSnapshot === 'object'
           ? sheetData.linkedEntityNWSnapshot : {});
+        // Seed year-to-year comparison from the snapshot the lender baked
+        // in at share time. Without this the CA sees an empty compare tab
+        // because savedSheets is unavailable to their auth session.
+        setCompSheets(Array.isArray(sheetData.comparisonSnapshot) ? sheetData.comparisonSnapshot : []);
         setCaOpenShare(share);
         setScreen('wizard');
         setStep(0);
