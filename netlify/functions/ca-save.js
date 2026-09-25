@@ -149,6 +149,28 @@ export const handler = async (event) => {
       const t = await writeResp.text().catch(()=>'');
       return err(writeResp.status, `Write failed: ${t.slice(0,400)}`);
     }
+
+    // Also refresh the ca_shares row's sheet_data snapshot so if the CA
+    // closes and re-opens the share, they see their own most recent edits.
+    // Without this the share row keeps the pre-edit snapshot forever.
+    try {
+      await fetch(
+        SUPABASE_URL + '/rest/v1/ca_shares'
+          + '?ca_user_id=eq.' + encodeURIComponent(caUserId)
+          + '&sheet_key=eq.' + encodeURIComponent(sheet_key),
+        {
+          method: 'PATCH',
+          headers: {
+            ...jsonHeaders,
+            'apikey': SERVICE_ROLE,
+            'Authorization': 'Bearer ' + SERVICE_ROLE,
+            'Prefer': 'return=minimal',
+          },
+          body: JSON.stringify({ sheet_data: savePayload }),
+        }
+      );
+    } catch { /* best-effort — write already succeeded */ }
+
     return ok({ ok: true, mode: existing.length ? 'update' : 'insert' });
   } catch (e) {
     return err(500, e && e.message ? e.message : String(e));
