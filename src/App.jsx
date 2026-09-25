@@ -8612,13 +8612,34 @@ Question: ${q}`,
     // needs (working-capital tailwind). If it's negative, they still owe after
     // selling everything they've stored — a real red flag.
     const liquidationOf = (p) => {
-      const stored = (p.farmProducts||[]).reduce((a,r) => a + nm(r.quantity)*nm(r.pricePerUnit)*(nm(r.share||'100')/100), 0);
+      // Truly liquid — cash sitting in bank accounts today.
+      const cashGlacier = nm(p.cashGlacier);
+      const cashOther   = (p.cashOther||[]).reduce((a,r) => a + nm(r.amount), 0);
+      const cash        = cashGlacier + cashOther;
+      // Owed to the client — money from crops already sold, custom work,
+      // hedging accounts, unpaid contracts. Comes in without any more work.
+      const receivables = (p.receivables||[]).reduce((a,r) => a + nm(r.amount), 0);
+      const fedPay      = Array.isArray(p.federalPayments)
+        ? (p.federalPayments||[]).reduce((a,r) => a + nm(r.amount), 0)
+        : nm(p.federalPayments);
+      // Convertible in the near term — stored grain + market livestock.
+      const stored  = (p.farmProducts||[]).reduce((a,r) => a + nm(r.quantity)*nm(r.pricePerUnit)*(nm(r.share||'100')/100), 0);
       const feeders = (p.livestockMarket||[]).reduce((a,r) => a + nm(r.value), 0);
-      const opLine  = (p.operatingNotes||[]).reduce((a,r) => a + nm(r.balance), 0);
+      // Short-term debt / obligations.
+      const opLine   = (p.operatingNotes||[]).reduce((a,r) => a + nm(r.balance), 0);
       const acctsDue = (p.accountsDue||[]).reduce((a,r) => a + nm(r.amount), 0);
-      const liquid  = stored + feeders;
+      // Supplies on hand (fuel, chem, fert, seed) — already paid, so they
+      // offset next year's operating need rather than helping the current
+      // year's payoff. Reported separately.
+      const supplies = (p.supplies||[]).reduce((a,r) => a + nm(r.value), 0);
+      const liquid    = cash + receivables + fedPay + stored + feeders;
       const shortTerm = opLine + acctsDue;
-      return { stored, feeders, opLine, acctsDue, liquid, shortTerm, carryOver: liquid - shortTerm };
+      return {
+        cash, receivables, fedPay, stored, feeders,
+        opLine, acctsDue, supplies,
+        liquid, shortTerm,
+        carryOver: liquid - shortTerm,
+      };
     };
     const budgetRows = [];
     const liquidationRows = [];
@@ -8665,21 +8686,32 @@ Question: ${q}`,
             }
             try {
               const el = liquidationOf(ep);
-              liqCombo.stored    += el.stored * pct;
-              liqCombo.feeders   += el.feeders * pct;
-              liqCombo.opLine    += el.opLine * pct;
-              liqCombo.acctsDue  += el.acctsDue * pct;
-              liqCombo.liquid    += el.liquid * pct;
-              liqCombo.shortTerm += el.shortTerm * pct;
-              liqCombo.carryOver += el.carryOver * pct;
-              liqEntityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%): stored ${fmtM(el.stored)}, opLine ${fmtM(el.opLine)}, carry-over ${fmtM(el.carryOver)}`);
+              liqCombo.cash        += el.cash * pct;
+              liqCombo.receivables += el.receivables * pct;
+              liqCombo.fedPay      += el.fedPay * pct;
+              liqCombo.stored      += el.stored * pct;
+              liqCombo.feeders     += el.feeders * pct;
+              liqCombo.opLine      += el.opLine * pct;
+              liqCombo.acctsDue    += el.acctsDue * pct;
+              liqCombo.supplies    += el.supplies * pct;
+              liqCombo.liquid      += el.liquid * pct;
+              liqCombo.shortTerm   += el.shortTerm * pct;
+              liqCombo.carryOver   += el.carryOver * pct;
+              liqEntityLines.push(`${entry.name} (${(pct*100).toFixed(0)}%): cash ${fmtM(el.cash)} + AR ${fmtM(el.receivables)} + stored ${fmtM(el.stored)} vs opLine ${fmtM(el.opLine)}, carry-over ${fmtM(el.carryOver)}, supplies ${fmtM(el.supplies)}`);
             } catch {}
           }
         }
         const active = useConsolidated ? liqCombo : liqOwn;
         const coveragePct = active.shortTerm > 0 ? ((active.liquid / active.shortTerm) * 100).toFixed(0) + '%' : 'n/a';
+        // "Effective" carry-over = post-payoff cash + supplies-on-hand (already
+        // paid, so they reduce next year's operating need dollar-for-dollar).
+        const effectiveNextYear = active.carryOver + active.supplies;
         liquidationRows.push(
-          `- ${s.date}: crop-on-hand ${fmtM(active.stored)} + market livestock ${fmtM(active.feeders)} = liquid ${fmtM(active.liquid)} vs op line ${fmtM(active.opLine)} + accts due ${fmtM(active.acctsDue)} = ${fmtM(active.shortTerm)} short-term → coverage ${coveragePct} → post-payoff carry-over ${fmtM(active.carryOver)}`
+          `- ${s.date}: LIQUID: cash ${fmtM(active.cash)} + receivables (crops sold / AR) ${fmtM(active.receivables)} + federal pmts ${fmtM(active.fedPay)} + crop-on-hand ${fmtM(active.stored)} + market livestock ${fmtM(active.feeders)} = ${fmtM(active.liquid)}`
+          + ` vs SHORT-TERM: op line ${fmtM(active.opLine)} + accts due ${fmtM(active.acctsDue)} = ${fmtM(active.shortTerm)}`
+          + ` → coverage ${coveragePct} → post-payoff carry-over ${fmtM(active.carryOver)}`
+          + ` | SUPPLIES ON HAND (offsets next year's op need): ${fmtM(active.supplies)}`
+          + ` → effective going into next year: ${fmtM(effectiveNextYear)}`
           + (useConsolidated && liqEntityLines.length ? liqEntityLines.map(l => `\n    · ${l}`).join('') : '')
         );
         // In consolidated mode, also fold in each linked entity's budget × ownership %.
@@ -8741,7 +8773,9 @@ Question: ${q}`,
     const liquidationBlock = liquidationRows.length
       ? "\n\nPOST-HARVEST LIQUIDATION & OPERATING-LINE CARRY-OVER (per year)"
         + (useConsolidated ? " — consolidated" : "")
-        + ":\nIf the client sold their stored grain + market livestock at listed values, would it pay off the operating note & accounts due? What margin is left to seed next year's operating cycle?\n"
+        + ":\nLIQUID today includes: cash on hand + receivables (crops already sold / custom-work AR) + federal payments + crop-on-hand + market livestock."
+        + " Compare that against short-term debt (operating note + accounts due) to see whether liquidating everything would pay the note off."
+        + " SUPPLIES ON HAND (fuel, chem, fert, seed already paid for) are reported separately — they are NOT part of current-year payoff, but they DO reduce next year's operating need dollar-for-dollar, so the 'effective going into next year' figure = post-payoff carry-over + supplies. Use that combined figure when discussing next year's outlook.\n"
         + liquidationRows.join("\n")
       : "";
 
