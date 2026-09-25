@@ -8595,30 +8595,29 @@ Question: ${q}`,
     // projected income" even though the budget is populated.
     const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
     const fmtM = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
-    // Helper — pull budget numbers out of a raw sheet blob. Matches the
-    // display logic in BudgetView: if a row isn't contracted and isn't
-    // flagged customPrice, fall back to the commodity price list. Otherwise
-    // rows whose price was left blank (because the UI was showing the list
-    // price) come through here as $0 and the whole DSCR reads 0.00.
-    const cropListPrice = (name) => {
-      if (!name) return 0;
+    // Helper — pull budget numbers out of a raw sheet blob. This mirrors the
+    // wizard's own effective-price logic EXACTLY (see budgetCropTotal in the
+    // main render). If the row isn't contracted and isn't a custom-price row,
+    // the commodity price list takes precedence over r.price (matches what
+    // the user sees on-screen). Otherwise r.price is authoritative.
+    const listPriceFor = (name) => {
+      if (!name) return null;
       const needle = String(name).toLowerCase().trim();
       const exact = commodityPrices.find(p => p.name && p.name.toLowerCase().trim() === needle);
-      return exact ? nm(exact.price) : 0;
+      return exact ? nm(exact.price) : null;
     };
     const budgetOf = (p) => {
       const cropInc = (p.budgetCrops||[]).reduce((a,r) => {
-        // Effective price: row-level price first, else commodity list price
-        // (unless the row is marked contracted or has a custom price).
-        const rowPrice = nm(r.price);
-        const listPrice = (r.contracted || r.customPrice) ? 0 : cropListPrice(r.crop);
-        const effectivePrice = rowPrice || listPrice;
+        // Same precedence as the on-screen budget:
+        //   cp?.price ?? r.price   (when NOT contracted/customPrice)
+        //   r.price                (when contracted OR customPrice)
+        const cp = (!r.contracted && !r.customPrice) ? listPriceFor(r.crop) : null;
+        const effectivePrice = (cp != null ? cp : 0) || nm(r.price);
         return a + nm(r.acres) * nm(r.yieldPerAcre) * effectivePrice * (nm(r.share||'100')/100);
       }, 0);
       const livestockInc = (p.budgetLivestock||[]).reduce((a,r) => {
-        const rowPrice = nm(r.price);
-        const listPrice = cropListPrice(r.type);
-        const effectivePrice = rowPrice || listPrice;
+        const cp = listPriceFor(r.type);
+        const effectivePrice = (cp != null ? cp : 0) || nm(r.price);
         return a + nm(r.head) * nm(r.lbs) * effectivePrice;
       }, 0);
       const miscInc      = (p.budgetMisc||[]).reduce((a,r) => a + nm(r.amount), 0);
