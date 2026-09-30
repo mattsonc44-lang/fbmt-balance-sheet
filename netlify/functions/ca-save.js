@@ -97,19 +97,22 @@ export const handler = async (event) => {
     };
 
     // 4. Look up the existing row by (lender_user_id, orig.name, orig.date).
+    //    This matches how the lender's storage.set finds the row on their side.
     const findUrl = SUPABASE_URL + '/rest/v1/balance_sheets'
       + '?user_id=eq.' + encodeURIComponent(lenderUserId)
       + '&client_name=eq.' + encodeURIComponent(orig.name)
-      + '&as_of_date=eq.' + encodeURIComponent(orig.date)
-      + '&select=id&limit=1';
-    const findResp = await fetch(findUrl, {
+      + '&as_of_date=eq.' + orig.date
+      + '&limit=1';
+    const findResp = await fetch(findUrl + '&select=id', {
       headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE },
     });
     const existing = findResp.ok ? await findResp.json().catch(()=>[]) : [];
 
     let writeResp;
     if (Array.isArray(existing) && existing.length > 0) {
-      // Update the existing row — includes rename/date-change support.
+      // Update the existing row — mirror the lender's PATCH exactly (only
+      // updates `data` and `saved_at`, never touches client_name/as_of_date
+      // so no unique-constraint drama).
       writeResp = await fetch(findUrl, {
         method: 'PATCH',
         headers: {
@@ -118,15 +121,12 @@ export const handler = async (event) => {
           'Authorization': 'Bearer ' + SERVICE_ROLE,
           'Prefer': 'return=minimal',
         },
-        body: JSON.stringify({
-          client_name: newClientName,
-          as_of_date: newAsOfDate,
-          data: savePayload,
-          saved_at: nowIso,
-        }),
+        body: JSON.stringify({ data: savePayload, saved_at: nowIso }),
       });
     } else {
-      // No row yet — insert.
+      // No row yet — insert. The CA can't safely rename the client (that
+      // would create a duplicate under the new key), so we use the ORIGINAL
+      // name/date on inserts.
       writeResp = await fetch(SUPABASE_URL + '/rest/v1/balance_sheets', {
         method: 'POST',
         headers: {
@@ -137,8 +137,8 @@ export const handler = async (event) => {
         },
         body: JSON.stringify({
           user_id: lenderUserId,
-          client_name: newClientName,
-          as_of_date: newAsOfDate,
+          client_name: orig.name,
+          as_of_date: orig.date,
           data: savePayload,
           saved_at: nowIso,
         }),
