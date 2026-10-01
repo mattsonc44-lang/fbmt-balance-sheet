@@ -6621,6 +6621,10 @@ export default function BalanceSheet() {
   // that early return violates Rules of Hooks (hook count changes between
   // renders) → white screen when the CA opens a share.
   const [caDirectSaving, setCaDirectSaving] = useState(false);
+  // Machinery/equipment price-check results, keyed by machinery[] index.
+  // Each entry: { status: 'ok'|'high'|'low'|'unknown', low, high, note }
+  const [machPriceCheck, setMachPriceCheck] = useState({});
+  const [machPriceCheckLoading, setMachPriceCheckLoading] = useState(false);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
 
@@ -6852,6 +6856,56 @@ export default function BalanceSheet() {
       (Array.isArray(rows) ? rows : []).forEach(row => { map[row.client_name] = row; });
       setClientNotesMap(map);
     } catch {}
+  };
+
+  // ── Machinery price-check ──────────────────────────────────────────────────
+  // Send the machinery list to Claude and ask it to flag any pieces whose
+  // declared value is outside a reasonable range for the year + make/model.
+  const runMachineryPriceCheck = async () => {
+    const items = (data.machinery||[]).map((r,i) => ({...r, _i: i}))
+      .filter(r => r.year && r.make && numVal(r.value) > 0);
+    if (!items.length) { alert('Add machinery with year, make/model, and value first.'); return; }
+    setMachPriceCheckLoading(true);
+    const prompt =
+`You are an agricultural equipment appraiser. For each piece of farm equipment below, estimate the typical current-market VALUE range (used, retail) for an item in the stated year/make/model/size/condition. Then compare the owner's declared value to that range and flag any that look off.
+
+Return STRICT JSON ONLY (no markdown, no commentary):
+{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence>"}]}
+
+Rules:
+- status "ok": declared value falls within your estimated range
+- status "high": declared value is >15% above the top of your range
+- status "low":  declared value is >15% below the bottom of your range
+- status "unknown": you can't bracket it from year/make/size alone
+- low/high are USD numbers (no commas / no $)
+- note: brief one-sentence rationale — mention the key market reference point you used
+
+Equipment list:
+${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'('+r.condition+')':''} — declared $${numVal(r.value).toLocaleString()}`).join('\n')}`;
+
+    try {
+      const resp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 2000,
+          system: 'You are a conservative, numerate agricultural equipment appraiser. Base estimates on public auction trends, dealer listings, and typical depreciation. When uncertain, mark status "unknown" rather than guessing. Return STRICT JSON.',
+          messages: [{ role:'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) { throw new Error('Server returned ' + resp.status + ': ' + (await resp.text()).slice(0, 200)); }
+      const json = await resp.json();
+      const text = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || '';
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      const byIdx = {};
+      (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
+      setMachPriceCheck(byIdx);
+    } catch (e) {
+      alert('Price check failed: ' + (e.message || e));
+    }
+    setMachPriceCheckLoading(false);
   };
 
   // Build a compact one-row-per-client summary for Q&A. Loads each client's latest
@@ -10449,6 +10503,21 @@ ${extraPages}
       case "machinery": return (
         <div className="step-content">
           <SecHdr icon="⚙" title="Machinery and Equipment Schedule" subtitle="List each piece — total carries to balance sheet automatically" />
+          <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:8,flexWrap:'wrap',alignItems:'center'}}>
+            {Object.keys(machPriceCheck).length > 0 && (
+              <span style={{fontSize:11,color:'#6b7280'}}>
+                ✅ {Object.values(machPriceCheck).filter(x=>x.status==='ok').length} ok ·
+                ⚠ {Object.values(machPriceCheck).filter(x=>x.status==='high'||x.status==='low').length} flagged ·
+                ❓ {Object.values(machPriceCheck).filter(x=>x.status==='unknown').length} unknown
+              </span>
+            )}
+            <button type="button" onClick={runMachineryPriceCheck}
+              disabled={machPriceCheckLoading}
+              title="Ask AI to estimate a reasonable value range for each piece from year + make/model and flag anything that looks out of range."
+              style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:machPriceCheckLoading?'wait':'pointer',fontFamily:'inherit',opacity:machPriceCheckLoading?.7:1}}>
+              {machPriceCheckLoading ? 'Checking…' : '🔍 Check equipment values'}
+            </button>
+          </div>
           <div className="mach-table">
             <div className="mach-header">
               <span style={{width:62}}>Year</span>
@@ -10459,7 +10528,17 @@ ${extraPages}
               <span style={{width:110}}>Value</span>
               <span style={{width:32}}></span>
             </div>
-            {data.machinery.map((r,i) => (
+            {data.machinery.map((r,i) => {
+              const chk = machPriceCheck[i];
+              const flag = chk && (() => {
+                const money = v => '$' + Math.round(Number(v)||0).toLocaleString();
+                if (chk.status === 'ok')     return { bg:'#dcfce7', fg:'#15803d', text:'✓ within range', title:`Est. range ${money(chk.low)}–${money(chk.high)}. ${chk.note||''}` };
+                if (chk.status === 'high')   return { bg:'#fee2e2', fg:'#b91c1c', text:'⚠ above range', title:`Est. range ${money(chk.low)}–${money(chk.high)}. ${chk.note||''}` };
+                if (chk.status === 'low')    return { bg:'#fef3c7', fg:'#92400e', text:'⚠ below range', title:`Est. range ${money(chk.low)}–${money(chk.high)}. ${chk.note||''}` };
+                if (chk.status === 'unknown')return { bg:'#f3f4f6', fg:'#6b7280', text:'? not sure', title: chk.note || 'Not enough info to bracket a range.' };
+                return null;
+              })();
+              return (
               <div key={i} className="mach-row" data-rowkey={`machinery-${i}`}>
                 <div className="mach-col" style={{width:62}}>
                   <input className="text-input" type="text" value={r.year} placeholder="2018" maxLength={4}
@@ -10491,10 +10570,17 @@ ${extraPages}
                     <input type="text" value={r.value} placeholder="0"
                       onChange={e=>setArr("machinery",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
+                  {flag && (
+                    <div title={flag.title}
+                      style={{marginTop:3,background:flag.bg,color:flag.fg,fontSize:10,fontWeight:700,textAlign:'center',padding:'2px 4px',borderRadius:4,cursor:'help',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                      {flag.text}
+                    </div>
+                  )}
                 </div>
                 <button className="remove-btn" onClick={()=>removeRow("machinery",i)}>x</button>
               </div>
-            ))}
+              );
+            })}
           </div>
           <button className="add-btn" onClick={()=>addRow("machinery",{year:"",make:"",size:"",serial:"",condition:"",value:""})}>+ Add Equipment</button>
           <div className="subtotal-row total"><span>Total Machinery and Equipment</span><strong>{fmt(machVal)}</strong></div>
