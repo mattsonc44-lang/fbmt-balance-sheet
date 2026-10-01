@@ -641,8 +641,8 @@ const STEPS = [
   "intro","cash_glacier","cash_other","receivables","federal_payments",
   "livestock_market","farm_products","crop_investment","supplies","other_current",
   "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets",
-  "liab_intro","operating_notes","accounts_due","intermediate_debt","re_current",
-  "taxes_due","other_current_liab","re_mortgages","other_liabilities","summary"
+  "liab_intro","operating_notes","accounts_due","intermediate_debt","re_debt",
+  "taxes_due","other_current_liab","other_liabilities","summary"
 ];
 const STEP_LABELS = {
   intro:"Client Info", cash_glacier:"Glacier Bank", cash_other:"Other Banks",
@@ -652,15 +652,15 @@ const STEP_LABELS = {
   breeding_stock:"Breeding Stock", real_estate:"Real Estate", re_contracts:"RE Contracts",
   vehicles:"Vehicles", machinery:"Machinery", other_assets:"Other Assets",
   liab_intro:"Liabilities", operating_notes:"Operating Notes", accounts_due:"Accounts Due",
-  intermediate_debt:"Term Debt", re_current:"RE Current", taxes_due:"Taxes Due",
-  other_current_liab:"Other Curr. Liab", re_mortgages:"RE Mortgages",
+  intermediate_debt:"Term Debt", re_debt:"Real Estate Debt", taxes_due:"Taxes Due",
+  other_current_liab:"Other Curr. Liab",
   other_liabilities:"Other Liabilities", summary:"Summary"
 };
 const ASSET_STEPS = ["cash_glacier","cash_other","receivables","federal_payments",
   "livestock_market","farm_products","crop_investment","supplies","other_current",
   "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets"];
-const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_current",
-  "taxes_due","other_current_liab","re_mortgages","other_liabilities"];
+const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_debt",
+  "taxes_due","other_current_liab","other_liabilities"];
 
 function emptyData() {
   return {
@@ -682,6 +682,12 @@ function emptyData() {
     accountsDue:[{creditor:"",amount:""}],
     intermediatDebt:[{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:""}],
     reCurrent:[{creditor:"",annualPmt:"",rate:""}],
+    // Unified RE debt entry — one row per mortgage captures annual payment,
+    // principal, rate, terms. Printing automatically shows the annual pmt in
+    // the Current-Portion section and the (principal − annual pmt) in the
+    // Long-Term section. Older sheets with reCurrent/reMortgages continue to
+    // work; totals combine both sources.
+    reDebt:[{lienHolder:"",annualPmt:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false}],
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
     reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
     otherLiabilities:[{description:"",balance:""}],
@@ -8302,11 +8308,16 @@ Question: ${q}`,
   const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
   const intermedLTPortion = data.intermediatDebt.reduce((s,r)=>s+Math.max(0,n(r.principal)-n(r.annualPmt)),0);
   const intermedTotal = intermedCurrentPortion; // alias used in summary display
-  const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0);
+  // Unified reDebt contributes BOTH to current-portion totals (annual pmt)
+  // and long-term totals (principal − annual pmt). Legacy reCurrent + reMortgages
+  // arrays still contribute separately so older sheets keep working.
+  const reDebtCurrentPortion = (data.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+  const reDebtLTPortion     = (data.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal)-n(r.annualPmt)),0);
+  const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0) + reDebtCurrentPortion;
   const taxesDueVal = n(data.taxesDue);
   const otherCLTotal = data.otherCurrentLiab.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
-  const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0);
+  const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0) + reDebtLTPortion;
   const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
   const totalLiabilities = totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal;
   const netWorth = totalAssets - totalLiabilities;
@@ -9809,10 +9820,12 @@ ${blank(d.accountsDue.filter(r=>r.creditor),2).map(r=>`<div class="row"><span>${
 ${blank(d.intermediatDebt.filter(r=>r.creditor),4).map(r=>`<div class="trow"><span class="c1">${r.creditor||""}</span><span class="c2">${r.security||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c4">${pFmt(r.annualPmt)}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
 <div class="sec">Current RE Mortgage Portion:</div>
 ${blank(d.reCurrent.filter(r=>r.creditor),2).map(r=>`<div class="row"><span>${r.creditor||""}</span><span>${pFmt(r.annualPmt)}</span></div>`).join("")}
+${(d.reDebt||[]).filter(r=>r.lienHolder||r.annualPmt||r.principal).map(r=>`<div class="row"><span>${r.lienHolder||""}</span><span>${pFmt(r.annualPmt)}</span></div>`).join("")}
 <div class="row"><span>Income Taxes Due:</span><span>${pFmt(d.taxesDue)}</span></div>
 <div class="subtot"><span>TOTAL CURRENT LIABILITIES:</span><span>${pFmt(totalCurrentLiab)||"$0"}</span></div>
 <div class="sec">RE Mortgages (long-term):</div>
 ${blank(d.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
+${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const lt=Math.max(0,n(r.principal)-n(r.annualPmt));return `<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c5">${pFmt(lt)}</span></div>`;}).join("")}
 <div class="tot"><span>TOTAL LIABILITIES</span><span>${pFmt(totalLiabilities)||"$0"}</span></div>
 <div class="net"><span>WORKING CAPITAL</span><span>${pFmt(workingCapital)||"$0"}</span></div>
 <div class="net"><span>NET WORTH</span><span>${pFmt(netWorth)||"$0"}</span></div>
@@ -10583,35 +10596,56 @@ ${extraPages}
           <div className="subtotal-row"><span>Total Intermediate Debt</span><strong className="red">{fmt(intermedTotal)}</strong></div>
         </div>
       );
-      case "re_current": return (
+      case "re_debt": return (
         <div className="step-content">
-          <SecHdr icon="🏠" title="Current Portion — Real Estate Mortgages" subtitle="Mortgage payments due within the next 12 months" color="#4a0810" />
-          {data.reCurrent.map((r,i) => {
+          <SecHdr icon="🏠" title="Real Estate Debt"
+            subtitle="One row per mortgage. The annual payment auto-flows to current-portion liabilities; the remaining balance (principal − annual pmt) flows to long-term — printed in the correct sections automatically."
+            color="#4a0810" />
+          {(data.reDebt||[]).map((r,i) => {
             const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
             const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            const currentPortion = n(r.annualPmt);
+            const ltPortion = Math.max(0, n(r.principal) - currentPortion);
             return (
-            <div key={i} className="row-entry" data-rowkey={`reCurrent-${i}`}>
+            <div key={i} className="row-entry" data-rowkey={`reDebt-${i}`} style={{alignItems:'flex-end'}}>
               <span className="row-num">{i+1}</span>
-              <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("reCurrent",i,"creditor",v)} placeholder="Mortgage holder" />
-              <Inp label="Annual Payment" prefix="$" value={r.annualPmt} onChange={v=>setArr("reCurrent",i,"annualPmt",v)} />
-              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reCurrent",i,"rate",v)} />
+              <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
+              <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr fixed" />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
+              <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("reDebt",i,"annualPmt",v)} />
+              <Inp label="Principal (total)" prefix="$" value={r.principal} onChange={v=>setArr("reDebt",i,"principal",v)} />
+              <div style={{display:"flex",flexDirection:"column",fontSize:11,color:"#6b7280",minWidth:150,paddingBottom:6}}>
+                <span>Prints as:</span>
+                <span>• Current: <strong style={{color:"#991b1b"}}>{fmt(currentPortion)}</strong></span>
+                <span>• Long-term: <strong style={{color:"#991b1b"}}>{fmt(ltPortion)}</strong></span>
+              </div>
               {linkedCorpNames.length > 0 && (
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130}}>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130,paddingBottom:6}}>
                   <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Paid by</span>
                   <select value={currentPayer}
-                    onChange={e=>{ setArr("reCurrent",i,"corpPaidBy",e.target.value); setArr("reCurrent",i,"corpPaid", !!e.target.value); }}
+                    onChange={e=>{ setArr("reDebt",i,"corpPaidBy",e.target.value); setArr("reDebt",i,"corpPaid", !!e.target.value); }}
                     style={{border:"1px solid #ddd",borderRadius:5,padding:"3px 6px",fontSize:".8rem",fontFamily:"inherit",background:"white",cursor:"pointer",maxWidth:130}}>
                     <option value="">Personal</option>
                     {linkedCorpNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </div>
               )}
-              <button className="remove-btn" onClick={()=>removeRow("reCurrent",i)}>x</button>
+              <button className="remove-btn" onClick={()=>removeRow("reDebt",i)}>x</button>
             </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("reCurrent",{creditor:"",annualPmt:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
-          <div className="subtotal-row"><span>Total Current RE Portion</span><strong className="red">{fmt(reCurrentTotal)}</strong></div>
+          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
+          <div className="subtotal-row">
+            <span>Current-portion total</span><strong className="red">{fmt(reDebtCurrentPortion)}</strong>
+          </div>
+          <div className="subtotal-row">
+            <span>Long-term total</span><strong className="red">{fmt(reDebtLTPortion)}</strong>
+          </div>
+          {(data.reCurrent||[]).some(r=>r.creditor||r.annualPmt) || (data.reMortgages||[]).some(r=>r.lienHolder||r.principal) ? (
+            <div style={{marginTop:14,padding:'10px 14px',background:'#fdf7f7',border:'1px solid #f0dcdf',borderRadius:6,fontSize:12,color:'#7a1a1a'}}>
+              ℹ️ This sheet also has entries in the older separate RE-Current / RE-Mortgages fields — those still count toward totals. New entries should be added here.
+            </div>
+          ) : null}
         </div>
       );
       case "taxes_due": return (
