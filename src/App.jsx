@@ -12663,10 +12663,25 @@ ${extraPages}
                 </strong>
               </div>
             </div>
-            <button className="btn btn-save" onClick={saveSheet}
-              disabled={!data.clientName || saveStatus === "saving"}>
-              {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save"}
-            </button>
+            {caOpenShare ? (
+              <>
+                <button className="btn btn-save" onClick={caDirectSave}
+                  disabled={caDirectSaving}
+                  title="Save straight to the lender's sheet — same button behavior as the balance-sheet tab.">
+                  {caDirectSaving ? 'Saving…' : '💾 Save Budget'}
+                </button>
+                <button className="btn" onClick={submitCaEditFromWizard}
+                  style={{background:'#fbbf24',color:'#1a1a1a',fontSize:'.85rem'}}
+                  title="Send this as a proposed edit for lender review.">
+                  📝 Submit for Review
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-save" onClick={saveSheet}
+                disabled={!data.clientName || saveStatus === "saving"}>
+                {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus && saveStatus !== "error" ? "Error: " + saveStatus.slice(0,60) : "Save"}
+              </button>
+            )}
             <button className="btn btn-secondary" onClick={handlePrintBudget}
               style={{fontSize:".85rem"}}>
               Print Budget
@@ -12683,14 +12698,18 @@ ${extraPages}
                 📝 Expense List
               </button>
             )}
-            <button onClick={()=>generateBudgetShare(true)}
-              style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-              🔗 Share with Customer
-            </button>
-            <button className="btn btn-secondary" onClick={()=>setShowShareBudget(true)}
-              style={{fontSize:".85rem",background:"#1B4332",color:"white",border:"none"}}>
-              📧 Share with Customer
-            </button>
+            {!caOpenShare && (
+              <>
+                <button onClick={()=>generateBudgetShare(true)}
+                  style={{background:"#2d5a8e",color:"white",border:"none",borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
+                  🔗 Share with Customer
+                </button>
+                <button className="btn btn-secondary" onClick={()=>setShowShareBudget(true)}
+                  style={{fontSize:".85rem",background:"#1B4332",color:"white",border:"none"}}>
+                  📧 Share with Customer
+                </button>
+              </>
+            )}
           </div>
           <div className="budget-body">
             <BudgetView
