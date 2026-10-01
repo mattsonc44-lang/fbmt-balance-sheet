@@ -10953,8 +10953,8 @@ ${extraPages}
       <div style={{minHeight:"100vh",background:"#6B0E1E",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
         <div style={{background:"white",borderRadius:14,padding:40,width:"min(400px,100%)",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
           <div style={{textAlign:"center",marginBottom:28}}>
-            <div style={{fontSize:36,marginBottom:8}}>🏦</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:22,color:"#6B0E1E"}}>First Bank of Montana</div>
+            <img src="/fbmt-login-logo.jpg" alt="First Bank of Montana — Division of Glacier Bank"
+              style={{maxWidth:"100%",height:"auto",display:"block",margin:"0 auto 10px"}}/>
             <div style={{fontSize:13,color:"#888",marginTop:4}}>Agricultural Balance Sheet System</div>
           </div>
           {loginError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#991b1b"}}>{loginError}</div>}
