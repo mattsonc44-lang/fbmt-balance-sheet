@@ -10641,11 +10641,88 @@ ${extraPages}
           <div className="subtotal-row">
             <span>Long-term total</span><strong className="red">{fmt(reDebtLTPortion)}</strong>
           </div>
-          {(data.reCurrent||[]).some(r=>r.creditor||r.annualPmt) || (data.reMortgages||[]).some(r=>r.lienHolder||r.principal) ? (
-            <div style={{marginTop:14,padding:'10px 14px',background:'#fdf7f7',border:'1px solid #f0dcdf',borderRadius:6,fontSize:12,color:'#7a1a1a'}}>
-              ℹ️ This sheet also has entries in the older separate RE-Current / RE-Mortgages fields — those still count toward totals. New entries should be added here.
-            </div>
-          ) : null}
+          {(() => {
+            const legacyCur = (data.reCurrent||[]).filter(r => r.creditor || n(r.annualPmt) > 0);
+            const legacyLT  = (data.reMortgages||[]).filter(r => r.lienHolder || n(r.principal) > 0);
+            if (!legacyCur.length && !legacyLT.length) return null;
+            // Build a preview merge — match current-portion rows to LT rows
+            // by creditor/lienHolder name (case-insensitive, trimmed).
+            const buildMerge = () => {
+              const norm = s => String(s||'').trim().toLowerCase();
+              const ltRemaining = [...legacyLT];
+              const merged = [];
+              legacyCur.forEach(c => {
+                const key = norm(c.creditor);
+                const idx = key ? ltRemaining.findIndex(m => norm(m.lienHolder) === key) : -1;
+                const partner = idx >= 0 ? ltRemaining.splice(idx, 1)[0] : null;
+                merged.push({
+                  lienHolder: c.creditor || (partner?.lienHolder || ''),
+                  annualPmt:  c.annualPmt || '',
+                  principal:  partner ? (
+                    // Legacy reMortgages.principal held "beyond-12-mo" portion,
+                    // so the TRUE total principal = legacy LT principal + current pmt.
+                    String(n(partner.principal) + n(c.annualPmt))
+                  ) : '',
+                  rate:       c.rate || partner?.rate || '',
+                  terms:      partner?.terms || '',
+                  corpPaidBy: c.corpPaidBy || partner?.corpPaidBy || '',
+                  corpPaid:   !!(c.corpPaid || partner?.corpPaid || c.corpPaidBy || partner?.corpPaidBy),
+                });
+              });
+              // Any unpaired LT rows → separate reDebt entries (annualPmt = 0)
+              ltRemaining.forEach(m => merged.push({
+                lienHolder: m.lienHolder || '',
+                annualPmt:  '',
+                principal:  m.principal || '',
+                rate:       m.rate || '',
+                terms:      m.terms || '',
+                corpPaidBy: m.corpPaidBy || '',
+                corpPaid:   !!(m.corpPaid || m.corpPaidBy),
+              }));
+              return merged;
+            };
+            const doMigrate = () => {
+              const merged = buildMerge();
+              // Build the preview text so the user can review before confirming.
+              const lines = merged.map((m,i) => {
+                const lt = Math.max(0, n(m.principal) - n(m.annualPmt));
+                return `${i+1}. ${m.lienHolder || '(no name)'} — current ${fmt(n(m.annualPmt))}, LT ${fmt(lt)} (total principal ${fmt(n(m.principal))})`;
+              });
+              const msg = `Combine legacy RE Debt entries into the new unified section?\n\n`
+                + `${legacyCur.length} current-portion row(s) + ${legacyLT.length} long-term row(s) → ${merged.length} unified row(s):\n\n`
+                + lines.join('\n') + '\n\n'
+                + `After migration:\n• The legacy RE-Current + RE-Mortgages arrays will be cleared.\n`
+                + `• Entries that merged into existing reDebt rows WILL preserve those too.\n`
+                + `• Totals will be unchanged (same money, re-expressed as one row per mortgage).\n\n`
+                + `Review each row carefully. Click OK to migrate.`;
+              if (!window.confirm(msg)) return;
+              // Keep any already-populated reDebt rows + append merged. Discard
+              // empty default rows (lienHolder blank AND no amounts).
+              const existingReDebt = (data.reDebt||[]).filter(r => r.lienHolder || n(r.annualPmt) > 0 || n(r.principal) > 0);
+              const nextData = {
+                ...data,
+                reDebt: [...existingReDebt, ...merged],
+                reCurrent: [{creditor:"",annualPmt:"",rate:""}],   // reset to empty default
+                reMortgages: [{lienHolder:"",terms:"",principal:"",rate:""}],
+              };
+              setData(nextData);
+              alert(`Migrated ${merged.length} RE Debt entries. Legacy sections cleared.`);
+            };
+            return (
+              <div style={{marginTop:14,padding:'12px 14px',background:'#fdf7f7',border:'1px solid #f0dcdf',borderRadius:6}}>
+                <div style={{fontSize:12,color:'#7a1a1a',marginBottom:8}}>
+                  ℹ️ This sheet has <strong>{legacyCur.length}</strong> entr{legacyCur.length===1?'y':'ies'} in the legacy RE-Current section and <strong>{legacyLT.length}</strong> in the legacy RE-Mortgages section. They still count toward totals but are stored separately from the new unified entries above.
+                </div>
+                <button type="button" onClick={doMigrate}
+                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                  🔀 Review &amp; merge into unified entries
+                </button>
+                <div style={{fontSize:11,color:'#7a1a1a',marginTop:8}}>
+                  You'll see the merge preview and can cancel. Nothing changes until you confirm. Save the sheet after migrating.
+                </div>
+              </div>
+            );
+          })()}
         </div>
       );
       case "taxes_due": return (
