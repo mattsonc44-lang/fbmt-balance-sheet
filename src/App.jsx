@@ -6381,20 +6381,8 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
         const body = await resp.text();
         throw new Error(`Supabase ${resp.status}: ${body || resp.statusText}`);
       }
-      // Fire-and-forget email to the lender who owns this share.
-      try {
-        await fetch('/.netlify/functions/notify-submission', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            type: 'ca_edit',
-            clientName: openSheet.client_name,
-            shareId: openSheet.id,
-            submittedAt: new Date().toISOString(),
-            lenderEmail: openSheet.lender_email || '',
-            caName: profile?.full_name || session.user.email,
-          }),
-        });
-      } catch {}
+      // In-app only — no email. The lender sees the pending CA edit in
+      // their own pending-reviews banner when they open the app.
       setSubmitMsg('Changes submitted to lender for review.');
       await loadShares();
     } catch(e) { setSubmitMsg('Error: '+e.message); }
@@ -8082,8 +8070,8 @@ Question: ${q}`,
 
   // Find any active CA shares pointing at this sheet_key. For each, refresh
   // the share's sheet_data snapshot (so the CA sees current numbers next open)
-  // and fire a notify-submission email so they know changes landed. Best-effort
-  // — never blocks the save.
+  // and write a change-log row the CA will see as a bullet-point summary.
+  // The CA is alerted purely in-app (portal badge + modal) — no email.
   const notifySharedCAs = async (sheetKey, savedPayload, baseline) => {
     if (!isConfigured() || !session?.user?.id) return;
     try {
@@ -8096,20 +8084,6 @@ Question: ${q}`,
       if (!r.ok) return;
       const shares = await r.json();
       if (!Array.isArray(shares) || !shares.length) return;
-      // Resolve CA emails from profiles for notifications.
-      const caIds = [...new Set(shares.map(s => s.ca_user_id).filter(Boolean))];
-      const emailMap = {};
-      if (caIds.length) {
-        try {
-          const pr = await fetch(
-            SUPABASE_URL + '/rest/v1/profiles?id=in.(' + caIds.join(',') + ')&select=id,email',
-            { headers: supaHeaders() }
-          );
-          const profs = pr.ok ? await pr.json() : [];
-          for (const p of (profs||[])) emailMap[p.id] = p.email;
-        } catch {}
-      }
-      const nowIso = new Date().toISOString();
       // Patch each share row's snapshot so CAs see fresh data on open +
       // write a change-log row the CA can review as a side-by-side diff.
       // IMPORTANT: ca_shares only has these columns we can PATCH — do NOT
@@ -8127,8 +8101,6 @@ Question: ${q}`,
             }
           );
           if (!patchResp.ok) {
-            // Surface this to the console so a silent failure doesn't leave
-            // the CA with stale data without anyone knowing why.
             const txt = await patchResp.text().catch(()=>'');
             console.warn('ca_shares snapshot refresh failed for share', sh.id, patchResp.status, txt.slice(0,300));
           }
@@ -8139,21 +8111,6 @@ Question: ${q}`,
         try {
           await logSheetChange('lender', baseline, savedPayload, sheetKey, {
             share_id: sh.id, ca_user_id: sh.ca_user_id, client_name: sh.client_name,
-          });
-        } catch {}
-        // Email the CA.
-        try {
-          await fetch('/.netlify/functions/notify-submission', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'lender_update',
-              clientName: sh.client_name || savedPayload.clientName || '',
-              shareId: sh.id,
-              submittedAt: nowIso,
-              lenderEmail: emailMap[sh.ca_user_id] || '',  // email target = the CA
-              caName: profile?.full_name || session?.user?.email || 'Lender',
-            }),
           });
         } catch {}
       }
@@ -13948,21 +13905,8 @@ ${extraPages}
         const body = await resp.text();
         throw new Error(`Supabase ${resp.status}: ${body || resp.statusText}`);
       }
-      // Fire-and-forget email to the lender.
-      try {
-        await fetch('/.netlify/functions/notify-submission', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            type:'ca_edit',
-            clientName: caOpenShare.client_name,
-            shareId: caOpenShare.id,
-            submittedAt: new Date().toISOString(),
-            lenderEmail: caOpenShare.lender_email || '',
-            caName: profile?.full_name || session?.user?.email || '',
-          }),
-        });
-      } catch {}
+      // In-app only — no email. The lender sees the "CA edited this sheet"
+      // banner + change-log entry when they open the sheet.
       alert('Changes submitted to lender for review.');
       setCaOpenShare(null); setData(emptyData()); setScreen("home");
     } catch (e) {
@@ -14007,23 +13951,8 @@ ${extraPages}
         try { const j = JSON.parse(errBody); if (j && j.error) msg = j.error; } catch {}
         throw new Error(`Server returned ${resp.status}: ${String(msg).slice(0, 400)}`);
       }
-      // Fire-and-forget: tell the lender the CA saved directly, so they can
-      // see the changes reflected in their own view.
-      try {
-        await fetch('/.netlify/functions/notify-submission', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            type:'ca_edit',
-            clientName: caOpenShare.client_name,
-            shareId: caOpenShare.id,
-            submittedAt: new Date().toISOString(),
-            lenderEmail: caOpenShare.lender_email || '',
-            caName: (profile?.full_name || session?.user?.email || '') + ' (direct save)',
-          }),
-        });
-      } catch {}
-      // Change log — lender sees this as "CA edited — view diff" on open.
+      // In-app only — no email. The change-log row below is what the
+      // lender sees as "CA edited this sheet — view diff" on open.
       try {
         await logSheetChange(
           'ca',
