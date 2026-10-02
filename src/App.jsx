@@ -671,6 +671,7 @@ const ANALYSIS_STEPS = ["collateral"];
 const COLLATERAL_CATEGORIES = [
   { key:'cd',             label:'Certificate of Deposit',     realization:1.00, liqCost:0.00, section:'cash',      source:'cdValue' },
   { key:'govtPmts',       label:'Government Payments',        realization:0.90, liqCost:0.00, section:'cash' },
+  { key:'receivables',    label:'Accounts Receivable',        realization:0.80, liqCost:0.05, section:'cash' },
   { key:'cropsHarvested', label:'Crops — Harvested',          realization:0.85, liqCost:0.10, section:'crops' },
   { key:'cropsUnharvested',label:'Crops — Unharvested',       realization:0.85, liqCost:0.10, section:'crops' },
   { key:'livestockMkt',   label:'Livestock — Market',         realization:0.85, liqCost:0.10, section:'livestock' },
@@ -688,21 +689,30 @@ function deriveCollateral(d) {
   const c = d.collateral || {};
   const ov = c.realizationOverrides || {};
   // ── Book-value lookups ──────────────────────────────────────────────────
+  // Row-level "collateral" flag: default-ON (treat missing/undefined as true
+  // so existing sheets keep behaving as before). A row that is explicitly
+  // flagged collateral:false is EXCLUDED from the collateral totals even
+  // though it still shows on the balance sheet.
+  const isColl = r => r && r.collateral !== false;
+  // Federal payments is a mixed shape (sometimes array, sometimes scalar) —
+  // only filter when it's an array.
+  const govtArr = Array.isArray(d.federalPayments) ? d.federalPayments : null;
   const bookValues = {
     cd:              n(c.cdValue),
-    govtPmts:        Array.isArray(d.federalPayments)
-                       ? d.federalPayments.reduce((s,r) => s + n(r.amount), 0)
+    govtPmts:        govtArr
+                       ? govtArr.filter(isColl).reduce((s,r) => s + n(r.amount), 0)
                        : n(d.federalPayments),
-    cropsHarvested:  (d.farmProducts||[]).reduce((s,r) => s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0),
-    cropsUnharvested:(d.cropInvestment||[]).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
-    livestockMkt:    (d.livestockMarket||[]).reduce((s,r) => s + n(r.value), 0),
-    livestockBreed:  (d.breedingStock||[]).reduce((s,r) => s + n(r.value), 0),
-    farmEquipment:   (d.machinery||[]).reduce((s,r) => s + n(r.value), 0),
-    rollingStock:    (d.vehicles||[]).reduce((s,r) => s + n(r.value), 0),
+    receivables:     (d.receivables||[]).filter(isColl).reduce((s,r) => s + n(r.amount), 0),
+    cropsHarvested:  (d.farmProducts||[]).filter(isColl).reduce((s,r) => s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0),
+    cropsUnharvested:(d.cropInvestment||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
+    livestockMkt:    (d.livestockMarket||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
+    livestockBreed:  (d.breedingStock||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
+    farmEquipment:   (d.machinery||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
+    rollingStock:    (d.vehicles||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
     otherEquipment:  n(c.otherEquipmentValue),
-    landBuildings:   (d.realEstate||[]).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
+    landBuildings:   (d.realEstate||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
     buildings:       n(c.buildingsValue),
-    cash:            n(d.cashGlacier) + (d.cashOther||[]).reduce((s,r) => s + n(r.amount), 0),
+    cash:            n(d.cashGlacier) + (d.cashOther||[]).filter(isColl).reduce((s,r) => s + n(r.amount), 0),
     other:           n(c.otherCollateralValue),
   };
   // ── Per-category gross & net ────────────────────────────────────────────
@@ -8829,12 +8839,32 @@ Question: ${q}`,
   // as-of date (same policy as linked-entity NW resolution above).
   useEffect(() => {
     async function fetchCollateralLinkedData() {
-      if (profile?.role === 'ca' || caOpenShare) { setCollateralLinkedData([]); return; }
       const entities = normalizeLinked(data.linkedEntities);
       if (!entities.length) { setCollateralLinkedData([]); return; }
       setCollateralLinkedLoading(true);
       const results = [];
       const anchor = data.asOfDate || '';
+
+      // CA path — no access to the lender's storage. Use the baked-in
+      // linkedEntitySnapshots the lender packs into the share payload.
+      const isCA = profile?.role === 'ca' || caOpenShare;
+      if (isCA) {
+        const snaps = data.linkedEntitySnapshots || {};
+        for (const {name, ownership} of entities) {
+          const snap = snaps[name];
+          if (snap && snap.data) {
+            results.push({
+              name, ownership: Number(ownership)||100,
+              sheet: snap.data, asOfDate: snap.asOfDate || snap.data.asOfDate,
+            });
+          }
+        }
+        setCollateralLinkedData(results);
+        setCollateralLinkedLoading(false);
+        return;
+      }
+
+      // Lender path — live scan of local storage, date-anchored.
       for (const {name, date, ownership} of entities) {
         try {
           const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
@@ -8860,7 +8890,7 @@ Question: ${q}`,
       setCollateralLinkedLoading(false);
     }
     fetchCollateralLinkedData();
-  }, [JSON.stringify(data.linkedEntities), data.asOfDate, savedSheets.length]);
+  }, [JSON.stringify(data.linkedEntities), data.asOfDate, savedSheets.length, caOpenShare?.id]);
 
 
   // Comparison groups sheets by FOLDER (using the already-loaded savedSheets metadata)
@@ -10629,6 +10659,19 @@ ${extraPages}
   // ── Step Renderer ──────────────────────────────────────────────────────────
   function renderStep() {
     const CONDITIONS = ["— Select —","Cropland","Irrigated Cropland","Pasture / Rangeland","CRP","Timber","Home / Farmstead","Commercial","Vacant Lot","Other"];
+    // Reusable per-row collateral checkbox — defaults to ON (treat missing
+    // flag as pledged). Unchecking excludes this row from the Collateral
+    // worksheet without removing it from the balance sheet itself.
+    const CollChk = ({field, i, r}) => (
+      <label title="Pledged as collateral — uncheck to exclude from the Collateral worksheet"
+        style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:10,color:'#6b7280',marginRight:4,userSelect:'none',whiteSpace:'nowrap'}}
+        onClick={e=>e.stopPropagation()}>
+        <input type="checkbox" tabIndex={-1} checked={r.collateral !== false}
+          onChange={e=>setArr(field,i,"collateral",e.target.checked)}
+          style={{margin:0}} />
+        Coll
+      </label>
+    );
     switch (currentStepId) {
       case "intro": return (
         <div className="step-content">
@@ -10674,6 +10717,7 @@ ${extraPages}
               <span className="row-num">{i+1}</span>
               <TxtInp label="Description" value={r.description} onChange={v=>setArr("receivables",i,"description",v)} placeholder="Who owes / for what" />
               <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("receivables",i,"amount",v)} />
+              <CollChk field="receivables" i={i} r={r} />
               <button className="remove-btn" onClick={()=>removeRow("receivables",i)}>x</button>
             </div>
           ))}
@@ -10693,6 +10737,7 @@ ${extraPages}
                 placeholder="e.g., FSA ARC-CO, CRP, CFAP, PLC" />
               <Inp label="Amount" prefix="$" value={r.amount}
                 onChange={v=>setArr("federalPayments",i,"amount",v)} />
+              <CollChk field="federalPayments" i={i} r={r} />
               <button className="remove-btn"
                 onClick={()=>removeRow("federalPayments",i)}>x</button>
             </div>
@@ -10716,6 +10761,7 @@ ${extraPages}
               <TxtInp label="Number" value={r.number} onChange={v=>setArr("livestockMarket",i,"number",v)} placeholder="# head" />
               <TxtInp label="Kind and Weight" value={r.kind} onChange={v=>setArr("livestockMarket",i,"kind",v)} placeholder="e.g., 450 lb steers" />
               <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("livestockMarket",i,"value",v)} />
+              <CollChk field="livestockMarket" i={i} r={r} />
               <button className="remove-btn" onClick={()=>removeRow("livestockMarket",i)}>x</button>
             </div>
           ))}
@@ -10783,6 +10829,7 @@ ${extraPages}
                   </label>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
+                <CollChk field="farmProducts" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("farmProducts",i)}>x</button>
               </div>
             );
@@ -10826,6 +10873,7 @@ ${extraPages}
                   </div>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
+                <CollChk field="cropInvestment" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("cropInvestment",i)}>x</button>
               </div>
             );
@@ -10876,6 +10924,7 @@ ${extraPages}
               <TxtInp label="Number" value={r.number} onChange={v=>setArr("breedingStock",i,"number",v)} placeholder="# head" />
               <TxtInp label="Kind" value={r.kind} onChange={v=>setArr("breedingStock",i,"kind",v)} placeholder="e.g., Angus cows" />
               <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("breedingStock",i,"value",v)} />
+              <CollChk field="breedingStock" i={i} r={r} />
               <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
             </div>
           ))}
@@ -10924,6 +10973,7 @@ ${extraPages}
                   </div>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
+                <CollChk field="realEstate" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("realEstate",i)}>x</button>
               </div>
             );
@@ -10988,6 +11038,7 @@ ${extraPages}
                       onChange={e=>setArr("vehicles",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
+                <CollChk field="vehicles" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("vehicles",i)}>x</button>
               </div>
             ))}
@@ -11079,6 +11130,7 @@ ${extraPages}
                     <span style={{fontSize:11,color:'#9ca3af'}}>—</span>
                   )}
                 </div>
+                <CollChk field="machinery" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("machinery",i)}>x</button>
               </div>
               {chk && (chk.status === 'high' || chk.status === 'low' || chk.status === 'ok' || chk.status === 'unknown') && (
@@ -11491,8 +11543,9 @@ ${extraPages}
                 const displayPct = override !== undefined && override !== '' ? override : Math.round(cat.realization * 100);
                 const isManual = !!cat.source;
                 const SOURCE_HINTS = {
-                  govtPmts:        'from Federal Payments',
-                  cropsHarvested:  'from Farm Products on Hand (qty × price × share%)',
+                  govtPmts:        'from Federal Payments (collateral-flagged rows)',
+                  receivables:     'from Receivables (collateral-flagged rows)',
+                  cropsHarvested:  'from Farm Products on Hand (qty × price × share%, collateral-flagged rows)',
                   cropsUnharvested:'from Crop Investment (acres × $/ac)',
                   livestockMkt:    'from Market Livestock',
                   livestockBreed:  'from Breeding Stock',
