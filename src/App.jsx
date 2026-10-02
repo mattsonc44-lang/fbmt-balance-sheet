@@ -661,6 +661,7 @@ const ASSET_STEPS = ["cash_glacier","cash_other","receivables","federal_payments
   "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets"];
 const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_debt",
   "taxes_due","other_current_liab","other_liabilities"];
+const ANALYSIS_STEPS = ["collateral"];
 
 // ── Collateral valuation defaults ──────────────────────────────────────────
 // Per-category realization % + liquidation cost % per the FBMT Agricultural
@@ -13163,6 +13164,14 @@ ${extraPages}
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Liabilities</div>
                 {["liab_intro",...LIAB_STEPS].map(s => {
+                  const idx = STEPS.indexOf(s);
+                  const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
+                  return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
+                })}
+              </div>
+              <div className="sidebar-section">
+                <div className="sidebar-section-label">Analysis</div>
+                {ANALYSIS_STEPS.map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
