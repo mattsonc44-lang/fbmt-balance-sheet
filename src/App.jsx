@@ -6167,6 +6167,98 @@ function AdminScreen({ session, profile, onSignOut, onClose }) {
 }
 
 // ─── CAPortal ─────────────────────────────────────────────────────────────────
+// Short, human-readable summary of what changed between two sheet payloads.
+// Returns an array of bullet-point strings. Compares headline balance-sheet
+// totals + array row counts + a handful of scalar fields. Keeps it readable
+// — this feeds the CA's "lender edited this sheet" alert, not a formal diff.
+function summarizeSheetChanges(baseline, next) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+  const sign = d => d >= 0 ? '+' : '−';
+  const bullets = [];
+  if (!baseline || typeof baseline !== 'object') baseline = {};
+  if (!next || typeof next !== 'object') return bullets;
+  // Inline headline totals so this helper doesn't depend on the main component's sheetTotals.
+  const quickTotals = (d) => {
+    const sumArr = (arr, k) => (Array.isArray(arr)?arr:[]).reduce((s,r) => s + n(r[k]), 0);
+    const sumArrMul = (arr, a, b, m=1) => (Array.isArray(arr)?arr:[]).reduce((s,r) => s + n(r[a])*n(r[b])*m, 0);
+    const cash = n(d.cashGlacier) + sumArr(d.cashOther, 'amount');
+    const rec = sumArr(d.receivables, 'amount');
+    const fed = Array.isArray(d.federalPayments) ? sumArr(d.federalPayments, 'amount') : n(d.federalPayments);
+    const ls  = sumArr(d.livestockMarket, 'value');
+    const fp  = (Array.isArray(d.farmProducts)?d.farmProducts:[]).reduce((s,r)=>s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0);
+    const ci  = (Array.isArray(d.cropInvestment)?d.cropInvestment:[]).reduce((s,r)=>s + n(r.acres)*n(r.valuePerAcre), 0);
+    const sup = sumArr(d.supplies, 'value');
+    const oc  = sumArr(d.otherCurrent, 'amount');
+    const tc  = cash+rec+fed+ls+fp+ci+sup+oc;
+    const bs  = sumArr(d.breedingStock, 'value');
+    const re  = (Array.isArray(d.realEstate)?d.realEstate:[]).reduce((s,r)=>s + n(r.acres)*n(r.valuePerAcre), 0);
+    const veh = sumArr(d.vehicles, 'value');
+    const mch = sumArr(d.machinery, 'value');
+    const oa  = sumArr(d.otherAssets, 'amount');
+    const tlt = bs+re+veh+mch+oa;
+    const ta  = tc+tlt;
+    const on  = sumArr(d.operatingNotes, 'balance');
+    const ad  = sumArr(d.accountsDue, 'amount');
+    const idp = sumArr(d.intermediatDebt, 'annualPmt');
+    const idLT= sumArr(d.intermediatDebt, 'principal') - idp;
+    const rc  = sumArr(d.reCurrent, 'annualPmt') + sumArr(d.reDebt, 'annualPmt');
+    const tx  = n(d.taxesDue);
+    const ocl = sumArr(d.otherCurrentLiab, 'amount');
+    const tcl = on+ad+idp+rc+tx+ocl;
+    const rm  = sumArr(d.reMortgages, 'principal') + Math.max(0, sumArr(d.reDebt, 'principal') - sumArr(d.reDebt, 'annualPmt'));
+    const ol  = sumArr(d.otherLiabilities, 'balance');
+    const tl  = tcl+idLT+rm+ol;
+    return { 'TOTAL ASSETS':ta,'TOTAL LIABILITIES':tl,'NET WORTH':ta-tl,'WORKING CAPITAL':tc-tcl };
+  };
+  try {
+    const a = quickTotals(baseline);
+    const b = quickTotals(next);
+    ['TOTAL ASSETS','TOTAL LIABILITIES','NET WORTH','WORKING CAPITAL'].forEach(k => {
+      const d = (b[k] || 0) - (a[k] || 0);
+      if (Math.abs(d) >= 1) bullets.push(`${k}: ${money(a[k]||0)} → ${money(b[k]||0)} (${sign(d)}${money(Math.abs(d))})`);
+    });
+  } catch {}
+  // Row-count deltas across every array field present on either side.
+  const arrFields = new Set();
+  Object.keys(baseline).forEach(k => { if (Array.isArray(baseline[k])) arrFields.add(k); });
+  Object.keys(next).forEach(k    => { if (Array.isArray(next[k]))     arrFields.add(k); });
+  const PRETTY = {
+    cashOther:'cash accounts', receivables:'receivables', federalPayments:'federal payments',
+    livestockMarket:'market livestock', farmProducts:'farm products', cropInvestment:'growing crops',
+    supplies:'supplies', otherCurrent:'other current assets',
+    breedingStock:'breeding stock', realEstate:'real estate tracts', reContracts:'RE contracts',
+    vehicles:'vehicles', machinery:'machinery', otherAssets:'other assets',
+    operatingNotes:'operating notes', accountsDue:'accounts due',
+    intermediatDebt:'intermediate debt', reCurrent:'RE current debt',
+    reDebt:'RE debt', reMortgages:'RE mortgages', otherLiabilities:'other liabilities',
+    otherCurrentLiab:'other current liab', budgetCrops:'budget crops',
+    budgetLivestock:'budget livestock', budgetExpenses:'budget expenses',
+    budgetMisc:'budget misc income',
+  };
+  arrFields.forEach(k => {
+    if (!PRETTY[k]) return;
+    const a = (baseline[k]||[]).length;
+    const b = (next[k]||[]).length;
+    if (a !== b) bullets.push(`${PRETTY[k]}: ${a} row${a===1?'':'s'} → ${b} row${b===1?'':'s'}`);
+  });
+  // Scalar fields worth flagging.
+  const SCALARS = { clientName:'Client name', asOfDate:'As-of date', cashGlacier:'Cash on hand (Glacier)', taxesDue:'Income taxes due' };
+  Object.entries(SCALARS).forEach(([k,label]) => {
+    const a = baseline[k] ?? '';
+    const b = next[k] ?? '';
+    if (String(a) !== String(b)) {
+      // Format money for the known-money fields.
+      if (k === 'cashGlacier' || k === 'taxesDue') {
+        bullets.push(`${label}: ${money(n(a))} → ${money(n(b))}`);
+      } else {
+        bullets.push(`${label}: ${a || '—'} → ${b || '—'}`);
+      }
+    }
+  });
+  return bullets;
+}
+
 function CAPortal({ session, profile, onSignOut, onOpen }) {
   const [shares, setShares] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -6175,6 +6267,20 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
   const [submitting, setSubmitting] = React.useState(false);
   const [submitMsg, setSubmitMsg] = React.useState('');
   const [caEdits, setCaEdits] = React.useState({}); // shareId -> pending edit
+  // shareId -> array of unseen lender change_log rows (newest first).
+  // Compared against localStorage per-share last-seen timestamps.
+  const [lenderUpdates, setLenderUpdates] = React.useState({});
+  // Currently open lender-update summary modal — { share, changes }.
+  const [updateModal, setUpdateModal] = React.useState(null);
+
+  const SEEN_KEY = 'fbmt_ca_seen_lender_updates';
+  const getSeen = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY)||'{}'); } catch { return {}; } };
+  const markSeen = (shareId, iso) => {
+    const seen = getSeen();
+    seen[shareId] = iso || new Date().toISOString();
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch {}
+    setLenderUpdates(prev => ({...prev, [shareId]: []}));
+  };
 
   const hdr = { 'Content-Type':'application/json','apikey':window.SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token };
 
@@ -6190,9 +6296,43 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
         const editMap = {};
         (edits||[]).forEach(e => { editMap[e.share_id] = e; });
         setCaEdits(editMap);
+        // Lender-authored change_log rows per share. We ask for everything
+        // on these shares and filter to _direction='lender' + unseen on the
+        // client (Supabase REST can't query JSONB nested keys easily).
+        try {
+          const ids = data.map(s => s.id).filter(Boolean);
+          if (ids.length) {
+            const url = window.SUPABASE_URL + '/rest/v1/ca_edits'
+              + '?status=eq.change_log'
+              + '&share_id=in.(' + ids.join(',') + ')'
+              + '&order=submitted_at.desc'
+              + '&select=*';
+            const lr = await fetch(url, {headers:hdr});
+            const rows = lr.ok ? await lr.json() : [];
+            const seen = getSeen();
+            const byShare = {};
+            (rows||[]).forEach(row => {
+              if ((row.edited_data?._direction || '') !== 'lender') return;
+              const stamp = row.submitted_at || row.edited_data?._changedAt || '';
+              const lastSeen = seen[row.share_id] || '1970-01-01';
+              if (stamp && stamp > lastSeen) {
+                (byShare[row.share_id] = byShare[row.share_id] || []).push(row);
+              }
+            });
+            setLenderUpdates(byShare);
+          }
+        } catch {}
       }
     } catch {}
     setLoading(false);
+  };
+
+  // Build the summary bullets for a specific unseen row.
+  const openUpdateSummary = (share, row) => {
+    const baseline = row.edited_data?._baseline || {};
+    const next = row.edited_data || {};
+    const bullets = summarizeSheetChanges(baseline, next);
+    setUpdateModal({ share, row, bullets });
   };
   React.useEffect(()=>{ loadShares(); },[]);
 
@@ -6312,16 +6452,34 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
                 {lenderShares.map(share => (
-                  <div key={share.id} style={{background:'white',borderRadius:10,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'0 1px 4px rgba(0,0,0,.08)',border:'1px solid #e5e7eb'}}>
+                  <div key={share.id} style={{background:'white',borderRadius:10,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'0 1px 4px rgba(0,0,0,.08)',border:(lenderUpdates[share.id]&&lenderUpdates[share.id].length)?'1.5px solid #1d4ed8':'1px solid #e5e7eb'}}>
                     <div style={{fontSize:24}}>📋</div>
                     <div style={{flex:1}}>
                       <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a'}}>{share.client_name}</div>
                       <div style={{fontSize:12,color:'#888',marginTop:2}}>
                         Shared {new Date(share.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
                         {caEdits[share.id] && <span style={{marginLeft:8,background:'#fef3c7',color:'#92400e',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>Changes Pending Review</span>}
+                        {lenderUpdates[share.id] && lenderUpdates[share.id].length > 0 && (
+                          <span style={{marginLeft:8,background:'#dbeafe',color:'#1e40af',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>
+                            🔔 {lenderUpdates[share.id].length} new update{lenderUpdates[share.id].length===1?'':'s'} from lender
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <button onClick={()=> onOpen ? onOpen(share) : openForEdit(share)}
+                    {lenderUpdates[share.id] && lenderUpdates[share.id].length > 0 && (
+                      <button onClick={()=>openUpdateSummary(share, lenderUpdates[share.id][0])}
+                        title="See a bullet-point summary of what the lender changed"
+                        style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:7,padding:'7px 14px',fontWeight:700,fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>
+                        View summary
+                      </button>
+                    )}
+                    <button onClick={()=>{
+                      // Clear the badge the moment the CA opens the sheet —
+                      // opening equals "seen", and the in-sheet banner already
+                      // shows a persistent View diff / Reload latest control.
+                      if (lenderUpdates[share.id] && lenderUpdates[share.id].length) markSeen(share.id);
+                      return onOpen ? onOpen(share) : openForEdit(share);
+                    }}
                       style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'7px 16px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
                       Open
                     </button>
@@ -6336,6 +6494,63 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
           ))
         )}
       </div>
+
+      {/* Lender-update summary modal — shows a bullet-point diff of what the
+          lender changed on the most recent save. Clicking "Open sheet" or
+          "Dismiss" marks the update seen (localStorage) and clears the badge.
+          The in-sheet "⬇ Reload latest" button is where the CA actually
+          pulls the new numbers into their editor. */}
+      {updateModal && (
+        <div onClick={()=>setUpdateModal(null)}
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100,padding:16}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:'white',borderRadius:12,maxWidth:520,width:'100%',padding:'20px 22px',boxShadow:'0 10px 40px rgba(0,0,0,.2)'}}>
+            <div style={{fontSize:18,fontWeight:800,color:'#1e40af',marginBottom:4}}>
+              🔄 Lender updated this sheet
+            </div>
+            <div style={{fontSize:13,color:'#374151',marginBottom:14}}>
+              <strong>{updateModal.row.edited_data?._changedByName || 'Lender'}</strong> saved changes to{' '}
+              <strong>{updateModal.share.client_name}</strong> on{' '}
+              {new Date(updateModal.row.submitted_at || updateModal.row.edited_data?._changedAt || Date.now()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}
+            </div>
+            {updateModal.bullets.length === 0 ? (
+              <div style={{fontSize:13,color:'#6b7280',padding:'10px 12px',background:'#f9fafb',borderRadius:6,fontStyle:'italic'}}>
+                No notable differences detected at the headline level — the lender may have adjusted internal fields or notes. Open the sheet and use "View diff" for the full side-by-side.
+              </div>
+            ) : (
+              <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'10px 14px',marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:'#1e40af',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>Summary of changes</div>
+                <ul style={{margin:0,paddingLeft:18,fontSize:13,color:'#1a1a1a',lineHeight:1.65}}>
+                  {updateModal.bullets.map((b,i) => <li key={i}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+            {lenderUpdates[updateModal.share.id] && lenderUpdates[updateModal.share.id].length > 1 && (
+              <div style={{fontSize:11,color:'#6b7280',marginBottom:10}}>
+                + {lenderUpdates[updateModal.share.id].length - 1} earlier update{lenderUpdates[updateModal.share.id].length-1===1?'':'s'} not shown — open the sheet to review each with "View diff".
+              </div>
+            )}
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:10}}>
+              <button onClick={()=>{
+                markSeen(updateModal.share.id);
+                setUpdateModal(null);
+              }}
+                style={{background:'white',border:'1px solid #d1d5db',color:'#374151',borderRadius:7,padding:'7px 14px',fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                Dismiss
+              </button>
+              <button onClick={()=>{
+                const share = updateModal.share;
+                markSeen(share.id);
+                setUpdateModal(null);
+                return onOpen ? onOpen(share) : openForEdit(share);
+              }}
+                style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:7,padding:'7px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                Open sheet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
