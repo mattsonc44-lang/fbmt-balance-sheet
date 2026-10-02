@@ -821,50 +821,20 @@ function deriveCollateral(d) {
   const totalGrossRecap   = recap.reduce((s,r) => s + r.net, 0);
   const totalLiqCost      = recap.reduce((s,r) => s + r.costDollars, 0);
   const totalNetProceeds  = recap.reduce((s,r) => s + r.netProceeds, 0);
-  // ── Loan balances for coverage ──────────────────────────────────────────
-  // Three independent debt buckets, each secured by its own slice of the
-  // collateral pool:
-  //   Operating  — operating line of credit, secured by current-asset
-  //                collateral (crops, livestock, cash equivalents, other).
-  //   Equipment  — intermediate / term debt against machinery + rolling
-  //                stock, secured by the Equipment section.
-  //   Real estate— long-term mortgages, secured by the Real Estate section.
-  // Each has an override; blank → auto-derive from the matching debt arrays.
-  const autoOperatingLoan = (d.operatingNotes||[]).reduce((s,r) => s + n(r.balance), 0);
-  const autoEquipmentLoan = (d.intermediatDebt||[]).reduce((s,r) => s + n(r.principal), 0);
-  const autoReLoan        = (d.reDebt||[]).reduce((s,r) => s + n(r.principal), 0)
-                          + (d.reMortgages||[]).reduce((s,r) => s + n(r.principal), 0);
-  const pick = (ov, auto) => (ov !== undefined && ov !== '') ? n(ov) : auto;
-  const operatingLoan     = pick(c.operatingLoanOverride, autoOperatingLoan);
-  const equipmentLoan     = pick(c.equipmentLoanOverride, autoEquipmentLoan);
-  const reLoan            = pick(c.reLoanOverride,        autoReLoan);
-  // Back-compat: older sheets may only have a single `loanBalanceOverride`
-  // (the one lump field). If any of the three new fields is populated, we
-  // use them; otherwise fall back to the legacy field as the operating-bucket
-  // override so existing sheets keep producing their old numbers.
-  const anyNewOverride = [c.operatingLoanOverride, c.equipmentLoanOverride, c.reLoanOverride]
-                          .some(x => x !== undefined && x !== '');
-  const legacyLoanBalance = !anyNewOverride && c.loanBalanceOverride !== undefined && c.loanBalanceOverride !== ''
-                              ? n(c.loanBalanceOverride) : null;
-  const effectiveOperatingLoan = legacyLoanBalance != null ? legacyLoanBalance : operatingLoan;
-  // Proceeds buckets (recap rows summed into the matching debt bucket).
-  const findRecap = (lbl) => (recap.find(r => r.label === lbl) || {}).netProceeds || 0;
-  const operatingProceeds = findRecap('Crops') + findRecap('Livestock') + findRecap('Cash') + findRecap('Other');
-  const equipmentProceeds = findRecap('Equipment');
-  const reProceeds        = findRecap('Real Estate');
-  const buckets = [
-    { key:'operating', label:'Operating LOC',  proceeds:operatingProceeds, loan:effectiveOperatingLoan, autoLoan:autoOperatingLoan, overrideKey:'operatingLoanOverride', secures:'Crops + Livestock + Cash + Other' },
-    { key:'equipment', label:'Equipment Debt', proceeds:equipmentProceeds, loan:equipmentLoan,          autoLoan:autoEquipmentLoan, overrideKey:'equipmentLoanOverride', secures:'Equipment net' },
-    { key:'realEstate',label:'Real Estate Debt',proceeds:reProceeds,       loan:reLoan,                 autoLoan:autoReLoan,        overrideKey:'reLoanOverride',        secures:'Real Estate net' },
-  ].map(b => ({
-    ...b,
-    cushion: b.proceeds - b.loan,
-    coveragePct: b.loan > 0 ? (b.proceeds / b.loan) * 100 : null,
-  }));
-  // Overall cushion = sum of bucket cushions (equivalently total proceeds − total debt).
-  const totalLoanBalance  = buckets.reduce((s,b) => s + b.loan, 0);
-  const cushion           = totalNetProceeds - totalLoanBalance;
-  const coveragePct       = totalLoanBalance > 0 ? (totalNetProceeds / totalLoanBalance) * 100 : null;
+  // ── Loan balance for coverage ───────────────────────────────────────────
+  // Single "Gross Loan Balance (current OTL)" field with per-mode overrides
+  // — current and pro-forma each have their own stored value so switching
+  // the mode toggle doesn't bleed one scenario's loan balance into the other.
+  // Auto-fallback for both modes is the sum of operatingNotes balances.
+  const autoLoanBalance   = (d.operatingNotes||[]).reduce((s,r) => s + n(r.balance), 0);
+  // When d._collateralMode === 'proforma', use loanBalanceOverrideProforma;
+  // otherwise use loanBalanceOverride (back-compat with pre-split sheets).
+  const isProformaScope   = d._collateralMode === 'proforma';
+  const activeOverride    = isProformaScope ? c.loanBalanceOverrideProforma : c.loanBalanceOverride;
+  const loanBalance       = activeOverride !== undefined && activeOverride !== ''
+                              ? n(activeOverride) : autoLoanBalance;
+  const cushion           = totalNetProceeds - loanBalance;
+  const coveragePct       = loanBalance > 0 ? (totalNetProceeds / loanBalance) * 100 : null;
   return {
     categories, bookValues,
     sections: {
@@ -874,9 +844,8 @@ function deriveCollateral(d) {
       other: otherSection,
     },
     recap, totalGrossRecap, totalLiqCost, totalNetProceeds,
-    buckets, totalLoanBalance, cushion, coveragePct,
-    // Legacy aliases so older callers (if any) keep working.
-    autoLoanBalance: autoOperatingLoan, loanBalance: totalLoanBalance,
+    autoLoanBalance, loanBalance, cushion, coveragePct,
+    isProformaScope,
   };
 }
 
@@ -918,14 +887,11 @@ function emptyData() {
       // Superior encumbrances (senior liens) that reduce category net value.
       equipmentSuperiorEnc: "",
       reSuperiorEnc: "",
-      // Legacy single-bucket loan override — kept for sheets saved before
-      // the per-bucket model landed; migrates to operatingLoanOverride.
-      loanBalanceOverride: "",
-      // Per-bucket loan overrides. Blank → auto-derive from the matching
-      // debt arrays (operatingNotes, intermediatDebt, reDebt+reMortgages).
-      operatingLoanOverride: "",
-      equipmentLoanOverride: "",
-      reLoanOverride: "",
+      // Loan balance for the coverage calc. Independent per mode so the
+      // current scenario and the pro-forma scenario can carry different
+      // OTL figures. Blank → auto = sum of operating notes.
+      loanBalanceOverride: "",            // Current mode
+      loanBalanceOverrideProforma: "",    // Pro-forma mode
       // Manual entries (not derived from the balance sheet).
       cdValue: "",
       otherEquipmentValue: "",
@@ -10982,7 +10948,7 @@ ${extraPages}
         }
         sheetForPrint = merged;
       }
-      const col = deriveCollateral(sheetForPrint);
+      const col = deriveCollateral({ ...sheetForPrint, _collateralMode: collateralMode });
       const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
       const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       const catRow = (c) => `<tr>
@@ -11077,37 +11043,15 @@ ${extraPages}
   </table>
   <div style="padding:6pt 8pt;background:#fafafa;border-top:1pt solid #6B0E1E">
     <div style="display:flex;justify-content:space-between;font-size:8pt;padding:2pt 0"><span>Total Net Liquidation Proceeds</span><strong style="color:#1a5c25">${money(col.totalNetProceeds)}</strong></div>
+    <div style="display:flex;justify-content:space-between;font-size:8pt;padding:2pt 0"><span>Less: Gross Loan Balance (current OTL)</span><strong style="color:#7a1a1a">${money(col.loanBalance)}</strong></div>
   </div>
-  <table style="width:100%;border-collapse:collapse;margin-top:4pt;font-size:7.5pt">
-    <thead><tr style="background:#f5e8ea;color:#4a0810">
-      <th style="text-align:left;padding:3pt 6pt">Debt Bucket</th>
-      <th style="text-align:left;padding:3pt 6pt;font-weight:400">Secured by</th>
-      <th style="text-align:right;padding:3pt 6pt">Proceeds</th>
-      <th style="text-align:right;padding:3pt 6pt">Loan Bal.</th>
-      <th style="text-align:right;padding:3pt 6pt">Cushion</th>
-      <th style="text-align:right;padding:3pt 6pt">Cov. %</th>
-    </tr></thead>
-    <tbody>
-      ${col.buckets.map(b => `<tr>
-        <td style="padding:2pt 6pt">${b.label}</td>
-        <td style="padding:2pt 6pt;color:#6b7280;font-size:6.5pt">${b.secures}</td>
-        <td style="padding:2pt 6pt;text-align:right;color:#1a5c25">${money(b.proceeds)}</td>
-        <td style="padding:2pt 6pt;text-align:right;color:#7a1a1a">${money(b.loan)}</td>
-        <td style="padding:2pt 6pt;text-align:right;color:${b.cushion>=0?'#15803d':'#991b1b'};font-weight:600">${money(b.cushion)}</td>
-        <td style="padding:2pt 6pt;text-align:right;color:${b.coveragePct==null?'#6b7280':b.coveragePct>=125?'#15803d':b.coveragePct>=100?'#92400e':'#991b1b'};font-weight:600">${b.coveragePct==null?'n/a':b.coveragePct.toFixed(0)+'%'}</td>
-      </tr>`).join('')}
-      <tr style="border-top:1pt solid #d4a5ac;background:#fdf7f7;font-weight:700">
-        <td style="padding:3pt 6pt" colspan="2">Totals</td>
-        <td style="padding:3pt 6pt;text-align:right">${money(col.totalNetProceeds)}</td>
-        <td style="padding:3pt 6pt;text-align:right;color:#7a1a1a">${money(col.totalLoanBalance)}</td>
-        <td style="padding:3pt 6pt;text-align:right;color:${col.cushion>=0?'#15803d':'#991b1b'}">${money(col.cushion)}</td>
-        <td style="padding:3pt 6pt;text-align:right;color:${col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}">${col.coveragePct==null?'n/a':col.coveragePct.toFixed(0)+'%'}</td>
-      </tr>
-    </tbody>
-  </table>
   <div class="cush ${col.cushion<0?'neg':''}">
-    <span>${col.cushion >= 0 ? 'Net Collateral Cushion (All Buckets)' : 'Net Collateral LOSS (All Buckets)'}</span>
+    <span>${col.cushion >= 0 ? 'Net Collateral Cushion' : 'Net Collateral LOSS'}</span>
     <span>${money(col.cushion)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:4pt 8pt;font-size:8pt;background:#fff">
+    <span>Collateral Coverage %</span>
+    <strong style="color:${col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}">${col.coveragePct===null?'n/a':col.coveragePct.toFixed(0)+'%'}</strong>
   </div>
 </div>
 
@@ -12110,7 +12054,9 @@ ${extraPages}
           return merged;
         };
         const mergedData = buildMergedData();
-        const col = deriveCollateral(mergedData);
+        // Tag the merged dataset with the active mode so deriveCollateral picks
+        // the right loan-balance override (current vs pro-forma — independent).
+        const col = deriveCollateral({ ...mergedData, _collateralMode: collateralMode });
         const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
         const setColField = (key, value) => set("collateral", {...(data.collateral||{}), [key]: value});
         const setOverride = (catKey, value) => {
@@ -12307,58 +12253,42 @@ ${extraPages}
                 <div style={{textAlign:'right',color:'#1a5c25'}}>{money(col.totalNetProceeds)}</div>
               </div>
               <div style={{padding:'14px 14px',borderTop:'1.5px solid #6B0E1E',background:'white'}}>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:10}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:6}}>
                   <div style={{fontSize:13,color:'#4a0810',fontWeight:600}}>Total Net Liquidation Proceeds</div>
                   <div style={{textAlign:'right',fontWeight:700,color:'#1a5c25',fontSize:14}}>{money(col.totalNetProceeds)}</div>
                 </div>
-
-                {/* Per-bucket coverage — each debt bucket matched to the collateral that secures it. */}
-                <div style={{border:'0.5px solid #e5e7eb',borderRadius:6,overflow:'hidden',marginBottom:10}}>
-                  <div style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr 1fr 90px',gap:0,background:'#f5e8ea',padding:'6px 10px',fontSize:10,fontWeight:700,color:'#4a0810',textTransform:'uppercase',letterSpacing:.4}}>
-                    <div>Debt Bucket</div>
-                    <div style={{textAlign:'right'}}>Collateral Proceeds</div>
-                    <div style={{textAlign:'right'}}>Loan Balance</div>
-                    <div style={{textAlign:'right'}}>Cushion</div>
-                    <div style={{textAlign:'right'}}>Coverage</div>
-                  </div>
-                  {col.buckets.map(b => (
-                    <div key={b.key} style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr 1fr 90px',gap:0,padding:'8px 10px',alignItems:'center',borderTop:'0.5px solid #f0f0f0',fontSize:12}}>
-                      <div>
-                        <div style={{fontWeight:600,color:'#1a1a1a'}}>{b.label}</div>
-                        <div style={{fontSize:10,color:'#9ca3af'}}>secured by {b.secures}</div>
+                {/* Single Gross Loan Balance line — stored independently per
+                    mode so flipping Current ↔ Pro-forma doesn't overwrite the
+                    other scenario's figure. */}
+                {(() => {
+                  const overrideKey = isProforma ? 'loanBalanceOverrideProforma' : 'loanBalanceOverride';
+                  const currentOverride = data.collateral?.[overrideKey];
+                  return (
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:6}}>
+                      <div style={{fontSize:13,color:'#4a0810'}}>
+                        Less: Gross Loan Balance (current OTL)
+                        <span style={{fontSize:11,color:'#6b7280',marginLeft:6}}>
+                          {currentOverride ? `(${isProforma ? 'pro-forma' : 'current'} override)` : `(auto = sum of operating notes: ${money(col.autoLoanBalance)})`}
+                        </span>
                       </div>
-                      <div style={{textAlign:'right',color:'#1a5c25',fontWeight:500}}>{money(b.proceeds)}</div>
-                      <div style={{textAlign:'right'}}>
-                        <input type="text"
-                          value={data.collateral?.[b.overrideKey] ?? ""}
-                          onChange={e => setColField(b.overrideKey, e.target.value.replace(/[^0-9.]/g,""))}
-                          placeholder={String(Math.round(b.autoLoan))}
-                          title={(data.collateral?.[b.overrideKey]) ? 'Override — clear to use auto' : `Auto = ${money(b.autoLoan)}`}
-                          style={{...INP,textAlign:'right',fontWeight:600,color:'#7a1a1a',width:'100%'}} />
-                      </div>
-                      <div style={{textAlign:'right',fontWeight:600,color:b.cushion>=0?'#15803d':'#991b1b'}}>{money(b.cushion)}</div>
-                      <div style={{textAlign:'right',fontWeight:700,fontSize:11,color:b.coveragePct==null?'#6b7280':b.coveragePct>=125?'#15803d':b.coveragePct>=100?'#92400e':'#991b1b'}}>
-                        {b.coveragePct == null ? 'n/a' : b.coveragePct.toFixed(0)+'%'}
-                      </div>
+                      <input type="text" value={currentOverride || ""}
+                        onChange={e => setColField(overrideKey, e.target.value.replace(/[^0-9.]/g,""))}
+                        placeholder={String(Math.round(col.autoLoanBalance))}
+                        style={{...INP,textAlign:'right',fontWeight:700,color:'#7a1a1a',fontSize:14}} />
                     </div>
-                  ))}
-                  {/* Totals row across buckets. */}
-                  <div style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr 1fr 90px',gap:0,padding:'8px 10px',alignItems:'center',borderTop:'1px solid #d4a5ac',background:'#fdf7f7',fontSize:12,fontWeight:700,color:'#4a0810'}}>
-                    <div>Totals</div>
-                    <div style={{textAlign:'right'}}>{money(col.totalNetProceeds)}</div>
-                    <div style={{textAlign:'right',color:'#7a1a1a'}}>{money(col.totalLoanBalance)}</div>
-                    <div style={{textAlign:'right',color:col.cushion>=0?'#15803d':'#991b1b'}}>{money(col.cushion)}</div>
-                    <div style={{textAlign:'right',fontSize:11,color:col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}}>
-                      {col.coveragePct == null ? 'n/a' : col.coveragePct.toFixed(0)+'%'}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',padding:'8px 10px',background:col.cushion>=0?'#dcfce7':'#fee2e2',borderRadius:6}}>
+                  );
+                })()}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',padding:'8px 10px',background:col.cushion>=0?'#dcfce7':'#fee2e2',borderRadius:6,marginTop:10}}>
                   <div style={{fontSize:13,fontWeight:700,color:col.cushion>=0?'#15803d':'#991b1b'}}>
-                    {col.cushion >= 0 ? 'Net Collateral Cushion (All Buckets)' : 'Net Collateral LOSS (All Buckets)'}
+                    {col.cushion >= 0 ? 'Net Collateral Cushion' : 'Net Collateral LOSS'}
                   </div>
                   <div style={{textAlign:'right',fontWeight:800,fontSize:16,color:col.cushion>=0?'#15803d':'#991b1b'}}>{money(col.cushion)}</div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginTop:6,padding:'4px 10px'}}>
+                  <div style={{fontSize:12,color:'#6b7280'}}>Collateral Coverage %</div>
+                  <div style={{textAlign:'right',fontWeight:700,color:col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}}>
+                    {col.coveragePct === null ? 'n/a' : col.coveragePct.toFixed(0)+'%'}
+                  </div>
                 </div>
               </div>
             </div>
