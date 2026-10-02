@@ -821,12 +821,50 @@ function deriveCollateral(d) {
   const totalGrossRecap   = recap.reduce((s,r) => s + r.net, 0);
   const totalLiqCost      = recap.reduce((s,r) => s + r.costDollars, 0);
   const totalNetProceeds  = recap.reduce((s,r) => s + r.netProceeds, 0);
-  // ── Loan balance for coverage ───────────────────────────────────────────
-  const autoLoanBalance   = (d.operatingNotes||[]).reduce((s,r) => s + n(r.balance), 0);
-  const loanBalance       = c.loanBalanceOverride !== undefined && c.loanBalanceOverride !== ''
-                              ? n(c.loanBalanceOverride) : autoLoanBalance;
-  const cushion           = totalNetProceeds - loanBalance;
-  const coveragePct       = loanBalance > 0 ? (totalNetProceeds / loanBalance) * 100 : null;
+  // ── Loan balances for coverage ──────────────────────────────────────────
+  // Three independent debt buckets, each secured by its own slice of the
+  // collateral pool:
+  //   Operating  — operating line of credit, secured by current-asset
+  //                collateral (crops, livestock, cash equivalents, other).
+  //   Equipment  — intermediate / term debt against machinery + rolling
+  //                stock, secured by the Equipment section.
+  //   Real estate— long-term mortgages, secured by the Real Estate section.
+  // Each has an override; blank → auto-derive from the matching debt arrays.
+  const autoOperatingLoan = (d.operatingNotes||[]).reduce((s,r) => s + n(r.balance), 0);
+  const autoEquipmentLoan = (d.intermediatDebt||[]).reduce((s,r) => s + n(r.principal), 0);
+  const autoReLoan        = (d.reDebt||[]).reduce((s,r) => s + n(r.principal), 0)
+                          + (d.reMortgages||[]).reduce((s,r) => s + n(r.principal), 0);
+  const pick = (ov, auto) => (ov !== undefined && ov !== '') ? n(ov) : auto;
+  const operatingLoan     = pick(c.operatingLoanOverride, autoOperatingLoan);
+  const equipmentLoan     = pick(c.equipmentLoanOverride, autoEquipmentLoan);
+  const reLoan            = pick(c.reLoanOverride,        autoReLoan);
+  // Back-compat: older sheets may only have a single `loanBalanceOverride`
+  // (the one lump field). If any of the three new fields is populated, we
+  // use them; otherwise fall back to the legacy field as the operating-bucket
+  // override so existing sheets keep producing their old numbers.
+  const anyNewOverride = [c.operatingLoanOverride, c.equipmentLoanOverride, c.reLoanOverride]
+                          .some(x => x !== undefined && x !== '');
+  const legacyLoanBalance = !anyNewOverride && c.loanBalanceOverride !== undefined && c.loanBalanceOverride !== ''
+                              ? n(c.loanBalanceOverride) : null;
+  const effectiveOperatingLoan = legacyLoanBalance != null ? legacyLoanBalance : operatingLoan;
+  // Proceeds buckets (recap rows summed into the matching debt bucket).
+  const findRecap = (lbl) => (recap.find(r => r.label === lbl) || {}).netProceeds || 0;
+  const operatingProceeds = findRecap('Crops') + findRecap('Livestock') + findRecap('Cash') + findRecap('Other');
+  const equipmentProceeds = findRecap('Equipment');
+  const reProceeds        = findRecap('Real Estate');
+  const buckets = [
+    { key:'operating', label:'Operating LOC',  proceeds:operatingProceeds, loan:effectiveOperatingLoan, autoLoan:autoOperatingLoan, overrideKey:'operatingLoanOverride', secures:'Crops + Livestock + Cash + Other' },
+    { key:'equipment', label:'Equipment Debt', proceeds:equipmentProceeds, loan:equipmentLoan,          autoLoan:autoEquipmentLoan, overrideKey:'equipmentLoanOverride', secures:'Equipment net' },
+    { key:'realEstate',label:'Real Estate Debt',proceeds:reProceeds,       loan:reLoan,                 autoLoan:autoReLoan,        overrideKey:'reLoanOverride',        secures:'Real Estate net' },
+  ].map(b => ({
+    ...b,
+    cushion: b.proceeds - b.loan,
+    coveragePct: b.loan > 0 ? (b.proceeds / b.loan) * 100 : null,
+  }));
+  // Overall cushion = sum of bucket cushions (equivalently total proceeds − total debt).
+  const totalLoanBalance  = buckets.reduce((s,b) => s + b.loan, 0);
+  const cushion           = totalNetProceeds - totalLoanBalance;
+  const coveragePct       = totalLoanBalance > 0 ? (totalNetProceeds / totalLoanBalance) * 100 : null;
   return {
     categories, bookValues,
     sections: {
@@ -836,7 +874,9 @@ function deriveCollateral(d) {
       other: otherSection,
     },
     recap, totalGrossRecap, totalLiqCost, totalNetProceeds,
-    autoLoanBalance, loanBalance, cushion, coveragePct,
+    buckets, totalLoanBalance, cushion, coveragePct,
+    // Legacy aliases so older callers (if any) keep working.
+    autoLoanBalance: autoOperatingLoan, loanBalance: totalLoanBalance,
   };
 }
 
@@ -878,8 +918,14 @@ function emptyData() {
       // Superior encumbrances (senior liens) that reduce category net value.
       equipmentSuperiorEnc: "",
       reSuperiorEnc: "",
-      // Loan balance for the coverage calc. Blank → auto = sum of operating notes.
+      // Legacy single-bucket loan override — kept for sheets saved before
+      // the per-bucket model landed; migrates to operatingLoanOverride.
       loanBalanceOverride: "",
+      // Per-bucket loan overrides. Blank → auto-derive from the matching
+      // debt arrays (operatingNotes, intermediatDebt, reDebt+reMortgages).
+      operatingLoanOverride: "",
+      equipmentLoanOverride: "",
+      reLoanOverride: "",
       // Manual entries (not derived from the balance sheet).
       cdValue: "",
       otherEquipmentValue: "",
@@ -7701,6 +7747,22 @@ Question: ${q}`,
     else setRecentChanges([]);
   }, [data.clientName, data.asOfDate, caOpenShare?.id]);
 
+  // Poll the change log every 30s while a sheet is open so the CA sees
+  // "Lender edited this sheet…" within a half-minute of the lender clicking
+  // Save — no manual refresh needed. Lender gets the same banner for CA
+  // edits. Light query (status=change_log + sheet_key filter) so this is
+  // cheap. Only runs on the wizard screen.
+  useEffect(() => {
+    if (screen !== 'wizard') return;
+    const sk = caOpenShare?.sheet_key
+      || (data.clientName && data.asOfDate
+            ? (STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate)
+            : null);
+    if (!sk) return;
+    const id = setInterval(() => { loadRecentChanges(sk); }, 30000);
+    return () => clearInterval(id);
+  }, [screen, data.clientName, data.asOfDate, caOpenShare?.id]);
+
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [showLenderPkg, setShowLenderPkg] = useState(false);
@@ -7861,17 +7923,29 @@ Question: ${q}`,
       const nowIso = new Date().toISOString();
       // Patch each share row's snapshot so CAs see fresh data on open +
       // write a change-log row the CA can review as a side-by-side diff.
+      // IMPORTANT: ca_shares only has these columns we can PATCH — do NOT
+      // add fields that aren't in the schema (Supabase returns 400 and the
+      // sheet_data refresh silently fails, leaving the CA with stale data).
+      // The "last updated" timestamp lives inside sheet_data as `_savedAt`.
       for (const sh of shares) {
         try {
-          await fetch(
+          const patchResp = await fetch(
             SUPABASE_URL + '/rest/v1/ca_shares?id=eq.' + sh.id,
             {
               method: 'PATCH',
               headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
-              body: JSON.stringify({ sheet_data: savedPayload, _lastLenderUpdate: nowIso }),
+              body: JSON.stringify({ sheet_data: savedPayload }),
             }
           );
-        } catch {}
+          if (!patchResp.ok) {
+            // Surface this to the console so a silent failure doesn't leave
+            // the CA with stale data without anyone knowing why.
+            const txt = await patchResp.text().catch(()=>'');
+            console.warn('ca_shares snapshot refresh failed for share', sh.id, patchResp.status, txt.slice(0,300));
+          }
+        } catch (e) {
+          console.warn('ca_shares snapshot refresh threw for share', sh.id, e);
+        }
         // Change log — CA will see this on open as "Lender updated — view diff".
         try {
           await logSheetChange('lender', baseline, savedPayload, sheetKey, {
@@ -10866,8 +10940,48 @@ ${extraPages}
     const W = window.open("","_blank","width=900,height=1100");
     if (!W) { alert('Print window was blocked — allow popups for this site.'); return; }
     try {
+      // Mirror what the on-screen Collateral step does — pro-forma projection
+      // FIRST, then the linked-entity merge on top so the print matches the
+      // numbers the lender just approved on screen. The previous version
+      // called deriveCollateral(data) directly, which skipped the linked-
+      // entity merge even when the "Include linked entities" toggle was on.
       const isProforma = collateralMode === 'proforma';
-      const sheetForPrint = isProforma ? applyBudgetProjections(data, commodityPrices) : data;
+      const nParse = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+      const scaleArr = (arr, pct, fields) => (arr||[]).map(r => {
+        const o = {...r};
+        fields.forEach(f => { if (o[f] !== undefined && o[f] !== '') o[f] = String(Number(String(o[f]).replace(/[^0-9.-]/g,''))*pct || 0); });
+        return o;
+      });
+      const baseSheet = isProforma ? applyBudgetProjections(data, commodityPrices) : data;
+      let sheetForPrint = baseSheet;
+      if (collateralIncludeLinked && collateralLinkedData && collateralLinkedData.length) {
+        const merged = {...baseSheet};
+        const push = (field, rows) => { merged[field] = [...(merged[field]||[]), ...rows]; };
+        for (const ent of collateralLinkedData) {
+          const pct = (Number(ent.ownership) || 100) / 100;
+          if (!ent.sheet) continue;
+          const p = isProforma ? applyBudgetProjections(ent.sheet, commodityPrices) : ent.sheet;
+          merged.cashGlacier = String(nParse(merged.cashGlacier) + nParse(p.cashGlacier) * pct);
+          push('cashOther',       scaleArr(p.cashOther,       pct, ['amount']));
+          push('federalPayments', scaleArr(p.federalPayments, pct, ['amount']));
+          push('receivables',    scaleArr(p.receivables,     pct, ['amount']));
+          push('farmProducts',    scaleArr(p.farmProducts,    pct, ['quantity']));
+          push('cropInvestment',  scaleArr(p.cropInvestment,  pct, ['acres']));
+          push('livestockMarket', scaleArr(p.livestockMarket, pct, ['value']));
+          push('breedingStock',   scaleArr(p.breedingStock,   pct, ['value']));
+          push('machinery',       scaleArr(p.machinery,       pct, ['value']));
+          push('vehicles',        scaleArr(p.vehicles,        pct, ['value']));
+          push('realEstate',      scaleArr(p.realEstate,      pct, ['acres']));
+          // Scale each linked corp's debt totals by ownership % and roll them
+          // into the auto-loan buckets so the printed per-bucket table matches
+          // the merged collateral on the left side.
+          push('operatingNotes',  scaleArr(p.operatingNotes,  pct, ['balance']));
+          push('intermediatDebt', scaleArr(p.intermediatDebt, pct, ['principal']));
+          push('reDebt',          scaleArr(p.reDebt,          pct, ['principal']));
+          push('reMortgages',     scaleArr(p.reMortgages,     pct, ['principal']));
+        }
+        sheetForPrint = merged;
+      }
       const col = deriveCollateral(sheetForPrint);
       const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
       const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10963,15 +11077,37 @@ ${extraPages}
   </table>
   <div style="padding:6pt 8pt;background:#fafafa;border-top:1pt solid #6B0E1E">
     <div style="display:flex;justify-content:space-between;font-size:8pt;padding:2pt 0"><span>Total Net Liquidation Proceeds</span><strong style="color:#1a5c25">${money(col.totalNetProceeds)}</strong></div>
-    <div style="display:flex;justify-content:space-between;font-size:8pt;padding:2pt 0"><span>Less: Gross Loan Balance (current OTL)</span><strong style="color:#7a1a1a">${money(col.loanBalance)}</strong></div>
   </div>
+  <table style="width:100%;border-collapse:collapse;margin-top:4pt;font-size:7.5pt">
+    <thead><tr style="background:#f5e8ea;color:#4a0810">
+      <th style="text-align:left;padding:3pt 6pt">Debt Bucket</th>
+      <th style="text-align:left;padding:3pt 6pt;font-weight:400">Secured by</th>
+      <th style="text-align:right;padding:3pt 6pt">Proceeds</th>
+      <th style="text-align:right;padding:3pt 6pt">Loan Bal.</th>
+      <th style="text-align:right;padding:3pt 6pt">Cushion</th>
+      <th style="text-align:right;padding:3pt 6pt">Cov. %</th>
+    </tr></thead>
+    <tbody>
+      ${col.buckets.map(b => `<tr>
+        <td style="padding:2pt 6pt">${b.label}</td>
+        <td style="padding:2pt 6pt;color:#6b7280;font-size:6.5pt">${b.secures}</td>
+        <td style="padding:2pt 6pt;text-align:right;color:#1a5c25">${money(b.proceeds)}</td>
+        <td style="padding:2pt 6pt;text-align:right;color:#7a1a1a">${money(b.loan)}</td>
+        <td style="padding:2pt 6pt;text-align:right;color:${b.cushion>=0?'#15803d':'#991b1b'};font-weight:600">${money(b.cushion)}</td>
+        <td style="padding:2pt 6pt;text-align:right;color:${b.coveragePct==null?'#6b7280':b.coveragePct>=125?'#15803d':b.coveragePct>=100?'#92400e':'#991b1b'};font-weight:600">${b.coveragePct==null?'n/a':b.coveragePct.toFixed(0)+'%'}</td>
+      </tr>`).join('')}
+      <tr style="border-top:1pt solid #d4a5ac;background:#fdf7f7;font-weight:700">
+        <td style="padding:3pt 6pt" colspan="2">Totals</td>
+        <td style="padding:3pt 6pt;text-align:right">${money(col.totalNetProceeds)}</td>
+        <td style="padding:3pt 6pt;text-align:right;color:#7a1a1a">${money(col.totalLoanBalance)}</td>
+        <td style="padding:3pt 6pt;text-align:right;color:${col.cushion>=0?'#15803d':'#991b1b'}">${money(col.cushion)}</td>
+        <td style="padding:3pt 6pt;text-align:right;color:${col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}">${col.coveragePct==null?'n/a':col.coveragePct.toFixed(0)+'%'}</td>
+      </tr>
+    </tbody>
+  </table>
   <div class="cush ${col.cushion<0?'neg':''}">
-    <span>${col.cushion >= 0 ? 'Net Collateral Cushion' : 'Net Collateral LOSS'}</span>
+    <span>${col.cushion >= 0 ? 'Net Collateral Cushion (All Buckets)' : 'Net Collateral LOSS (All Buckets)'}</span>
     <span>${money(col.cushion)}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;padding:4pt 8pt;font-size:8pt;background:#fff">
-    <span>Collateral Coverage %</span>
-    <strong style="color:${col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}">${col.coveragePct===null?'n/a':col.coveragePct.toFixed(0)+'%'}</strong>
   </div>
 </div>
 
@@ -11928,6 +12064,7 @@ ${extraPages}
             merged.cashGlacier = String((n(merged.cashGlacier) + n(p.cashGlacier) * pct));
             push('cashOther',       scaleArr(p.cashOther,       pct, ['amount']));
             push('federalPayments', scaleArr(p.federalPayments, pct, ['amount']));
+            push('receivables',     scaleArr(p.receivables,     pct, ['amount']));
             push('farmProducts',    scaleArr(p.farmProducts,    pct, ['quantity']));
             push('cropInvestment',  scaleArr(p.cropInvestment,  pct, ['acres']));
             push('livestockMarket', scaleArr(p.livestockMarket, pct, ['value']));
@@ -11935,6 +12072,13 @@ ${extraPages}
             push('machinery',       scaleArr(p.machinery,       pct, ['value']));
             push('vehicles',        scaleArr(p.vehicles,        pct, ['value']));
             push('realEstate',      scaleArr(p.realEstate,      pct, ['acres']));
+            // Debt arrays — rolled into the auto loan-bucket totals so each
+            // per-bucket row on the Collateral worksheet reflects the merged
+            // picture, matching how the collateral asset side is merged.
+            push('operatingNotes',  scaleArr(p.operatingNotes,  pct, ['balance']));
+            push('intermediatDebt', scaleArr(p.intermediatDebt, pct, ['principal']));
+            push('reDebt',          scaleArr(p.reDebt,          pct, ['principal']));
+            push('reMortgages',     scaleArr(p.reMortgages,     pct, ['principal']));
           }
           return merged;
         };
@@ -12136,33 +12280,58 @@ ${extraPages}
                 <div style={{textAlign:'right',color:'#1a5c25'}}>{money(col.totalNetProceeds)}</div>
               </div>
               <div style={{padding:'14px 14px',borderTop:'1.5px solid #6B0E1E',background:'white'}}>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:6}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:10}}>
                   <div style={{fontSize:13,color:'#4a0810',fontWeight:600}}>Total Net Liquidation Proceeds</div>
                   <div style={{textAlign:'right',fontWeight:700,color:'#1a5c25',fontSize:14}}>{money(col.totalNetProceeds)}</div>
                 </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:6}}>
-                  <div style={{fontSize:13,color:'#4a0810'}}>
-                    Less: Gross Loan Balance (current OTL)
-                    <span style={{fontSize:11,color:'#6b7280',marginLeft:6}}>
-                      {data.collateral?.loanBalanceOverride ? '(override)' : `(auto = sum of operating notes: ${money(col.autoLoanBalance)})`}
-                    </span>
+
+                {/* Per-bucket coverage — each debt bucket matched to the collateral that secures it. */}
+                <div style={{border:'0.5px solid #e5e7eb',borderRadius:6,overflow:'hidden',marginBottom:10}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr 1fr 90px',gap:0,background:'#f5e8ea',padding:'6px 10px',fontSize:10,fontWeight:700,color:'#4a0810',textTransform:'uppercase',letterSpacing:.4}}>
+                    <div>Debt Bucket</div>
+                    <div style={{textAlign:'right'}}>Collateral Proceeds</div>
+                    <div style={{textAlign:'right'}}>Loan Balance</div>
+                    <div style={{textAlign:'right'}}>Cushion</div>
+                    <div style={{textAlign:'right'}}>Coverage</div>
                   </div>
-                  <input type="text" value={data.collateral?.loanBalanceOverride||""}
-                    onChange={e => setColField('loanBalanceOverride', e.target.value.replace(/[^0-9.]/g,""))}
-                    placeholder={String(Math.round(col.autoLoanBalance))}
-                    style={{...INP,textAlign:'right',fontWeight:700,color:'#7a1a1a',fontSize:14}} />
+                  {col.buckets.map(b => (
+                    <div key={b.key} style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr 1fr 90px',gap:0,padding:'8px 10px',alignItems:'center',borderTop:'0.5px solid #f0f0f0',fontSize:12}}>
+                      <div>
+                        <div style={{fontWeight:600,color:'#1a1a1a'}}>{b.label}</div>
+                        <div style={{fontSize:10,color:'#9ca3af'}}>secured by {b.secures}</div>
+                      </div>
+                      <div style={{textAlign:'right',color:'#1a5c25',fontWeight:500}}>{money(b.proceeds)}</div>
+                      <div style={{textAlign:'right'}}>
+                        <input type="text"
+                          value={data.collateral?.[b.overrideKey] ?? ""}
+                          onChange={e => setColField(b.overrideKey, e.target.value.replace(/[^0-9.]/g,""))}
+                          placeholder={String(Math.round(b.autoLoan))}
+                          title={(data.collateral?.[b.overrideKey]) ? 'Override — clear to use auto' : `Auto = ${money(b.autoLoan)}`}
+                          style={{...INP,textAlign:'right',fontWeight:600,color:'#7a1a1a',width:'100%'}} />
+                      </div>
+                      <div style={{textAlign:'right',fontWeight:600,color:b.cushion>=0?'#15803d':'#991b1b'}}>{money(b.cushion)}</div>
+                      <div style={{textAlign:'right',fontWeight:700,fontSize:11,color:b.coveragePct==null?'#6b7280':b.coveragePct>=125?'#15803d':b.coveragePct>=100?'#92400e':'#991b1b'}}>
+                        {b.coveragePct == null ? 'n/a' : b.coveragePct.toFixed(0)+'%'}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Totals row across buckets. */}
+                  <div style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr 1fr 90px',gap:0,padding:'8px 10px',alignItems:'center',borderTop:'1px solid #d4a5ac',background:'#fdf7f7',fontSize:12,fontWeight:700,color:'#4a0810'}}>
+                    <div>Totals</div>
+                    <div style={{textAlign:'right'}}>{money(col.totalNetProceeds)}</div>
+                    <div style={{textAlign:'right',color:'#7a1a1a'}}>{money(col.totalLoanBalance)}</div>
+                    <div style={{textAlign:'right',color:col.cushion>=0?'#15803d':'#991b1b'}}>{money(col.cushion)}</div>
+                    <div style={{textAlign:'right',fontSize:11,color:col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}}>
+                      {col.coveragePct == null ? 'n/a' : col.coveragePct.toFixed(0)+'%'}
+                    </div>
+                  </div>
                 </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',padding:'8px 10px',background:col.cushion>=0?'#dcfce7':'#fee2e2',borderRadius:6,marginTop:10}}>
+
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',padding:'8px 10px',background:col.cushion>=0?'#dcfce7':'#fee2e2',borderRadius:6}}>
                   <div style={{fontSize:13,fontWeight:700,color:col.cushion>=0?'#15803d':'#991b1b'}}>
-                    {col.cushion >= 0 ? 'Net Collateral Cushion' : 'Net Collateral LOSS'}
+                    {col.cushion >= 0 ? 'Net Collateral Cushion (All Buckets)' : 'Net Collateral LOSS (All Buckets)'}
                   </div>
                   <div style={{textAlign:'right',fontWeight:800,fontSize:16,color:col.cushion>=0?'#15803d':'#991b1b'}}>{money(col.cushion)}</div>
-                </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginTop:6,padding:'4px 10px'}}>
-                  <div style={{fontSize:12,color:'#6b7280'}}>Collateral Coverage %</div>
-                  <div style={{textAlign:'right',fontWeight:700,color:col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}}>
-                    {col.coveragePct === null ? 'n/a' : col.coveragePct.toFixed(0)+'%'}
-                  </div>
                 </div>
               </div>
             </div>
@@ -13989,6 +14158,28 @@ ${extraPages}
                 style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:5,padding:'4px 12px',fontWeight:700,cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
                 View diff
               </button>
+              {/* CA-side: pull the latest sheet_data from the share and swap it
+                  into the open editor. Lender-side has nothing to pull from
+                  (they ARE the source), so this is CA-only. */}
+              {caOpenShare && (
+                <button onClick={async ()=>{
+                  try {
+                    const r = await fetch(SUPABASE_URL+'/rest/v1/ca_shares?id=eq.'+caOpenShare.id+'&select=*', {headers:supaHeaders()});
+                    const rows = r.ok ? await r.json() : [];
+                    const fresh = Array.isArray(rows) && rows[0] ? rows[0] : null;
+                    if (!fresh || !fresh.sheet_data) { alert('Could not reload — share not found.'); return; }
+                    if (!window.confirm('Reload latest from the lender? Any unsaved edits you have will be lost.')) return;
+                    setData({...emptyData(), ...fresh.sheet_data});
+                    setCaOpenShare(prev => prev ? {...prev, sheet_data: fresh.sheet_data} : prev);
+                    // Refresh the change log once more now that data matches.
+                    loadRecentChanges(caOpenShare.sheet_key);
+                  } catch (e) { alert('Reload failed: ' + (e.message || e)); }
+                }}
+                  title="Pull the lender's current numbers into your view. Any unsaved edits you have will be lost."
+                  style={{background:'#15803d',color:'white',border:'none',borderRadius:5,padding:'4px 12px',fontWeight:700,cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
+                  ⬇ Reload latest
+                </button>
+              )}
               {recentChanges.length > 1 && (
                 <span style={{color:'#6b7280',fontSize:11}}>+ {recentChanges.length - 1} earlier change{recentChanges.length>2?'s':''}</span>
               )}
