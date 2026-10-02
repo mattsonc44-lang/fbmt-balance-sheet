@@ -7003,38 +7003,71 @@ export default function BalanceSheet() {
     if (!items.length) { alert('Add machinery with year, make/model, and value first.'); return; }
     setMachPriceCheckLoading(true);
     const prompt =
-`You are an agricultural equipment appraiser. For each piece of farm equipment below, estimate the typical current-market VALUE range (used, retail) for an item in the stated year/make/model/size/condition. Then compare the owner's declared value to that range and flag any that look off.
+`You are an agricultural equipment appraiser. For each piece of farm equipment below, SEARCH THE WEB for recent (last 12 months) auction results and dealer-listing prices from sources like TractorHouse, MachineryPete, Fastline, IronPlanet, Rouse, Purple Wave, and manufacturer-dealer sites. Build a current-market VALUE range (used, retail) for each piece. Then compare the owner's declared value to that range and flag any that look off.
 
-Return STRICT JSON ONLY (no markdown, no commentary):
-{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence>"}]}
+Return STRICT JSON ONLY as the final text block (no markdown fences, no commentary):
+{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence with the source(s) you used>"}]}
 
 Rules:
+- Use the web_search tool for each distinct piece — one search is fine if the result page has multiple comps.
 - status "ok": declared value falls within your estimated range
 - status "high": declared value is >15% above the top of your range
 - status "low":  declared value is >15% below the bottom of your range
-- status "unknown": you can't bracket it from year/make/size alone
+- status "unknown": search returned no useful comps for this exact year/make/model
 - low/high are USD numbers (no commas / no $)
-- note: brief one-sentence rationale — mention the key market reference point you used
+- note: brief one-sentence rationale naming the source(s) you cited (e.g. "TractorHouse listings on 2018 JD 8320R run $160k–$215k")
 
 Equipment list:
 ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'('+r.condition+')':''} — declared $${numVal(r.value).toLocaleString()}`).join('\n')}`;
 
     try {
-      const resp = await fetch('/.netlify/functions/analyze', {
+      const resp = await fetch('/.netlify/functions/analyze-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
         body: JSON.stringify({
           model: 'claude-haiku-4-5',
-          max_tokens: 2000,
-          system: 'You are a conservative, numerate agricultural equipment appraiser. Base estimates on public auction trends, dealer listings, and typical depreciation. When uncertain, mark status "unknown" rather than guessing. Return STRICT JSON.',
+          max_tokens: 4000,
+          max_searches: Math.max(10, items.length + 2),
+          system: 'You are a conservative, numerate agricultural equipment appraiser. Use the web_search tool to pull real recent-sale comps before answering. Cite the source in your note. Return STRICT JSON as your final response block.',
           messages: [{ role:'user', content: prompt }],
         }),
       });
-      if (!resp.ok) { throw new Error('Server returned ' + resp.status + ': ' + (await resp.text()).slice(0, 200)); }
+      if (!resp.ok) {
+        const errBody = await resp.text();
+        // Fallback: if analyze-search isn't deployed yet, fall back to the non-search version.
+        if (resp.status === 404) {
+          const fb = await fetch('/.netlify/functions/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 2000,
+              system: 'You are a conservative agricultural equipment appraiser. Estimate from training data (no live web). Return STRICT JSON.',
+              messages: [{ role:'user', content: prompt + '\n\n(No web search available — estimate from your training data.)' }],
+            }),
+          });
+          if (!fb.ok) throw new Error('Fallback also failed: ' + (await fb.text()).slice(0, 200));
+          const json = await fb.json();
+          const text = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || '';
+          const clean = text.replace(/```json|```/g, '').trim();
+          const parsed = JSON.parse(clean);
+          const byIdx = {};
+          (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = {...it, note: (it.note||'') + ' (estimate — no live web search)'}; });
+          setMachPriceCheck(byIdx);
+          setMachPriceCheckLoading(false);
+          return;
+        }
+        throw new Error('Server returned ' + resp.status + ': ' + errBody.slice(0, 200));
+      }
       const json = await resp.json();
-      const text = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || '';
-      const clean = text.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean);
+      // Response content may contain multiple blocks: web_search_tool_use,
+      // web_search_tool_result, and finally one or more text blocks. Grab
+      // every text block and concatenate to find the JSON payload.
+      const text = (json.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+      // Pull the JSON object out — model may wrap in prose or fences.
+      const match = text.match(/\{[\s\S]*"items"[\s\S]*\}/);
+      const raw = match ? match[0] : text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(raw);
       const byIdx = {};
       (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
       setMachPriceCheck(byIdx);
