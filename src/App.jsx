@@ -6765,6 +6765,9 @@ export default function BalanceSheet() {
   // Each entry: { status: 'ok'|'high'|'low'|'unknown', low, high, note }
   const [machPriceCheck, setMachPriceCheck] = useState({});
   const [machPriceCheckLoading, setMachPriceCheckLoading] = useState(false);
+  // Vehicle price check — VIN-decoded (NHTSA free API) then valued via Claude web search.
+  const [vehPriceCheck, setVehPriceCheck] = useState({});
+  const [vehPriceCheckLoading, setVehPriceCheckLoading] = useState(false);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
   const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
 
@@ -7101,6 +7104,124 @@ ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'
       alert('Price check failed: ' + (e.message || e));
     }
     setMachPriceCheckLoading(false);
+  };
+
+  // ── Vehicle price check ──────────────────────────────────────────────────
+  // Two-step: (1) decode each VIN via NHTSA's free VPIC API to pull trim,
+  // body style, engine, drivetrain, GVWR; (2) hand the decoded strings +
+  // mileage + condition to Claude with web_search enabled to pull KBB /
+  // NADA / dealer / auction comps and bracket a value range per vehicle.
+  // VIN is optional — rows without one still get valued from year + make
+  // + condition, just less precisely.
+  const decodeVinNHTSA = async (vin) => {
+    if (!vin || vin.length < 11) return null;
+    try {
+      const r = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/decodevin/${encodeURIComponent(vin)}?format=json`);
+      if (!r.ok) return null;
+      const j = await r.json();
+      const pick = (label) => {
+        const row = (j.Results||[]).find(x => x.Variable === label);
+        return row && row.Value && row.Value !== 'Not Applicable' ? row.Value : '';
+      };
+      return {
+        year: pick('Model Year'),
+        make: pick('Make'),
+        model: pick('Model'),
+        trim: pick('Trim') || pick('Series'),
+        body: pick('Body Class'),
+        engine: [pick('Displacement (L)') ? pick('Displacement (L)') + 'L' : '', pick('Engine Configuration'), pick('Fuel Type - Primary')].filter(Boolean).join(' '),
+        drive: pick('Drive Type'),
+        gvwr: pick('Gross Vehicle Weight Rating From'),
+      };
+    } catch { return null; }
+  };
+
+  const runVehiclePriceCheck = async () => {
+    const items = (data.vehicles||[]).map((r,i) => ({...r, _i: i}))
+      .filter(r => r.year && r.make && numVal(r.value) > 0);
+    if (!items.length) { alert('Add vehicles with year, make/model, and value first.'); return; }
+    setVehPriceCheckLoading(true);
+    // Decode VINs in parallel — these are free and fast.
+    const decoded = await Promise.all(items.map(r => r.vin ? decodeVinNHTSA(r.vin.trim()) : null));
+    const describe = (r, k) => {
+      const d = decoded[k];
+      const base = `${r.year} ${r.make}`;
+      const vinExtras = d
+        ? [d.trim, d.body, d.engine, d.drive].filter(Boolean).join(', ')
+        : '';
+      const mileage = r.mileage ? ` ${Number(r.mileage).toLocaleString()} mi` : '';
+      const cond = r.condition ? ` (${r.condition})` : '';
+      return `${r._i}. ${base}${vinExtras ? ' — ' + vinExtras : ''}${mileage}${cond} — declared $${numVal(r.value).toLocaleString()}`;
+    };
+    const prompt =
+`You are a vehicle appraiser. For each vehicle below, SEARCH THE WEB for current (last 6–12 months) listings and auction results from sources like Kelley Blue Book (kbb.com), NADA / J.D. Power (nadaguides.com), Edmunds, CarGurus, AutoTrader, Cars.com, and regional dealer sites. Build a current used-market VALUE range (private-party / clean-retail where available) for each vehicle, taking mileage and condition into account. Then compare the owner's declared value to that range and flag any that look off.
+
+Return STRICT JSON ONLY as the final text block (no markdown fences, no commentary):
+{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence citing the source(s)>"}]}
+
+Rules:
+- Use the web_search tool for each distinct vehicle — one search per vehicle is fine if the result page has multiple comps.
+- status "ok": declared value falls within your estimated range
+- status "high": declared value is >15% above the top of your range
+- status "low":  declared value is >15% below the bottom of your range
+- status "unknown": search returned no useful comps for this year/make/model
+- low/high are USD numbers (no commas / no $)
+- note: brief one-sentence rationale naming the source(s) you cited and whether the VIN-decoded trim narrowed it down (e.g. "KBB private-party on 2020 F-350 Lariat 6.7L diesel 4x4 at 85k mi runs $52k–$61k")
+
+Vehicle list:
+${items.map((r,k) => describe(r,k)).join('\n')}`;
+
+    try {
+      const resp = await fetch('/.netlify/functions/analyze-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 4000,
+          max_searches: Math.max(10, items.length + 2),
+          system: 'You are a conservative, numerate vehicle appraiser. Use the web_search tool to pull real recent comps before answering. Cite the source in your note. Return STRICT JSON as your final response block.',
+          messages: [{ role:'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text();
+        if (resp.status === 404) {
+          // Fallback: no live web search.
+          const fb = await fetch('/.netlify/functions/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 2000,
+              system: 'You are a conservative vehicle appraiser. Estimate from training data (no live web). Return STRICT JSON.',
+              messages: [{ role:'user', content: prompt + '\n\n(No web search available — estimate from your training data.)' }],
+            }),
+          });
+          if (!fb.ok) throw new Error('Fallback also failed: ' + (await fb.text()).slice(0, 200));
+          const json = await fb.json();
+          const text = json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || '';
+          const clean = text.replace(/```json|```/g, '').trim();
+          const parsed = JSON.parse(clean);
+          const byIdx = {};
+          (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = {...it, note: (it.note||'') + ' (estimate — no live web search)'}; });
+          setVehPriceCheck(byIdx);
+          setVehPriceCheckLoading(false);
+          return;
+        }
+        throw new Error('Server returned ' + resp.status + ': ' + errBody.slice(0, 200));
+      }
+      const json = await resp.json();
+      const text = (json.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+      const match = text.match(/\{[\s\S]*"items"[\s\S]*\}/);
+      const raw = match ? match[0] : text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(raw);
+      const byIdx = {};
+      (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
+      setVehPriceCheck(byIdx);
+    } catch (e) {
+      alert('Vehicle price check failed: ' + (e.message || e));
+    }
+    setVehPriceCheckLoading(false);
   };
 
   // Build a compact one-row-per-client summary for Q&A. Loads each client's latest
@@ -11000,17 +11121,36 @@ ${extraPages}
       case "vehicles": return (
         <div className="step-content">
           <SecHdr icon="🚗" title="Titled Vehicles Schedule" subtitle="Trucks, pickups, cars, ATVs — anything licensed and titled" />
+          <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:8,flexWrap:'wrap',alignItems:'center'}}>
+            {Object.keys(vehPriceCheck).length > 0 && (
+              <span style={{fontSize:11,color:'#6b7280'}}>
+                ✅ {Object.values(vehPriceCheck).filter(x=>x.status==='ok').length} ok ·
+                ⚠ {Object.values(vehPriceCheck).filter(x=>x.status==='high'||x.status==='low').length} flagged ·
+                ❓ {Object.values(vehPriceCheck).filter(x=>x.status==='unknown').length} unknown
+              </span>
+            )}
+            <button type="button" onClick={runVehiclePriceCheck}
+              disabled={vehPriceCheckLoading}
+              title="Decode VINs via NHTSA, then search KBB / NADA / dealer listings for recent comps on each vehicle."
+              style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:vehPriceCheckLoading?'wait':'pointer',fontFamily:'inherit',opacity:vehPriceCheckLoading?.7:1}}>
+              {vehPriceCheckLoading ? 'Checking…' : '🔍 Check vehicle values'}
+            </button>
+          </div>
           <div className="mach-table">
             <div className="mach-header">
               <span style={{width:62}}>Year</span>
               <span style={{flex:1}}>Make and Model</span>
               <span style={{width:130}}>VIN</span>
+              <span style={{width:85}}>Mileage</span>
               <span style={{width:95}}>Condition</span>
               <span style={{width:110}}>Value</span>
               <span style={{width:32}}></span>
             </div>
-            {data.vehicles.map((r,i) => (
-              <div key={i} className="mach-row" data-rowkey={`vehicles-${i}`}>
+            {data.vehicles.map((r,i) => {
+              const chk = vehPriceCheck[i];
+              return (
+              <React.Fragment key={i}>
+              <div className="mach-row" data-rowkey={`vehicles-${i}`}>
                 <div className="mach-col" style={{width:62}}>
                   <input className="text-input" type="text" value={r.year} placeholder="2020" maxLength={4}
                     onChange={e=>setArr("vehicles",i,"year",e.target.value.replace(/[^0-9]/g,""))} />
@@ -11022,6 +11162,10 @@ ${extraPages}
                 <div className="mach-col" style={{width:130}}>
                   <input className="text-input" type="text" value={r.vin} placeholder="VIN"
                     onChange={e=>setArr("vehicles",i,"vin",e.target.value)} />
+                </div>
+                <div className="mach-col" style={{width:85}}>
+                  <input className="text-input" type="text" value={r.mileage||''} placeholder="miles"
+                    onChange={e=>setArr("vehicles",i,"mileage",e.target.value.replace(/[^0-9]/g,""))} />
                 </div>
                 <div className="mach-col" style={{width:95}}>
                   <select className="unit-select" value={r.condition}
@@ -11041,9 +11185,21 @@ ${extraPages}
                 <CollChk field="vehicles" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("vehicles",i)}>x</button>
               </div>
-            ))}
+              {chk && (chk.status === 'high' || chk.status === 'low' || chk.status === 'ok' || chk.status === 'unknown') && (
+                <div className={`mach-pricecheck-detail ${chk.status}`}>
+                  <strong>{r.year} {r.make}:</strong>{' '}
+                  {chk.status === 'ok'      && <span style={{color:'#15803d'}}>✅ Within range (${chk.low?.toLocaleString()}–${chk.high?.toLocaleString()}).</span>}
+                  {chk.status === 'high'    && <span style={{color:'#991b1b'}}>⚠ Declared value looks HIGH — comps run ${chk.low?.toLocaleString()}–${chk.high?.toLocaleString()}.</span>}
+                  {chk.status === 'low'     && <span style={{color:'#92400e'}}>⚠ Declared value looks LOW — comps run ${chk.low?.toLocaleString()}–${chk.high?.toLocaleString()}.</span>}
+                  {chk.status === 'unknown' && <span style={{color:'#6b7280'}}>❓ No reliable comps found.</span>}
+                  {chk.note && <span style={{color:'#6b7280',marginLeft:6}}>· {chk.note}</span>}
+                </div>
+              )}
+              </React.Fragment>
+              );
+            })}
           </div>
-          <button className="add-btn" onClick={()=>addRow("vehicles",{year:"",make:"",vin:"",condition:"",value:""})}>+ Add Vehicle</button>
+          <button className="add-btn" onClick={()=>addRow("vehicles",{year:"",make:"",vin:"",mileage:"",condition:"",value:""})}>+ Add Vehicle</button>
           <div className="subtotal-row total"><span>Total Titled Vehicles</span><strong>{fmt(vehiclesVal)}</strong></div>
         </div>
       );
