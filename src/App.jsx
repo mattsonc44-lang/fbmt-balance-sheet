@@ -687,11 +687,17 @@ const COLLATERAL_CATEGORIES = [
   { key:'cash',           label:'Cash',                       realization:0.00, liqCost:0.00, section:'cash' },
   { key:'other',          label:'Other Collateral',           realization:0.50, liqCost:0.25, section:'other',     source:'otherCollateralValue' },
 ];
-// Pro-forma projection: replace a sheet's crop + market-livestock arrays with
-// values derived from the Budget (projected harvest + projected cattle sales).
-// Growing-crop investment is zeroed because the budget's projected harvest
-// supersedes it. Everything else (equipment, RE, cash, breeding stock,
-// federal payments, A/R, …) passes through unchanged.
+// Pro-forma projection:
+//   • Crops Harvested (crop on hand)   — unchanged from the balance sheet's
+//     farmProducts (grain in the bin is grain in the bin).
+//   • Crops Unharvested (standing crop)— REPLACED with projected harvest value
+//     from Budget → Crop Income (acres × yield × price × share%). Growing-crop
+//     investment on the balance sheet is a cost basis; the budget projection
+//     is the revenue the standing crop will produce.
+//   • Market Livestock                 — REPLACED with projected cattle sales
+//     from Budget → Livestock Income (head × lbs × price × share%).
+//   • Everything else (equipment, RE, cash, breeding stock, A/R, federal
+//     payments, …) passes through unchanged.
 function applyBudgetProjections(d, commodityPrices = []) {
   const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
   const findCommodityPrice = (name) => {
@@ -700,24 +706,27 @@ function applyBudgetProjections(d, commodityPrices = []) {
     const hit = commodityPrices.find(p => p.name && p.name.toLowerCase().trim() === needle);
     return hit ? hit.price : null;
   };
-  // Project each budget crop → one "harvested" row carrying the farm-products shape.
-  const projectedFarmProducts = (d.budgetCrops||[])
+  // Project each budget crop → one cropInvestment-shaped row carrying the
+  // projected standing-crop value. deriveCollateral treats cropInvestment as
+  // "acres × $/acre", so we pre-compute the $/acre figure per budget row:
+  //    revenue/acre = yield × price × share%
+  // The matching crop row from the current cropInvestment carries its collateral
+  // flag through — if the lender un-flagged a specific crop on the current
+  // balance sheet, that choice sticks in the pro-forma view.
+  const projectedCropInvestment = (d.budgetCrops||[])
     .filter(r => n(r.acres) > 0 && n(r.yieldPerAcre) > 0)
     .map(r => {
       const listP = (!r.contracted && !r.customPrice) ? findCommodityPrice(r.crop) : null;
-      const price = String(listP != null ? listP : (r.price || 0));
-      const totalQty = n(r.acres) * n(r.yieldPerAcre);
+      const price = n(listP != null ? listP : r.price);
+      const sharePct = n(r.share || '100') / 100;
+      const revenuePerAcre = n(r.yieldPerAcre) * price * sharePct;
       return {
-        kind: r.crop || '',
-        quantity: String(totalQty),
-        unit: r.unit || 'bu',
-        pricePerUnit: price,
-        share: r.share || '100',
+        cropType: r.crop || '',
+        acres: String(r.acres || ''),
+        valuePerAcre: String(revenuePerAcre),
         contracted: !!r.contracted,
-        // Preserve the balance-sheet "collateral" flag if the lender has already
-        // deselected a crop on the current sheet with the same crop name.
         collateral: (() => {
-          const match = (d.farmProducts||[]).find(x => (x.kind||'').toLowerCase() === (r.crop||'').toLowerCase());
+          const match = (d.cropInvestment||[]).find(x => (x.cropType||'').toLowerCase() === (r.crop||'').toLowerCase());
           return match ? (match.collateral !== false) : true;
         })(),
         _source: 'budgetCrops',
@@ -741,8 +750,9 @@ function applyBudgetProjections(d, commodityPrices = []) {
     });
   return {
     ...d,
-    farmProducts: projectedFarmProducts,
-    cropInvestment: [],          // Growing-crop line rolls into the projected harvest.
+    // farmProducts (crop on hand) is intentionally untouched — it's whatever
+    // is in the bin today, not a projection.
+    cropInvestment:  projectedCropInvestment,
     livestockMarket: projectedLivestockMarket,
   };
 }
@@ -11828,7 +11838,7 @@ ${extraPages}
           <div className="step-content">
             <SecHdr icon="🛡" title={`Collateral Valuation — ${isProforma ? 'Pro-forma' : 'Current'}`}
               subtitle={isProforma
-                ? "Projected view: Crops Harvested = Budget → Crop Income (acres × yield × price × share%). Market Livestock = Budget → Livestock Income. Growing-crop investment rolls into the projected harvest. Everything else carries from the balance sheet."
+                ? "Projected view: Crops Harvested = crop on hand (unchanged). Crops Unharvested = projected revenue from Budget → Crop Income (acres × yield × price × share%). Market Livestock = Budget → Livestock Income. Everything else carries from the balance sheet."
                 : "Lender-side view: how much the pledged collateral would net in a forced liquidation. Values auto-populate from the balance sheet. Edit realization % per row if policy or borrower risk warrants."}
               color="#4a0810" />
 
@@ -11893,8 +11903,8 @@ ${extraPages}
                 const SOURCE_HINTS = isProforma ? {
                   govtPmts:        'from Federal Payments (collateral-flagged rows)',
                   receivables:     'from Receivables (collateral-flagged rows)',
-                  cropsHarvested:  'projected from Budget → Crop Income (acres × yield × price × share%)',
-                  cropsUnharvested:'rolls into projected harvest',
+                  cropsHarvested:  'from Farm Products on Hand (crop in the bin — unchanged)',
+                  cropsUnharvested:'projected from Budget → Crop Income (acres × yield × price × share%)',
                   livestockMkt:    'projected from Budget → Livestock Income (head × lbs × price × share%)',
                   livestockBreed:  'from Breeding Stock',
                   farmEquipment:   'from Machinery & Equipment',
