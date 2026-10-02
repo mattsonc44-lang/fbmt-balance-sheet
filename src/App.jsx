@@ -6337,7 +6337,7 @@ function CABalanceSheetEditor({ data, setData }) {
 // (Assets / Liabilities / Budget), detects added/removed/modified rows,
 // and shows an "Impact on totals" summary at the bottom so the lender can
 // see what the accept would do to Total Assets, Total Liabilities, and Net Worth.
-function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting }) {
+function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, onClose, accepting, viewOnly }) {
   const [tab, setTab] = React.useState('All');
   const [showUnchanged, setShowUnchanged] = React.useState(false);
   const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
@@ -6537,15 +6537,22 @@ function CAEditDiff({ original, edited, caName, clientName, onAccept, onReject, 
             </div>
           </div>
           <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <button onClick={onReject} disabled={accepting}
-              style={{background:'white',border:'0.5px solid #fca5a5',color:'#dc2626',fontSize:12,padding:'7px 14px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
-              Reject
-            </button>
-            {changed.length > 0 && (
+            {!viewOnly && (
+              <button onClick={onReject} disabled={accepting}
+                style={{background:'white',border:'0.5px solid #fca5a5',color:'#dc2626',fontSize:12,padding:'7px 14px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+                Reject
+              </button>
+            )}
+            {!viewOnly && changed.length > 0 && (
               <button onClick={onAccept} disabled={accepting}
                 style={{background:'#15803d',border:'none',color:'white',fontSize:12,padding:'7px 16px',borderRadius:6,cursor:accepting?'wait':'pointer',fontFamily:'inherit',fontWeight:500,opacity:accepting?.7:1}}>
                 {accepting ? 'Saving…' : 'Accept & save'}
               </button>
+            )}
+            {viewOnly && (
+              <span style={{background:'#dcfce7',color:'#15803d',border:'0.5px solid #86efac',fontSize:11,padding:'5px 10px',borderRadius:6,fontWeight:600}}>
+                Already applied
+              </span>
             )}
             <button onClick={onClose}
               style={{background:'transparent',border:'none',fontSize:18,cursor:'pointer',color:'#6b7280',padding:'2px 8px'}}>×</button>
@@ -6728,6 +6735,9 @@ export default function BalanceSheet() {
   const [selectedCAUser, setSelectedCAUser] = useState('');
   const [pendingCAEdits, setPendingCAEdits] = useState([]);
   const [showCADiff, setShowCADiff] = useState(null); // ca_edit record with .original added
+  // Change log — side-by-side diff rows written on every save of a shared sheet.
+  // Lender sees entries authored by CAs; CA sees entries authored by the lender.
+  const [recentChanges, setRecentChanges] = useState([]);
   const [acceptingCAEdit, setAcceptingCAEdit] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [caOpenShare, setCaOpenShare] = useState(null);
@@ -7346,7 +7356,14 @@ Question: ${q}`,
     if (!isCA) setCorpPersonalDebt([]);
     if (!isCA) setLinkedEntityNWMap({});
     if (qaBookCache && qaBookCache.current) qaBookCache.current = null;
-  }, [data.clientName, data.asOfDate]);
+    // Reload the counterparty change log for the newly-active sheet.
+    const sk = caOpenShare?.sheet_key
+      || (data.clientName && data.asOfDate
+            ? (STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate)
+            : null);
+    if (sk) loadRecentChanges(sk);
+    else setRecentChanges([]);
+  }, [data.clientName, data.asOfDate, caOpenShare?.id]);
 
   const [confirmSave, setConfirmSave] = useState(null);
   const [showImport, setShowImport] = useState(false);
@@ -7402,6 +7419,13 @@ Question: ${q}`,
     setConfirmSave(null);
     try {
       const fp = folderPathOverride !== undefined ? folderPathOverride : (data.folderPath || []);
+      // Snapshot the pre-save state before overwriting — the change log needs
+      // it as the "baseline" side of the diff. If no prior save, baseline is {}.
+      let baselineForLog = {};
+      try {
+        const prior = await storage.get(key);
+        if (prior) { try { baselineForLog = JSON.parse(prior.value) || {}; } catch {} }
+      } catch {}
       const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString() };
       await storage.set(key, JSON.stringify(savePayload));
       // Only delete the OLD key when this is a pure rename — client name
@@ -7421,10 +7445,9 @@ Question: ${q}`,
       set("folderPath", fp);
       setSaveStatus("saved");
       await loadSavedList();
-      // If this sheet is shared with any CA(s), notify them of the lender's
-      // update + refresh their sheet_data snapshot so when they open the share
-      // they see the new numbers (and can diff against their last-seen copy).
-      notifySharedCAs(key, savePayload).catch(()=>{});
+      // If this sheet is shared with any CA(s), notify them + refresh their
+      // snapshot + write a change-log row per share so each CA can view a diff.
+      notifySharedCAs(key, savePayload, baselineForLog).catch(()=>{});
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (err) {
       setSaveStatus(err.message || "error");
@@ -7432,11 +7455,49 @@ Question: ${q}`,
     }
   };
 
+  // Write a change-log row to ca_edits so the counterparty can view a diff of
+  // what changed (same side-by-side UI the review workflow used — just applied
+  // instead of pending). Scoped to a specific share so each CA sees only
+  // changes on sheets they're shared on. Best-effort — never blocks the save.
+  //   direction: 'lender' = lender edited, CA sees it; 'ca' = CA edited, lender sees it
+  //   shareInfo: { share_id, ca_user_id, client_name } for the targeted share
+  const logSheetChange = async (direction, baseline, next, sheetKey, shareInfo) => {
+    if (!isConfigured() || !sheetKey || !shareInfo) return;
+    const payload = {
+      share_id:  shareInfo.share_id,
+      ca_user_id: shareInfo.ca_user_id,
+      ca_name:   direction === 'ca'
+                   ? (profile?.full_name || session?.user?.email || 'CA')
+                   : (profile?.full_name || session?.user?.email || 'Lender'),
+      client_name: shareInfo.client_name,
+      sheet_key: sheetKey,
+      // Pack baseline + direction + author name INSIDE edited_data so no new
+      // columns are needed. CAEditDiff reads edited_data normally; the diff
+      // viewer unpacks ._baseline for the "original" side.
+      edited_data: {
+        ...next,
+        _baseline: baseline || {},
+        _direction: direction,
+        _changedAt: new Date().toISOString(),
+        _changedBy: direction === 'ca' ? 'ca' : 'lender',
+        _changedByName: profile?.full_name || session?.user?.email || '',
+      },
+      status: 'change_log',
+    };
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/ca_edits', {
+        method: 'POST',
+        headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
+        body: JSON.stringify(payload),
+      });
+    } catch {}
+  };
+
   // Find any active CA shares pointing at this sheet_key. For each, refresh
   // the share's sheet_data snapshot (so the CA sees current numbers next open)
   // and fire a notify-submission email so they know changes landed. Best-effort
   // — never blocks the save.
-  const notifySharedCAs = async (sheetKey, savedPayload) => {
+  const notifySharedCAs = async (sheetKey, savedPayload, baseline) => {
     if (!isConfigured() || !session?.user?.id) return;
     try {
       const r = await fetch(
@@ -7462,7 +7523,8 @@ Question: ${q}`,
         } catch {}
       }
       const nowIso = new Date().toISOString();
-      // Patch each share row's snapshot so CAs see fresh data on open.
+      // Patch each share row's snapshot so CAs see fresh data on open +
+      // write a change-log row the CA can review as a side-by-side diff.
       for (const sh of shares) {
         try {
           await fetch(
@@ -7473,6 +7535,12 @@ Question: ${q}`,
               body: JSON.stringify({ sheet_data: savedPayload, _lastLenderUpdate: nowIso }),
             }
           );
+        } catch {}
+        // Change log — CA will see this on open as "Lender updated — view diff".
+        try {
+          await logSheetChange('lender', baseline, savedPayload, sheetKey, {
+            share_id: sh.id, ca_user_id: sh.ca_user_id, client_name: sh.client_name,
+          });
         } catch {}
         // Email the CA.
         try {
@@ -9695,6 +9763,27 @@ FORMAT RULES — follow exactly:
       const edits = await r.json();
       setPendingCAEdits(Array.isArray(edits)?edits:[]);
     } catch {}
+  };
+
+  // Load the change log for the sheet currently open in the wizard. Returns
+  // entries authored by the counterparty — a lender sees CA edits, a CA sees
+  // lender edits. Most-recent-first, cap at 20.
+  const loadRecentChanges = async (sheetKey) => {
+    if (!isConfigured() || !sheetKey) { setRecentChanges([]); return; }
+    try {
+      const url = SUPABASE_URL + '/rest/v1/ca_edits'
+        + '?status=eq.change_log'
+        + '&sheet_key=eq.' + encodeURIComponent(sheetKey)
+        + '&order=submitted_at.desc'
+        + '&limit=20&select=*';
+      const r = await fetch(url, { headers: supaHeaders() });
+      const rows = r.ok ? await r.json() : [];
+      // Keep only entries from the OTHER side.
+      const myRole = caOpenShare ? 'ca' : 'lender';
+      const filtered = (Array.isArray(rows) ? rows : [])
+        .filter(x => (x.edited_data?._direction || '') !== myRole);
+      setRecentChanges(filtered);
+    } catch { setRecentChanges([]); }
   };
 
   const acceptCAEdit = async (edit) => {
@@ -12424,9 +12513,10 @@ ${extraPages}
               caName={showCADiff.ca_name}
               clientName={showCADiff.client_name}
               accepting={acceptingCAEdit}
-              onAccept={()=>acceptCAEdit(showCADiff)}
-              onReject={()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(showCADiff.id); }}
+              onAccept={showCADiff._viewOnly ? (()=>setShowCADiff(null)) : (()=>acceptCAEdit(showCADiff))}
+              onReject={showCADiff._viewOnly ? (()=>setShowCADiff(null)) : (()=>{ if(window.confirm('Reject these CA changes?')) rejectCAEdit(showCADiff.id); })}
               onClose={()=>setShowCADiff(null)}
+              viewOnly={!!showCADiff._viewOnly}
             />
           )}
 
@@ -13044,6 +13134,16 @@ ${extraPages}
           }),
         });
       } catch {}
+      // Change log — lender sees this as "CA edited — view diff" on open.
+      try {
+        await logSheetChange(
+          'ca',
+          caOpenShare.sheet_data || {},
+          data,
+          caOpenShare.sheet_key,
+          { share_id: caOpenShare.id, ca_user_id: session?.user?.id, client_name: caOpenShare.client_name }
+        );
+      } catch {}
       alert('Saved. Your changes are now on the lender\'s sheet.');
       // Stay on the wizard with the CA's edits visible — no reset. Also
       // update caOpenShare's local copy of sheet_data so if the CA
@@ -13328,6 +13428,32 @@ ${extraPages}
 
       {activeTab === "balance" && (
         <div>
+          {/* Change-log banner — "{Name} edited this sheet on {date} — [View diff]".
+              Visible to both lender (CA edits) and CA (lender edits). Clicking
+              opens the existing CAEditDiff modal in view-only mode. */}
+          {recentChanges.length > 0 && (
+            <div style={{background:'#eff6ff',borderBottom:'0.5px solid #93c5fd',padding:'8px 20px',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',fontSize:13}}>
+              <span style={{color:'#1e40af',fontWeight:600}}>
+                {recentChanges[0].edited_data?._direction === 'ca' ? '📝' : '🔄'}{' '}
+                {recentChanges[0].edited_data?._changedByName || (recentChanges[0].edited_data?._direction === 'ca' ? 'CA' : 'Lender')}
+                {' '}edited this sheet on{' '}
+                {new Date(recentChanges[0].submitted_at || recentChanges[0].edited_data?._changedAt || Date.now()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}
+              </span>
+              <button onClick={()=>setShowCADiff({
+                ...recentChanges[0],
+                original: recentChanges[0].edited_data?._baseline || {},
+                ca_name:  recentChanges[0].edited_data?._changedByName
+                           || (recentChanges[0].edited_data?._direction === 'ca' ? 'CA' : 'Lender'),
+                _viewOnly: true,
+              })}
+                style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:5,padding:'4px 12px',fontWeight:700,cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
+                View diff
+              </button>
+              {recentChanges.length > 1 && (
+                <span style={{color:'#6b7280',fontSize:11}}>+ {recentChanges.length - 1} earlier change{recentChanges.length>2?'s':''}</span>
+              )}
+            </div>
+          )}
           <div className="progress-bar-wrap">
             <div className="progress-label">Step {step+1} of {STEPS.length}</div>
             <div className="progress-track">
