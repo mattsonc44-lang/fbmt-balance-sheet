@@ -708,8 +708,8 @@ function deriveCollateral(d) {
     receivables:     (d.receivables||[]).filter(isColl).reduce((s,r) => s + n(r.amount), 0),
     cropsHarvested:  (d.farmProducts||[]).filter(isColl).reduce((s,r) => s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0),
     cropsUnharvested:(d.cropInvestment||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
-    livestockMkt:    (d.livestockMarket||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
-    livestockBreed:  (d.breedingStock||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
+    livestockMkt:    (d.livestockMarket||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(n(r.share||'100')/100), 0),
+    livestockBreed:  (d.breedingStock||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(n(r.share||'100')/100), 0),
     farmEquipment:   (d.machinery||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
     rollingStock:    (d.vehicles||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
     otherEquipment:  n(c.otherEquipmentValue),
@@ -1073,13 +1073,15 @@ function BudgetView({
             <span className="bg-col-label" style={{flex:1}}>Type / Variety</span>
             <span className="bg-col-label" style={{width:90}}>Lbs/Head</span>
             <span className="bg-col-label" style={{width:110}}>Price / Lb</span>
+            <span className="bg-col-label" style={{width:70}}>Share %</span>
             <span className="bg-col-label" style={{width:115}}>Value</span>
             <span style={{width:32}}></span>
           </div>
           {data.budgetLivestock.map((r, i) => {
             const defaultPrice = lookupPrice(r.type);
             const effectivePrice = defaultPrice || r.price;
-            const rv = numVal(r.head) * numVal(r.lbs) * numVal(effectivePrice);
+            const sharePct = numVal(r.share ?? "100") / 100;
+            const rv = numVal(r.head) * numVal(r.lbs) * numVal(effectivePrice) * sharePct;
             return (
               <div key={i} className="bg-row" data-rowkey={`budgetLivestock-${i}`}>
                 <span className="row-num">{i+1}</span>
@@ -1110,13 +1112,20 @@ function BudgetView({
                   </div>
                   {defaultPrice && <div style={{fontSize:".65rem",color:"#888",textAlign:"center",marginTop:1}}>list price</div>}
                 </div>
+                <div className="input-group" style={{width:70,flexShrink:0}}>
+                  <div className="input-wrap" title="Ownership share — total value × share%">
+                    <input type="text" value={r.share ?? "100"} placeholder="100"
+                      onChange={e => setArr("budgetLivestock",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
                 <CalcRow value={rv} style={{width:115}} />
                 <button className="remove-btn" onClick={() => removeRow("budgetLivestock",i)}>x</button>
               </div>
             );
           })}
           <button className="add-btn"
-            onClick={() => addRow("budgetLivestock",{head:"",type:"",lbs:"",price:""})}>
+            onClick={() => addRow("budgetLivestock",{head:"",type:"",lbs:"",price:"",share:"100"})}>
             + Add Livestock
           </button>
           <div className="budget-subtotal">
@@ -8780,13 +8789,13 @@ Question: ${q}`,
   const fedPay = Array.isArray(data.federalPayments)
     ? data.federalPayments.reduce((s,r)=>s+n(r.amount),0)
     : n(data.federalPayments);
-  const lsMktTotal = data.livestockMarket.reduce((s,r)=>s+n(r.value),0);
+  const lsMktTotal = data.livestockMarket.reduce((s,r)=>s+n(r.value)*(n(r.share||'100')/100),0);
   const farmProdTotal = data.farmProducts.reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||"100")/100),0);
   const cropInv = data.cropInvestment.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const suppliesTotal = data.supplies.reduce((s,r)=>s+n(r.value),0);
   const otherCurTotal = data.otherCurrent.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentAssets = cashTotal+recTotal+fedPay+lsMktTotal+farmProdTotal+cropInv+suppliesTotal+otherCurTotal;
-  const breedingTotal = data.breedingStock.reduce((s,r)=>s+n(r.value),0);
+  const breedingTotal = data.breedingStock.reduce((s,r)=>s+n(r.value)*(n(r.share||'100')/100),0);
   const reTotal = data.realEstate.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const reConTotal = data.reContracts.reduce((s,r)=>s+n(r.amount),0);
   const vehiclesVal = data.vehicles.reduce((s,r)=>s+n(r.value),0);
@@ -8835,7 +8844,9 @@ Question: ${q}`,
     // Exact match only — see note in lookupPrice.
     const exact = needle ? commodityPrices.find(p=>p.name&&p.name.toLowerCase().trim()===needle) : null;
     const ep = exact ? exact.price : r.price;
-    return s+n(r.head)*n(r.lbs)*n(ep);
+    // Share % defaults to 100 when missing (back-compat with pre-share rows).
+    const sharePct = n(r.share||"100")/100;
+    return s+n(r.head)*n(r.lbs)*n(ep)*sharePct;
   },0);
   const budgetMiscTotal = data.budgetMisc.reduce((s,r)=>s+n(r.amount),0);
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
@@ -10243,7 +10254,7 @@ FORMAT RULES — follow exactly:
 
 
 
-  const makeBSHTML = (d, withCover=false, extraPages='', linkedNW={}) => {
+  const makeBSHTML = (d, withCover=false, extraPages='', linkedNW={}, priceCheck={}) => {
     const m = numVal;
     const pFmt = v => v && m(v) ? "$"+Number(m(v)).toLocaleString("en-US",{maximumFractionDigits:0}) : "";
     const blank = (arr, min) => { const r=[...arr]; while(r.length<min) r.push({}); return r; };
@@ -10447,18 +10458,79 @@ ${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const lt=Math.max(
 <div class="sched-title" style="margin-top:18pt">Farm Machinery and Equipment Schedule</div>
 <table class="sched-table">
   <thead><tr>
-    <th style="width:7%">Year</th>
-    <th style="width:30%">Make and Model</th>
-    <th style="width:12%">Size</th>
-    <th style="width:18%">Serial Number</th>
-    <th style="width:13%">Condition</th>
-    <th class="r" style="width:20%">Value</th>
+    <th style="width:6%">Year</th>
+    <th style="width:26%">Make and Model</th>
+    <th style="width:10%">Size</th>
+    <th style="width:15%">Serial Number</th>
+    <th style="width:11%">Condition</th>
+    <th class="r" style="width:16%">Value</th>
+    <th class="r" style="width:16%">Comp Range</th>
   </tr></thead>
   <tbody>
-    ${(d.machinery.length ? d.machinery : [{year:"",make:"",size:"",serial:"",condition:"",value:""}]).map(r=>`<tr><td>${r.year||""}</td><td>${r.make||""}</td><td>${r.size||""}</td><td style="font-size:6.5pt">${r.serial||""}</td><td>${r.condition||""}</td><td class="r">${pFmt(r.value)}</td></tr>`).join("")}
+    ${(d.machinery.length ? d.machinery : [{year:"",make:"",size:"",serial:"",condition:"",value:""}]).map((r,i)=>{
+      const chk = priceCheck && priceCheck[i];
+      let compCell = '';
+      if (chk && (chk.low || chk.high)) {
+        const color = chk.status === 'ok'   ? '#15803d'
+                    : chk.status === 'high' ? '#991b1b'
+                    : chk.status === 'low'  ? '#92400e'
+                    :                          '#6b7280';
+        const flag  = chk.status === 'ok'   ? '✓'
+                    : chk.status === 'high' ? '▲'
+                    : chk.status === 'low'  ? '▼'
+                    :                          '?';
+        compCell = `<span style="color:${color};font-weight:600">${flag} ${pFmt(chk.low)}–${pFmt(chk.high)}</span>`;
+      } else if (chk && chk.status === 'unknown') {
+        compCell = `<span style="color:#6b7280">? no comps</span>`;
+      }
+      return `<tr><td>${r.year||""}</td><td>${r.make||""}</td><td>${r.size||""}</td><td style="font-size:6.5pt">${r.serial||""}</td><td>${r.condition||""}</td><td class="r">${pFmt(r.value)}</td><td class="r" style="font-size:7pt">${compCell}</td></tr>`;
+    }).join("")}
   </tbody>
 </table>
 <div class="sched-foot"><div class="sched-total">TOTAL MACHINERY AND EQUIPMENT: ${pFmt(machVal)||"$0"}</div></div>
+${(() => {
+  // Price-check appendix — one row per flagged piece with the source note.
+  if (!priceCheck || !Object.keys(priceCheck).length) return '';
+  const flagged = (d.machinery||[])
+    .map((r,i) => ({ r, i, chk: priceCheck[i] }))
+    .filter(x => x.chk && (x.chk.note || x.chk.low || x.chk.high));
+  if (!flagged.length) return '';
+  return `
+    <div class="sched-title" style="margin-top:14pt;font-size:9pt">Equipment Value Check — Market Comp Notes</div>
+    <table class="sched-table" style="font-size:7.5pt">
+      <thead><tr>
+        <th style="width:28%">Equipment</th>
+        <th style="width:10%">Declared</th>
+        <th style="width:17%">Comp Range</th>
+        <th style="width:10%">Status</th>
+        <th style="width:35%">Source / Note</th>
+      </tr></thead>
+      <tbody>
+        ${flagged.map(({r,chk}) => {
+          const statusLabel = chk.status === 'ok'      ? 'Within range'
+                            : chk.status === 'high'    ? 'HIGH vs market'
+                            : chk.status === 'low'     ? 'LOW vs market'
+                            : chk.status === 'unknown' ? 'No comps'
+                            :                            '';
+          const color = chk.status === 'ok'   ? '#15803d'
+                      : chk.status === 'high' ? '#991b1b'
+                      : chk.status === 'low'  ? '#92400e'
+                      :                          '#6b7280';
+          return `<tr>
+            <td>${(r.year||'')} ${(r.make||'')}${r.size?' · '+r.size:''}</td>
+            <td class="r">${pFmt(r.value)}</td>
+            <td class="r">${chk.low||chk.high ? pFmt(chk.low)+'–'+pFmt(chk.high) : '—'}</td>
+            <td style="color:${color};font-weight:600">${statusLabel}</td>
+            <td style="font-size:7pt;color:#374151">${(chk.note||'').replace(/</g,'&lt;')}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    <div style="font-size:6.5pt;color:#6b7280;margin-top:3pt;font-style:italic">
+      Comp ranges from live web search of auction &amp; dealer listings — treat as sanity-check reference, not formal appraisal.
+    </div>
+  `;
+})()}
 </div>
 ${extraPages}
 </body></html>`;
@@ -10470,7 +10542,7 @@ ${extraPages}
     if (!W) { alert('Print window was blocked — please allow popups for this site.'); return; }
     let html = '';
     try {
-      html = makeBSHTML(data, withCover, extraPages, linkedEntityNWMap);
+      html = makeBSHTML(data, withCover, extraPages, linkedEntityNWMap, machPriceCheck);
     } catch (e) {
       console.error('Print HTML build failed:', e);
       html = `<html><body style="font:14px system-ui;padding:24px;color:#7a1a1a">
@@ -10885,11 +10957,20 @@ ${extraPages}
               <TxtInp label="Number" value={r.number} onChange={v=>setArr("livestockMarket",i,"number",v)} placeholder="# head" />
               <TxtInp label="Kind and Weight" value={r.kind} onChange={v=>setArr("livestockMarket",i,"kind",v)} placeholder="e.g., 450 lb steers" />
               <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("livestockMarket",i,"value",v)} />
+              <div className="input-group" style={{width:80,flexShrink:0}}>
+                <label>Share %</label>
+                <div className="input-wrap">
+                  <input type="text" value={r.share ?? "100"} placeholder="100"
+                    title="Ownership share — total value × share%"
+                    onChange={e=>setArr("livestockMarket",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                  <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                </div>
+              </div>
               <CollChk field="livestockMarket" i={i} r={r} />
               <button className="remove-btn" onClick={()=>removeRow("livestockMarket",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("livestockMarket",{number:"",kind:"",value:""})}>+ Add Livestock</button>
+          <button className="add-btn" onClick={()=>addRow("livestockMarket",{number:"",kind:"",value:"",share:"100"})}>+ Add Livestock</button>
           <div className="subtotal-row"><span>Total Market Livestock</span><strong>{fmt(lsMktTotal)}</strong></div>
         </div>
       );
@@ -11048,11 +11129,20 @@ ${extraPages}
               <TxtInp label="Number" value={r.number} onChange={v=>setArr("breedingStock",i,"number",v)} placeholder="# head" />
               <TxtInp label="Kind" value={r.kind} onChange={v=>setArr("breedingStock",i,"kind",v)} placeholder="e.g., Angus cows" />
               <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("breedingStock",i,"value",v)} />
+              <div className="input-group" style={{width:80,flexShrink:0}}>
+                <label>Share %</label>
+                <div className="input-wrap">
+                  <input type="text" value={r.share ?? "100"} placeholder="100"
+                    title="Ownership share — total value × share%"
+                    onChange={e=>setArr("breedingStock",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                  <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                </div>
+              </div>
               <CollChk field="breedingStock" i={i} r={r} />
               <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
             </div>
           ))}
-          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",value:""})}>+ Add Breeding Stock</button>
+          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",value:"",share:"100"})}>+ Add Breeding Stock</button>
           <div className="subtotal-row"><span>Total Breeding Stock</span><strong>{fmt(breedingTotal)}</strong></div>
         </div>
       );
