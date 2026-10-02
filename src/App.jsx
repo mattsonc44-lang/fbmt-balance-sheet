@@ -681,7 +681,10 @@ const COLLATERAL_CATEGORIES = [
   { key:'otherEquipment', label:'Other Equipment',            realization:0.50, liqCost:0.10, section:'equipment', source:'otherEquipmentValue' },
   { key:'landBuildings',  label:'Land and Buildings',         realization:0.70, liqCost:0.10, section:'realEstate' },
   { key:'buildings',      label:'Buildings',                  realization:0.70, liqCost:0.10, section:'realEstate', source:'buildingsValue' },
-  { key:'cash',           label:'Cash',                       realization:1.00, liqCost:0.00, section:'cash' },
+  // Cash is NOT taken as collateral at FBMT — always realized at 0% so it
+  // contributes nothing to the collateral worksheet, even though it still
+  // shows on the balance sheet as a current asset.
+  { key:'cash',           label:'Cash',                       realization:0.00, liqCost:0.00, section:'cash' },
   { key:'other',          label:'Other Collateral',           realization:0.50, liqCost:0.25, section:'other',     source:'otherCollateralValue' },
 ];
 function deriveCollateral(d) {
