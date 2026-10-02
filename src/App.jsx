@@ -7064,6 +7064,120 @@ export default function BalanceSheet() {
       }
       .insight-line { margin: 4px 0 !important; }
       .insight-gap  { height: 6px !important; }
+
+      /* ──────────────────────────────────────────────────────────────────
+         Responsive — iPad landscape, iPad portrait, phone.
+         The desktop layout is a 3-column grid (sidebar | card | right-panel).
+         Below 1200px we drop the right-panel below the card. Below 900px
+         we move the sidebar from a left column to a horizontal strip above
+         the card. Below 640px we go full-width and let wide inner tables
+         (machinery, collateral, print-schedule) scroll horizontally so no
+         content gets clipped.
+         Nothing in here is JS — reload and resize the window to test.
+         ────────────────────────────────────────────────────────────────── */
+
+      /* iPad landscape and below — tighten the main container padding and
+         let the right-panel stack below the card so the data entry card
+         gets the full width it needs. */
+      @media (max-width: 1200px) {
+        .main { max-width: 100% !important; padding: 14px 16px !important; grid-template-columns: 180px 1fr !important; grid-template-areas: 'sidebar card' 'right right' !important; }
+        .sidebar { grid-area: sidebar; }
+        .card { grid-area: card; }
+        .right-panel { grid-area: right; width: auto !important; max-width: 100% !important; margin-top: 12px; }
+        .running-total { display: flex !important; gap: 24px !important; justify-content: space-around !important; padding: 10px 14px !important; }
+        .running-total .rt-item { flex: 1; text-align: center; }
+      }
+
+      /* iPad portrait — sidebar becomes a horizontal pill strip above
+         the card. Each sidebar-section is a scrollable row of chips so
+         all steps stay reachable with a single swipe. */
+      @media (max-width: 900px) {
+        .main { grid-template-columns: 1fr !important; grid-template-areas: 'sidebar' 'card' 'right' !important; padding: 10px 12px !important; }
+        .sidebar { grid-area: sidebar; width: 100% !important; max-width: 100% !important; display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+        .sidebar-section { display: flex !important; align-items: center; gap: 6px; overflow-x: auto; padding: 2px 0 !important; margin: 0 !important; -webkit-overflow-scrolling: touch; }
+        .sidebar-section::-webkit-scrollbar { height: 0; }
+        .sidebar-section-label { flex-shrink: 0; margin-right: 4px; }
+        .sidebar-item { flex-shrink: 0; white-space: nowrap; border: 0.5px solid #e5e7eb; padding: 5px 10px !important; border-radius: 999px !important; }
+        .sidebar-item.active { border-left: 0.5px solid #6B0E1E !important; border-radius: 999px !important; padding-left: 10px !important; background: #6B0E1E !important; color: white !important; }
+        .sidebar-item.done::before { content: "✓ " !important; }
+        .card-body { padding: 14px 16px !important; }
+        .card-nav { padding: 10px 16px !important; flex-wrap: wrap; gap: 8px; }
+
+        /* Tab bar: let it scroll horizontally if labels overflow. */
+        .tab-bar { overflow-x: auto !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; }
+        .tab-bar::-webkit-scrollbar { height: 0; }
+        .tab-btn { flex-shrink: 0; }
+
+        /* Top bar: drop the "Agricultural Financial Tools" subtitle on tight
+           screens, and allow the right-side pills to wrap. */
+        .top-bar { padding: 10px 14px !important; flex-wrap: wrap !important; row-gap: 6px !important; }
+        .top-bar .tool-name { display: none !important; }
+        .tab-bar { top: 42px !important; } /* match tightened top-bar height */
+      }
+
+      /* Phone — single-column everywhere, inputs become full-width rows
+         rather than horizontally-packed columns, and any inherently-wide
+         table (machinery/vehicles schedule, collateral grid) scrolls
+         inside its container so we don't blow out the viewport. */
+      @media (max-width: 640px) {
+        .main { padding: 8px 10px !important; }
+        .top-bar { padding: 8px 12px !important; font-size: 12px !important; }
+        .top-bar .bank-name { font-size: 12px !important; }
+        .top-bar > button { margin-right: 6px !important; }
+
+        .card-body { padding: 10px 12px !important; }
+        .card-nav  { padding: 8px 12px !important; }
+        .step-content { font-size: 13px; }
+
+        /* Row-entry (receivables, livestock, breeding stock, etc.) —
+           inputs wrap to multiple lines, each spanning full width. */
+        .row-entry { flex-wrap: wrap !important; gap: 6px !important; padding: 8px !important; }
+        .row-entry .input-group { flex: 1 1 100% !important; min-width: 0 !important; }
+        .row-entry .row-num { flex: 0 0 auto; }
+        .row-entry .remove-btn { position: absolute; right: 6px; top: 6px; }
+
+        /* Machinery / Vehicles / Farm Products / Crop Investment / Real Estate
+           tables keep their table layout but scroll horizontally. */
+        .mach-table, .fp-row, .bg-row {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+        .mach-row, .fp-row, .bg-row { min-width: 640px; }
+        .mach-header, .fp-header-row, .bg-header-row { min-width: 640px; }
+
+        /* Collateral worksheet — the fixed-column grid is too wide for phones.
+           Wrap it in a horizontal scroller instead of letting it clip. */
+        .step-content > div[style*="gridTemplateColumns"],
+        .step-content > div > div[style*="grid-template-columns"] {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        /* Running total — compact vertical pill. */
+        .running-total { flex-wrap: wrap !important; gap: 10px !important; padding: 8px 10px !important; }
+        .running-total .rt-item strong { font-size: 15px !important; }
+
+        /* Hide the sidebar completely on phones — the tab bar + the wizard's
+           Back/Next buttons + the "Step X of Y" indicator are enough to
+           navigate, and vertical pixels are the scarcest resource here. */
+        .sidebar { display: none !important; }
+        .main { grid-template-areas: 'card' 'right' !important; }
+
+        /* Section headers — tighten so they don't eat half the viewport. */
+        .sec-hdr { padding: 10px 12px !important; }
+        .sec-hdr-title { font-size: 15px !important; }
+        .sec-hdr-sub   { font-size: 11px !important; }
+
+        /* Modals (import, lender package, CA edit diff, etc.) — fill the
+           phone viewport with scroll instead of trying to center a desktop
+           rectangle in it. */
+        .modal, .modal-body, [role="dialog"] {
+          max-width: 100vw !important;
+          max-height: 100vh !important;
+          margin: 0 !important;
+          border-radius: 0 !important;
+        }
+      }
     `;
     if (!document.getElementById("fbmt-modern")) document.head.appendChild(modern);
   }, []);
