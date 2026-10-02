@@ -27,17 +27,25 @@ export const handler = async (event) => {
       budget:        'Budget',
       inspection:    'Ag Inspection',
       ca_edit:       'CA Edit',
+      lender_update: 'Lender Update',
     }[type] || 'Form';
 
-    // Two different email templates: customer submissions vs. CA edits.
-    const isCaEdit = type === 'ca_edit';
+    // Three templates: customer submission, CA edit (→ lender), lender update (→ CA).
+    const isCaEdit       = type === 'ca_edit';
+    const isLenderUpdate = type === 'lender_update';
 
-    const heading  = isCaEdit ? 'CA Changes Submitted for Review' : 'Customer Submission Received';
-    const icon     = isCaEdit ? '📝' : '📬';
-    const subject  = isCaEdit
+    const heading = isLenderUpdate ? 'Lender Updated a Shared Balance Sheet'
+                  : isCaEdit       ? 'CA Changes Submitted for Review'
+                  :                   'Customer Submission Received';
+    const icon    = isLenderUpdate ? '🔄' : isCaEdit ? '📝' : '📬';
+    const subject = isLenderUpdate
+      ? `🔄 ${caName || 'Lender'} updated ${clientName || 'a shared sheet'}`
+      : isCaEdit
       ? `📝 ${caName || 'A CA'} submitted edits to ${clientName || 'a client'}`
       : `📬 ${clientName || 'Customer'} submitted their ${typeLabel}`;
-    const bodyText = isCaEdit
+    const bodyText = isLenderUpdate
+      ? `<strong>${caName || 'The lender'}</strong> saved updates to <strong>${clientName || 'a shared'}</strong> balance sheet. Open the app to see the latest numbers — your previously-shared view has been refreshed.`
+      : isCaEdit
       ? `<strong>${caName || 'A credit analyst'}</strong> submitted proposed edits to <strong>${clientName || 'a client\'s'}</strong> balance sheet. Open the app to review and accept or reject the changes.`
       : `<strong>${clientName || 'A customer'}</strong> has submitted their <strong>${typeLabel}</strong> and it is ready for your review.`;
 
