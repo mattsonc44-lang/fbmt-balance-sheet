@@ -7421,11 +7421,76 @@ Question: ${q}`,
       set("folderPath", fp);
       setSaveStatus("saved");
       await loadSavedList();
+      // If this sheet is shared with any CA(s), notify them of the lender's
+      // update + refresh their sheet_data snapshot so when they open the share
+      // they see the new numbers (and can diff against their last-seen copy).
+      notifySharedCAs(key, savePayload).catch(()=>{});
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (err) {
       setSaveStatus(err.message || "error");
       setTimeout(() => setSaveStatus(null), 8000);
     }
+  };
+
+  // Find any active CA shares pointing at this sheet_key. For each, refresh
+  // the share's sheet_data snapshot (so the CA sees current numbers next open)
+  // and fire a notify-submission email so they know changes landed. Best-effort
+  // — never blocks the save.
+  const notifySharedCAs = async (sheetKey, savedPayload) => {
+    if (!isConfigured() || !session?.user?.id) return;
+    try {
+      const r = await fetch(
+        SUPABASE_URL + '/rest/v1/ca_shares?sheet_key=eq.' + encodeURIComponent(sheetKey)
+          + '&lender_user_id=eq.' + session.user.id
+          + '&select=id,ca_user_id,client_name',
+        { headers: supaHeaders() }
+      );
+      if (!r.ok) return;
+      const shares = await r.json();
+      if (!Array.isArray(shares) || !shares.length) return;
+      // Resolve CA emails from profiles for notifications.
+      const caIds = [...new Set(shares.map(s => s.ca_user_id).filter(Boolean))];
+      const emailMap = {};
+      if (caIds.length) {
+        try {
+          const pr = await fetch(
+            SUPABASE_URL + '/rest/v1/profiles?id=in.(' + caIds.join(',') + ')&select=id,email',
+            { headers: supaHeaders() }
+          );
+          const profs = pr.ok ? await pr.json() : [];
+          for (const p of (profs||[])) emailMap[p.id] = p.email;
+        } catch {}
+      }
+      const nowIso = new Date().toISOString();
+      // Patch each share row's snapshot so CAs see fresh data on open.
+      for (const sh of shares) {
+        try {
+          await fetch(
+            SUPABASE_URL + '/rest/v1/ca_shares?id=eq.' + sh.id,
+            {
+              method: 'PATCH',
+              headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
+              body: JSON.stringify({ sheet_data: savedPayload, _lastLenderUpdate: nowIso }),
+            }
+          );
+        } catch {}
+        // Email the CA.
+        try {
+          await fetch('/.netlify/functions/notify-submission', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'lender_update',
+              clientName: sh.client_name || savedPayload.clientName || '',
+              shareId: sh.id,
+              submittedAt: nowIso,
+              lenderEmail: emailMap[sh.ca_user_id] || '',  // email target = the CA
+              caName: profile?.full_name || session?.user?.email || 'Lender',
+            }),
+          });
+        } catch {}
+      }
+    } catch {}
   };
   const loadSheet = async (key) => {
     if (!key) { alert("Couldn't open that sheet — no storage key was provided."); return; }
@@ -11703,11 +11768,6 @@ ${extraPages}
                   title="Save straight to the lender's sheet — no review step. Requires an active share.">
                   {caDirectSaving ? 'Saving…' : '💾 Save Balance Sheet'}
                 </button>
-                <button className="btn" onClick={submitCaEditFromWizard}
-                  style={{background:'#fbbf24',color:'#1a1a1a'}}
-                  title="Send this as a proposed edit for lender review — original stays untouched until approved.">
-                  📝 Submit for Review
-                </button>
                 <button className="btn btn-secondary"
                   onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}>
                   ← Back to Portal
@@ -12945,8 +13005,8 @@ ${extraPages}
       return;
     }
     if (!window.confirm(
-      `Save these changes DIRECTLY to ${caOpenShare.client_name}'s sheet?\n\n` +
-      `This overwrites the lender's copy — no review step. Click Cancel if you'd rather Submit for Review instead.`
+      `Save these changes to ${caOpenShare.client_name}'s sheet?\n\n` +
+      `The lender will be notified of your edits.`
     )) return;
     setCaDirectSaving(true);
     try {
@@ -12991,7 +13051,7 @@ ${extraPages}
       // patches the row on Supabase so future opens see it too).
       setCaOpenShare(prev => prev ? { ...prev, sheet_data: { ...(prev.sheet_data||{}), ...data, _lastCAEdit: new Date().toISOString() } } : prev);
     } catch (e) {
-      alert('Direct save failed: ' + (e.message || e) + '\n\nIf the ca-save function isn\'t deployed yet, use "Submit for Review" instead.');
+      alert('Save failed: ' + (e.message || e));
     }
     setCaDirectSaving(false);
   };
@@ -13001,15 +13061,11 @@ ${extraPages}
     <div className="app">
       {caOpenShare && (
         <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13,gap:12,flexWrap:'wrap'}}>
-          <span>📝 <strong>CA Full-Edit Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Edit any field. Use <strong>Save</strong> to write directly to the lender's sheet, or <strong>Submit for Review</strong> for the approval workflow.</span>
+          <span>📝 <strong>CA Full-Edit Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Edit any field. Click <strong>Save</strong> and the lender is notified of your changes.</span>
           <div style={{display:'flex',gap:8}}>
             <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}
               style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
               ← Back to Portal
-            </button>
-            <button onClick={submitCaEditFromWizard}
-              style={{background:'#fbbf24',color:'#1a1a1a',border:'none',borderRadius:5,padding:'4px 16px',cursor:'pointer',fontSize:12,fontFamily:'inherit',fontWeight:700}}>
-              ✅ Submit Changes to Lender
             </button>
           </div>
         </div>
@@ -13212,6 +13268,22 @@ ${extraPages}
         <span className="divider">|</span>
         <span className="tool-name">Agricultural Financial Tools</span>
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+          {/* Always-visible Save button — works from any wizard step, no more trip to Summary. */}
+          {data.clientName && (screen === "wizard") && (
+            caOpenShare ? (
+              <button onClick={caDirectSave} disabled={caDirectSaving}
+                title="Save straight to the lender's sheet. The lender will be notified."
+                style={{background:caDirectSaving?'#6b7280':'#15803d',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:caDirectSaving?'default':'pointer',fontFamily:'inherit'}}>
+                {caDirectSaving ? '💾 Saving…' : '💾 Save'}
+              </button>
+            ) : (
+              <button onClick={saveSheet} disabled={!data.clientName || saveStatus === "saving"}
+                title={`Save balance sheet${(savedSheets && savedSheets.length && originalKey) ? ' (updates the shared copy and notifies any CA)' : ''}`}
+                style={{background:saveStatus==="saved"?'#15803d':saveStatus==="saving"?'#6b7280':'#15803d',color:'white',border:'none',borderRadius:6,padding:'5px 14px',fontWeight:700,fontSize:'.8rem',cursor:saveStatus==="saving"?'default':'pointer',fontFamily:'inherit'}}>
+                {saveStatus === "saving" ? '💾 Saving…' : saveStatus === "saved" ? '✓ Saved' : saveStatus && saveStatus !== "error" ? '⚠ ' + saveStatus.slice(0,40) : '💾 Save'}
+              </button>
+            )
+          )}
           {data.clientName && <span style={{opacity:.8,fontSize:".85rem"}}>{data.clientName}</span>}
           {session?.user?.email && <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
           {(pendingReviews.length + pendingCAEdits.length) > 0 && (
@@ -13361,11 +13433,6 @@ ${extraPages}
                   disabled={caDirectSaving}
                   title="Save straight to the lender's sheet — same button behavior as the balance-sheet tab.">
                   {caDirectSaving ? 'Saving…' : '💾 Save Budget'}
-                </button>
-                <button className="btn" onClick={submitCaEditFromWizard}
-                  style={{background:'#fbbf24',color:'#1a1a1a',fontSize:'.85rem'}}
-                  title="Send this as a proposed edit for lender review.">
-                  📝 Submit for Review
                 </button>
               </>
             ) : (
