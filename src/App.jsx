@@ -642,7 +642,7 @@ const STEPS = [
   "livestock_market","farm_products","crop_investment","supplies","other_current",
   "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets",
   "liab_intro","operating_notes","accounts_due","intermediate_debt","re_debt",
-  "taxes_due","other_current_liab","other_liabilities","summary"
+  "taxes_due","other_current_liab","other_liabilities","collateral","summary"
 ];
 const STEP_LABELS = {
   intro:"Client Info", cash_glacier:"Glacier Bank", cash_other:"Other Banks",
@@ -654,13 +654,107 @@ const STEP_LABELS = {
   liab_intro:"Liabilities", operating_notes:"Operating Notes", accounts_due:"Accounts Due",
   intermediate_debt:"Term Debt", re_debt:"Real Estate Debt", taxes_due:"Taxes Due",
   other_current_liab:"Other Curr. Liab",
-  other_liabilities:"Other Liabilities", summary:"Summary"
+  other_liabilities:"Other Liabilities", collateral:"Collateral", summary:"Summary"
 };
 const ASSET_STEPS = ["cash_glacier","cash_other","receivables","federal_payments",
   "livestock_market","farm_products","crop_investment","supplies","other_current",
   "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets"];
 const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_debt",
   "taxes_due","other_current_liab","other_liabilities"];
+
+// ── Collateral valuation defaults ──────────────────────────────────────────
+// Per-category realization % + liquidation cost % per the FBMT Agricultural
+// Collateral Valuation worksheet. Each row maps a category to the balance-sheet
+// fields it pulls book value from. Users can override realization % per row;
+// liquidation cost is applied in the recap at the bottom.
+const COLLATERAL_CATEGORIES = [
+  { key:'cd',             label:'Certificate of Deposit',     realization:1.00, liqCost:0.00, section:'cash',      source:'cdValue' },
+  { key:'govtPmts',       label:'Government Payments',        realization:0.90, liqCost:0.00, section:'cash' },
+  { key:'cropsHarvested', label:'Crops — Harvested',          realization:0.85, liqCost:0.10, section:'crops' },
+  { key:'cropsUnharvested',label:'Crops — Unharvested',       realization:0.85, liqCost:0.10, section:'crops' },
+  { key:'livestockMkt',   label:'Livestock — Market',         realization:0.85, liqCost:0.10, section:'livestock' },
+  { key:'livestockBreed', label:'Livestock — Breeding',       realization:0.85, liqCost:0.10, section:'livestock' },
+  { key:'farmEquipment',  label:'Farm Equipment',             realization:0.60, liqCost:0.10, section:'equipment' },
+  { key:'rollingStock',   label:'Rolling Stock (Titled Vehicles)', realization:0.80, liqCost:0.10, section:'equipment' },
+  { key:'otherEquipment', label:'Other Equipment',            realization:0.50, liqCost:0.10, section:'equipment', source:'otherEquipmentValue' },
+  { key:'landBuildings',  label:'Land and Buildings',         realization:0.70, liqCost:0.10, section:'realEstate' },
+  { key:'buildings',      label:'Buildings',                  realization:0.70, liqCost:0.10, section:'realEstate', source:'buildingsValue' },
+  { key:'cash',           label:'Cash',                       realization:1.00, liqCost:0.00, section:'cash' },
+  { key:'other',          label:'Other Collateral',           realization:0.50, liqCost:0.25, section:'other',     source:'otherCollateralValue' },
+];
+function deriveCollateral(d) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
+  const c = d.collateral || {};
+  const ov = c.realizationOverrides || {};
+  // ── Book-value lookups ──────────────────────────────────────────────────
+  const bookValues = {
+    cd:              n(c.cdValue),
+    govtPmts:        Array.isArray(d.federalPayments)
+                       ? d.federalPayments.reduce((s,r) => s + n(r.amount), 0)
+                       : n(d.federalPayments),
+    cropsHarvested:  (d.farmProducts||[]).reduce((s,r) => s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0),
+    cropsUnharvested:(d.cropInvestment||[]).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
+    livestockMkt:    (d.livestockMarket||[]).reduce((s,r) => s + n(r.value), 0),
+    livestockBreed:  (d.breedingStock||[]).reduce((s,r) => s + n(r.value), 0),
+    farmEquipment:   (d.machinery||[]).reduce((s,r) => s + n(r.value), 0),
+    rollingStock:    (d.vehicles||[]).reduce((s,r) => s + n(r.value), 0),
+    otherEquipment:  n(c.otherEquipmentValue),
+    landBuildings:   (d.realEstate||[]).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
+    buildings:       n(c.buildingsValue),
+    cash:            n(d.cashGlacier) + (d.cashOther||[]).reduce((s,r) => s + n(r.amount), 0),
+    other:           n(c.otherCollateralValue),
+  };
+  // ── Per-category gross & net ────────────────────────────────────────────
+  const categories = COLLATERAL_CATEGORIES.map(cat => {
+    const bookValue = bookValues[cat.key] || 0;
+    const realization = (ov[cat.key] !== undefined && ov[cat.key] !== '')
+      ? Math.max(0, Math.min(1, n(ov[cat.key]) / (n(ov[cat.key]) > 1 ? 100 : 1)))
+      : cat.realization;
+    const gross = bookValue * realization;
+    return { ...cat, bookValue, realization, gross };
+  });
+  // ── Section subtotals + superior-encumbrance deductions ─────────────────
+  const sum = (section) => categories.filter(c => c.section === section).reduce((s,c) => s + c.gross, 0);
+  const cashSection       = sum('cash');
+  const cropsSection      = sum('crops');
+  const livestockSection  = sum('livestock');
+  const equipmentGross    = sum('equipment');
+  const equipmentSupEnc   = n(c.equipmentSuperiorEnc);
+  const equipmentNet      = Math.max(0, equipmentGross - equipmentSupEnc);
+  const realEstateGross   = sum('realEstate');
+  const reSupEnc          = n(c.reSuperiorEnc);
+  const realEstateNet     = Math.max(0, realEstateGross - reSupEnc);
+  const otherSection      = sum('other');
+  // ── Recap (matches the FBMT Pro-forma Coll. Val. recap block) ───────────
+  const recap = [
+    { label:'Crops',       net: cropsSection,     liqCost: 0.10 },
+    { label:'Livestock',   net: livestockSection, liqCost: 0.10 },
+    { label:'Equipment',   net: equipmentNet,     liqCost: 0.10 },
+    { label:'Real Estate', net: realEstateNet,    liqCost: 0.10 },
+    { label:'Cash',        net: cashSection,      liqCost: 0.00 },
+    { label:'Other',       net: otherSection,     liqCost: 0.25 },
+  ].map(r => ({ ...r, costDollars: r.net * r.liqCost, netProceeds: r.net - (r.net * r.liqCost) }));
+  const totalGrossRecap   = recap.reduce((s,r) => s + r.net, 0);
+  const totalLiqCost      = recap.reduce((s,r) => s + r.costDollars, 0);
+  const totalNetProceeds  = recap.reduce((s,r) => s + r.netProceeds, 0);
+  // ── Loan balance for coverage ───────────────────────────────────────────
+  const autoLoanBalance   = (d.operatingNotes||[]).reduce((s,r) => s + n(r.balance), 0);
+  const loanBalance       = c.loanBalanceOverride !== undefined && c.loanBalanceOverride !== ''
+                              ? n(c.loanBalanceOverride) : autoLoanBalance;
+  const cushion           = totalNetProceeds - loanBalance;
+  const coveragePct       = loanBalance > 0 ? (totalNetProceeds / loanBalance) * 100 : null;
+  return {
+    categories, bookValues,
+    sections: {
+      cash: cashSection, crops: cropsSection, livestock: livestockSection,
+      equipmentGross, equipmentSupEnc, equipmentNet,
+      realEstateGross, reSupEnc, realEstateNet,
+      other: otherSection,
+    },
+    recap, totalGrossRecap, totalLiqCost, totalNetProceeds,
+    autoLoanBalance, loanBalance, cushion, coveragePct,
+  };
+}
 
 function emptyData() {
   return {
@@ -688,6 +782,26 @@ function emptyData() {
     // Long-Term section. Older sheets with reCurrent/reMortgages continue to
     // work; totals combine both sources.
     reDebt:[{lienHolder:"",annualPmt:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false}],
+    // ── Collateral valuation (lender-side analysis) ─────────────────────────
+    // Everything else on the sheet is the borrower's financial picture.
+    // `collateral` is the BANK's view of what the pledged assets would really
+    // be worth in a forced liquidation — book value × realization % − senior
+    // liens − liquidation cost. Values auto-populate from the balance sheet;
+    // only the overrides and manual-entry fields live here.
+    collateral: {
+      // Per-category realization % overrides. Blank/undefined → use defaults.
+      realizationOverrides: {},
+      // Superior encumbrances (senior liens) that reduce category net value.
+      equipmentSuperiorEnc: "",
+      reSuperiorEnc: "",
+      // Loan balance for the coverage calc. Blank → auto = sum of operating notes.
+      loanBalanceOverride: "",
+      // Manual entries (not derived from the balance sheet).
+      cdValue: "",
+      otherEquipmentValue: "",
+      buildingsValue: "",
+      otherCollateralValue: "",
+    },
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
     reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
     otherLiabilities:[{description:"",balance:""}],
@@ -6725,6 +6839,28 @@ export default function BalanceSheet() {
       /* Main layout — wider so long fields (farm product Kind, RE description,
          creditor names, etc.) aren't cramped. */
       .main { max-width: 1500px !important; padding: 20px 24px !important; }
+      /* Machinery step: break out wider than the card so Make/Model + the
+         price-check badges + detail notes can all breathe. */
+      .mach-wide .card,
+      .mach-wide .card-body { max-width: 1900px !important; }
+      body:has(.mach-wide) .main { max-width: 1950px !important; }
+      .mach-wide .mach-row { padding-right: 10px; }
+      .mach-pricecheck-detail {
+        grid-column: 1 / -1;
+        margin: 2px 0 10px 72px;
+        padding: 8px 12px;
+        background: #f9fafb;
+        border-left: 3px solid #6B0E1E;
+        border-radius: 0 6px 6px 0;
+        font-size: 11px;
+        color: #374151;
+        line-height: 1.5;
+      }
+      .mach-pricecheck-detail strong { color: #1a1a1a; }
+      .mach-pricecheck-detail.ok   { border-left-color: #15803d; }
+      .mach-pricecheck-detail.high { border-left-color: #b91c1c; background: #fef2f2; }
+      .mach-pricecheck-detail.low  { border-left-color: #92400e; background: #fffbeb; }
+      .mach-pricecheck-detail.unknown { border-left-color: #6b7280; background: #f3f4f6; }
 
       /* Sidebar — cleaner rows, subtle active state */
       .sidebar-section-label { color: #9ca3af !important; font-size: 10px !important; letter-spacing: .4px !important; padding: 4px 8px !important; }
@@ -10074,6 +10210,134 @@ ${extraPages}
     W.focus();
     setTimeout(()=>W.print(), 400);
   };
+
+  const handlePrintCollateral = () => {
+    const W = window.open("","_blank","width=900,height=1100");
+    if (!W) { alert('Print window was blocked — allow popups for this site.'); return; }
+    try {
+      const col = deriveCollateral(data);
+      const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+      const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const catRow = (c) => `<tr>
+        <td style="padding:3pt 6pt;font-size:8pt">${esc(c.label)}</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:right">${money(c.bookValue)}</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:center">${Math.round(c.realization*100)}%</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:right;font-weight:600">${money(c.gross)}</td>
+      </tr>`;
+      const inSection = s => col.categories.filter(c => c.section === s);
+      const html = `<!DOCTYPE html><html><head><title>Collateral Valuation — ${esc(data.clientName||'')}</title>
+<style>
+  @page { size: letter; margin: .45in .4in; }
+  body{font-family:Arial,sans-serif;font-size:8pt;color:#000;margin:0;padding:0}
+  h1{font-size:12pt;font-weight:700;text-decoration:underline;text-align:center;margin:0 0 2pt}
+  h2{font-size:10pt;font-weight:700;text-align:center;margin:0 0 10pt}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8pt;border-bottom:1.5pt solid #6B0E1E;padding-bottom:4pt}
+  table{width:100%;border-collapse:collapse;margin-bottom:6pt}
+  th{background:#1a1a1a;color:white;padding:3pt 6pt;font-size:7.5pt;text-align:left}
+  th.r{text-align:right}
+  td{border-bottom:.5pt dotted #ccc}
+  .sec{background:#f5e8ea;color:#6B0E1E;font-weight:700;padding:3pt 6pt;font-size:8pt;margin-top:6pt;letter-spacing:.3px;text-transform:uppercase}
+  .subt{display:flex;justify-content:space-between;padding:3pt 6pt;font-size:8pt;font-weight:700;background:#fafafa;border-top:.5pt solid #000}
+  .recap{border:1pt solid #6B0E1E;border-radius:3pt;overflow:hidden;margin-top:10pt}
+  .recap-head{background:#6B0E1E;color:white;padding:4pt 8pt;font-weight:700;font-size:9pt;text-transform:uppercase}
+  .cush{display:flex;justify-content:space-between;padding:5pt 8pt;font-weight:700;font-size:9pt;background:#dcfce7;color:#15803d;border-top:1pt solid #6B0E1E}
+  .cush.neg{background:#fee2e2;color:#991b1b}
+  @media print { .no-print{display:none} }
+</style></head><body>
+<button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
+<div class="hdr">
+  <div>
+    <h1>Agricultural Collateral Valuation — Current</h1>
+    <h2>${esc(data.clientName||'')}</h2>
+  </div>
+  <div style="text-align:right;font-size:8pt;color:#555">
+    First Bank of Montana<br/>
+    As of: ${esc(data.asOfDate||'')}<br/>
+    Printed: ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}
+  </div>
+</div>
+
+<table>
+  <thead><tr>
+    <th>Category</th>
+    <th class="r">Book / Appraised</th>
+    <th style="text-align:center">Realization %</th>
+    <th class="r">Gross Net Value</th>
+  </tr></thead>
+  <tbody>
+    <tr><td colspan="4" class="sec">Cash &amp; Equivalents</td></tr>
+    ${inSection('cash').map(catRow).join('')}
+    <tr><td colspan="4" class="sec">Crops</td></tr>
+    ${inSection('crops').map(catRow).join('')}
+    <tr><td colspan="4"><div class="subt"><span>CROP SUBTOTAL</span><span>${money(col.sections.crops)}</span></div></td></tr>
+    <tr><td colspan="4" class="sec">Livestock</td></tr>
+    ${inSection('livestock').map(catRow).join('')}
+    <tr><td colspan="4"><div class="subt"><span>LIVESTOCK SUBTOTAL</span><span>${money(col.sections.livestock)}</span></div></td></tr>
+    <tr><td colspan="4" class="sec">Equipment</td></tr>
+    ${inSection('equipment').map(catRow).join('')}
+    <tr><td colspan="4"><div class="subt"><span>Equipment Gross</span><span>${money(col.sections.equipmentGross)}</span></div></td></tr>
+    <tr><td colspan="4"><div class="subt" style="color:#7a1a1a"><span>Less: Superior Encumbrances</span><span>${money(col.sections.equipmentSupEnc)}</span></div></td></tr>
+    <tr><td colspan="4"><div class="subt" style="color:#991b1b"><span>NET EQUIPMENT VALUE</span><span>${money(col.sections.equipmentNet)}</span></div></td></tr>
+    <tr><td colspan="4" class="sec">Real Estate</td></tr>
+    ${inSection('realEstate').map(catRow).join('')}
+    <tr><td colspan="4"><div class="subt"><span>Real Estate Gross</span><span>${money(col.sections.realEstateGross)}</span></div></td></tr>
+    <tr><td colspan="4"><div class="subt" style="color:#7a1a1a"><span>Less: Superior Encumbrances</span><span>${money(col.sections.reSupEnc)}</span></div></td></tr>
+    <tr><td colspan="4"><div class="subt" style="color:#991b1b"><span>NET REAL ESTATE VALUE</span><span>${money(col.sections.realEstateNet)}</span></div></td></tr>
+    <tr><td colspan="4" class="sec">Other</td></tr>
+    ${inSection('other').map(catRow).join('')}
+  </tbody>
+</table>
+
+<div class="recap">
+  <div class="recap-head">Collateral Coverage Recap</div>
+  <table style="margin:0">
+    <thead><tr>
+      <th>Category</th>
+      <th class="r">Net Valuation</th>
+      <th style="text-align:center">Liq. Cost %</th>
+      <th class="r">Cost $</th>
+      <th class="r">Net Proceeds</th>
+    </tr></thead>
+    <tbody>
+      ${col.recap.map(r => `<tr>
+        <td style="padding:3pt 6pt;font-size:8pt">${esc(r.label)}</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:right">${money(r.net)}</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:center">${(r.liqCost*100).toFixed(0)}%</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:right;color:#92400e">${money(r.costDollars)}</td>
+        <td style="padding:3pt 6pt;font-size:8pt;text-align:right;font-weight:600;color:#1a5c25">${money(r.netProceeds)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <div style="padding:6pt 8pt;background:#fafafa;border-top:1pt solid #6B0E1E">
+    <div style="display:flex;justify-content:space-between;font-size:8pt;padding:2pt 0"><span>Total Net Liquidation Proceeds</span><strong style="color:#1a5c25">${money(col.totalNetProceeds)}</strong></div>
+    <div style="display:flex;justify-content:space-between;font-size:8pt;padding:2pt 0"><span>Less: Gross Loan Balance (current OTL)</span><strong style="color:#7a1a1a">${money(col.loanBalance)}</strong></div>
+  </div>
+  <div class="cush ${col.cushion<0?'neg':''}">
+    <span>${col.cushion >= 0 ? 'Net Collateral Cushion' : 'Net Collateral LOSS'}</span>
+    <span>${money(col.cushion)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:4pt 8pt;font-size:8pt;background:#fff">
+    <span>Collateral Coverage %</span>
+    <strong style="color:${col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}">${col.coveragePct===null?'n/a':col.coveragePct.toFixed(0)+'%'}</strong>
+  </div>
+</div>
+
+<div style="margin-top:14pt;font-size:7pt;color:#777;font-style:italic">
+  Realization and liquidation-cost percentages per First Bank of Montana policy. Overrides stored per sheet.
+</div>
+</body></html>`;
+      W.document.open();
+      W.document.write(html);
+      W.document.close();
+      W.focus();
+      setTimeout(() => { try { W.print(); } catch {} }, 400);
+    } catch (e) {
+      console.error('Print collateral failed:', e);
+      W.document.open();
+      W.document.write(`<html><body style="font:14px system-ui;padding:24px;color:#7a1a1a"><h2>Print failed</h2><pre>${String((e && e.stack) || e)}</pre></body></html>`);
+      W.document.close();
+    }
+  };
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => {
@@ -10501,7 +10765,7 @@ ${extraPages}
         </div>
       );
       case "machinery": return (
-        <div className="step-content">
+        <div className="step-content mach-wide">
           <SecHdr icon="⚙" title="Machinery and Equipment Schedule" subtitle="List each piece — total carries to balance sheet automatically" />
           <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:8,flexWrap:'wrap',alignItems:'center'}}>
             {Object.keys(machPriceCheck).length > 0 && (
@@ -10521,11 +10785,12 @@ ${extraPages}
           <div className="mach-table">
             <div className="mach-header">
               <span style={{width:62}}>Year</span>
-              <span style={{flex:1}}>Make and Model</span>
-              <span style={{width:90}}>Size</span>
-              <span style={{width:110}}>Serial #</span>
-              <span style={{width:95}}>Condition</span>
-              <span style={{width:110}}>Value</span>
+              <span style={{flex:2,minWidth:260}}>Make and Model</span>
+              <span style={{width:130}}>Size</span>
+              <span style={{width:150}}>Serial #</span>
+              <span style={{width:110}}>Condition</span>
+              <span style={{width:130}}>Value</span>
+              <span style={{width:140,textAlign:'center'}}>Price Check</span>
               <span style={{width:32}}></span>
             </div>
             {data.machinery.map((r,i) => {
@@ -10538,25 +10803,27 @@ ${extraPages}
                 if (chk.status === 'unknown')return { bg:'#f3f4f6', fg:'#6b7280', text:'? not sure', title: chk.note || 'Not enough info to bracket a range.' };
                 return null;
               })();
+              const money = v => '$' + Math.round(Number(v)||0).toLocaleString();
               return (
-              <div key={i} className="mach-row" data-rowkey={`machinery-${i}`}>
+              <React.Fragment key={i}>
+              <div className="mach-row" data-rowkey={`machinery-${i}`}>
                 <div className="mach-col" style={{width:62}}>
                   <input className="text-input" type="text" value={r.year} placeholder="2018" maxLength={4}
                     onChange={e=>setArr("machinery",i,"year",e.target.value.replace(/[^0-9]/g,""))} />
                 </div>
-                <div className="mach-col" style={{flex:1}}>
-                  <input className="text-input" type="text" value={r.make} placeholder="e.g., John Deere 8320"
+                <div className="mach-col" style={{flex:2,minWidth:260}}>
+                  <input className="text-input" type="text" value={r.make} placeholder="e.g., John Deere 8320R"
                     onChange={e=>setArr("machinery",i,"make",e.target.value)} />
                 </div>
-                <div className="mach-col" style={{width:90}}>
+                <div className="mach-col" style={{width:130}}>
                   <input className="text-input" type="text" value={r.size} placeholder="e.g., 320hp"
                     onChange={e=>setArr("machinery",i,"size",e.target.value)} />
                 </div>
-                <div className="mach-col" style={{width:110}}>
-                  <input className="text-input" type="text" value={r.serial} placeholder="Serial #"
+                <div className="mach-col" style={{width:150}}>
+                  <input className="text-input" type="text" value={r.serial} placeholder="Serial / VIN"
                     onChange={e=>setArr("machinery",i,"serial",e.target.value)} />
                 </div>
-                <div className="mach-col" style={{width:95}}>
+                <div className="mach-col" style={{width:110}}>
                   <select className="unit-select" value={r.condition}
                     onChange={e=>setArr("machinery",i,"condition",e.target.value)}>
                     <option value="">—</option>
@@ -10564,21 +10831,39 @@ ${extraPages}
                     <option>Fair</option><option>Poor</option>
                   </select>
                 </div>
-                <div className="mach-col" style={{width:110}}>
+                <div className="mach-col" style={{width:130}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
                     <input type="text" value={r.value} placeholder="0"
                       onChange={e=>setArr("machinery",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
-                  {flag && (
-                    <div title={flag.title}
-                      style={{marginTop:3,background:flag.bg,color:flag.fg,fontSize:10,fontWeight:700,textAlign:'center',padding:'2px 4px',borderRadius:4,cursor:'help',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                </div>
+                <div className="mach-col" style={{width:140,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  {flag ? (
+                    <div style={{background:flag.bg,color:flag.fg,fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:4,whiteSpace:'nowrap'}}>
                       {flag.text}
                     </div>
+                  ) : (
+                    <span style={{fontSize:11,color:'#9ca3af'}}>—</span>
                   )}
                 </div>
                 <button className="remove-btn" onClick={()=>removeRow("machinery",i)}>x</button>
               </div>
+              {chk && (chk.status === 'high' || chk.status === 'low' || chk.status === 'ok' || chk.status === 'unknown') && (
+                <div className={`mach-pricecheck-detail ${chk.status}`}>
+                  <strong>{r.year} {r.make}{r.size ? ' · ' + r.size : ''}:</strong>
+                  {' '}
+                  {chk.status === 'unknown'
+                    ? <span>Not enough info to bracket a range. {chk.note || ''}</span>
+                    : <>
+                        Declared <strong>{money(r.value)}</strong>
+                        {' vs est. market range '}
+                        <strong>{money(chk.low)}–{money(chk.high)}</strong>
+                        {chk.note && <span style={{display:'block',marginTop:4,color:'#6b7280',fontStyle:'italic'}}>“{chk.note}”</span>}
+                      </>}
+                </div>
+              )}
+              </React.Fragment>
               );
             })}
           </div>
@@ -10883,6 +11168,166 @@ ${extraPages}
           </div>
         </div>
       );
+      case "collateral": return (() => {
+        const col = deriveCollateral(data);
+        const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+        const setColField = (key, value) => set("collateral", {...(data.collateral||{}), [key]: value});
+        const setOverride = (catKey, value) => {
+          const existing = (data.collateral && data.collateral.realizationOverrides) || {};
+          set("collateral", {
+            ...(data.collateral||{}),
+            realizationOverrides: {...existing, [catKey]: value},
+          });
+        };
+        const INP = {border:'1px solid #d1d5db',borderRadius:5,padding:'5px 8px',fontSize:13,fontFamily:'inherit',outline:'none',boxSizing:'border-box',width:'100%'};
+        const colHead = {background:'#1a1a1a',color:'white',padding:'6px 10px',fontSize:11,textTransform:'uppercase',letterSpacing:.4,fontWeight:700};
+        const row = {display:'grid',gridTemplateColumns:'1.5fr 110px 110px 80px 120px 120px',gap:8,padding:'7px 10px',alignItems:'center',borderBottom:'0.5px solid #e5e7eb',fontSize:13};
+        return (
+          <div className="step-content">
+            <SecHdr icon="🛡" title="Collateral Valuation — Current"
+              subtitle="Lender-side view: how much the pledged collateral would net in a forced liquidation. Values auto-populate from the balance sheet. Edit realization % per row if policy or borrower risk warrants."
+              color="#4a0810" />
+            <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,overflow:'hidden',marginBottom:16}}>
+              <div style={{...row,...colHead,borderBottom:'none'}}>
+                <div>Category</div>
+                <div style={{textAlign:'right'}}>Book / Appraised</div>
+                <div style={{textAlign:'center'}}>Realization %</div>
+                <div style={{textAlign:'center'}}>Default</div>
+                <div style={{textAlign:'right'}}>Gross Net Value</div>
+                <div style={{textAlign:'right'}}>Notes</div>
+              </div>
+              {col.categories.map(cat => {
+                const override = (data.collateral?.realizationOverrides||{})[cat.key];
+                const displayPct = override !== undefined && override !== '' ? override : Math.round(cat.realization * 100);
+                const isManual = !!cat.source;
+                return (
+                  <div key={cat.key} style={row}>
+                    <div style={{fontWeight: cat.section==='equipment' || cat.section==='realEstate' ? 500 : 400}}>
+                      {cat.label}
+                      {isManual && <span style={{fontSize:10,color:'#6b7280',marginLeft:6}}>(manual)</span>}
+                    </div>
+                    <div style={{textAlign:'right'}}>
+                      {isManual ? (
+                        <input type="text" value={data.collateral?.[cat.source]||""}
+                          onChange={e => setColField(cat.source, e.target.value.replace(/[^0-9.]/g,""))}
+                          placeholder="0" style={{...INP,textAlign:'right'}} />
+                      ) : (
+                        <span style={{color:'#374151'}}>{money(cat.bookValue)}</span>
+                      )}
+                    </div>
+                    <div style={{textAlign:'center'}}>
+                      <input type="text" value={override !== undefined && override !== '' ? override : ''}
+                        onChange={e => setOverride(cat.key, e.target.value.replace(/[^0-9.]/g,""))}
+                        placeholder={String(Math.round(cat.realization * 100))}
+                        style={{...INP,textAlign:'center',width:72}} />
+                    </div>
+                    <div style={{textAlign:'center',fontSize:11,color:'#9ca3af'}}>{Math.round(cat.realization * 100)}%</div>
+                    <div style={{textAlign:'right',fontWeight:600,color:'#991b1b'}}>{money(cat.gross)}</div>
+                    <div style={{textAlign:'right',fontSize:11,color:'#6b7280'}}>
+                      {cat.bookValue > 0 ? `${money(cat.bookValue)} × ${Math.round(cat.realization*100)}%` : ''}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Superior encumbrances */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'12px 14px'}}>
+                <div style={{fontSize:11,fontWeight:700,color:'#4a0810',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>Equipment Section</div>
+                <div style={{fontSize:13,color:'#374151',marginBottom:8}}>Gross collateral (Farm + Rolling Stock + Other Equip): <strong>{money(col.sections.equipmentGross)}</strong></div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:12,color:'#6b7280',minWidth:160}}>Less: Superior Encumbrances</span>
+                  <input type="text" value={data.collateral?.equipmentSuperiorEnc||""}
+                    onChange={e => setColField('equipmentSuperiorEnc', e.target.value.replace(/[^0-9.]/g,""))}
+                    placeholder="0" style={{...INP,textAlign:'right',width:120}} />
+                </div>
+                <div style={{marginTop:8,fontWeight:700,color:'#991b1b'}}>Net Equipment Value: {money(col.sections.equipmentNet)}</div>
+              </div>
+              <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,padding:'12px 14px'}}>
+                <div style={{fontSize:11,fontWeight:700,color:'#4a0810',textTransform:'uppercase',letterSpacing:.4,marginBottom:6}}>Real Estate Section</div>
+                <div style={{fontSize:13,color:'#374151',marginBottom:8}}>Gross collateral (Land+Buildings + Buildings): <strong>{money(col.sections.realEstateGross)}</strong></div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:12,color:'#6b7280',minWidth:160}}>Less: Superior Encumbrances</span>
+                  <input type="text" value={data.collateral?.reSuperiorEnc||""}
+                    onChange={e => setColField('reSuperiorEnc', e.target.value.replace(/[^0-9.]/g,""))}
+                    placeholder="0" style={{...INP,textAlign:'right',width:120}} />
+                </div>
+                <div style={{marginTop:8,fontWeight:700,color:'#991b1b'}}>Net Real Estate Value: {money(col.sections.realEstateNet)}</div>
+              </div>
+            </div>
+
+            {/* ── Recap ────────────────────────────────────────────────── */}
+            <div style={{background:'#fdf7f7',border:'1.5px solid #6B0E1E',borderRadius:8,overflow:'hidden'}}>
+              <div style={{background:'#6B0E1E',color:'white',padding:'8px 14px',fontWeight:700,fontSize:13,textTransform:'uppercase',letterSpacing:.4}}>
+                Collateral Coverage Recap
+              </div>
+              <div style={{...row,fontWeight:700,color:'#4a0810',background:'#fdf7f7',borderBottom:'1px solid #6B0E1E'}}>
+                <div>Category</div>
+                <div style={{textAlign:'right'}}>Net Valuation</div>
+                <div style={{textAlign:'center'}}>Liq. Cost %</div>
+                <div></div>
+                <div style={{textAlign:'right'}}>Cost to Liq.</div>
+                <div style={{textAlign:'right'}}>Net Proceeds</div>
+              </div>
+              {col.recap.map(r => (
+                <div key={r.label} style={row}>
+                  <div>{r.label}</div>
+                  <div style={{textAlign:'right'}}>{money(r.net)}</div>
+                  <div style={{textAlign:'center',color:'#6b7280'}}>{(r.liqCost*100).toFixed(0)}%</div>
+                  <div></div>
+                  <div style={{textAlign:'right',color:'#92400e'}}>{money(r.costDollars)}</div>
+                  <div style={{textAlign:'right',fontWeight:600,color:'#1a5c25'}}>{money(r.netProceeds)}</div>
+                </div>
+              ))}
+              <div style={{...row,fontWeight:700,background:'#f5e8ea',borderTop:'1.5px solid #6B0E1E'}}>
+                <div>Totals</div>
+                <div style={{textAlign:'right'}}>{money(col.totalGrossRecap)}</div>
+                <div></div>
+                <div></div>
+                <div style={{textAlign:'right',color:'#92400e'}}>{money(col.totalLiqCost)}</div>
+                <div style={{textAlign:'right',color:'#1a5c25'}}>{money(col.totalNetProceeds)}</div>
+              </div>
+              <div style={{padding:'14px 14px',borderTop:'1.5px solid #6B0E1E',background:'white'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:6}}>
+                  <div style={{fontSize:13,color:'#4a0810',fontWeight:600}}>Total Net Liquidation Proceeds</div>
+                  <div style={{textAlign:'right',fontWeight:700,color:'#1a5c25',fontSize:14}}>{money(col.totalNetProceeds)}</div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginBottom:6}}>
+                  <div style={{fontSize:13,color:'#4a0810'}}>
+                    Less: Gross Loan Balance (current OTL)
+                    <span style={{fontSize:11,color:'#6b7280',marginLeft:6}}>
+                      {data.collateral?.loanBalanceOverride ? '(override)' : `(auto = sum of operating notes: ${money(col.autoLoanBalance)})`}
+                    </span>
+                  </div>
+                  <input type="text" value={data.collateral?.loanBalanceOverride||""}
+                    onChange={e => setColField('loanBalanceOverride', e.target.value.replace(/[^0-9.]/g,""))}
+                    placeholder={String(Math.round(col.autoLoanBalance))}
+                    style={{...INP,textAlign:'right',fontWeight:700,color:'#7a1a1a',fontSize:14}} />
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',padding:'8px 10px',background:col.cushion>=0?'#dcfce7':'#fee2e2',borderRadius:6,marginTop:10}}>
+                  <div style={{fontSize:13,fontWeight:700,color:col.cushion>=0?'#15803d':'#991b1b'}}>
+                    {col.cushion >= 0 ? 'Net Collateral Cushion' : 'Net Collateral LOSS'}
+                  </div>
+                  <div style={{textAlign:'right',fontWeight:800,fontSize:16,color:col.cushion>=0?'#15803d':'#991b1b'}}>{money(col.cushion)}</div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 180px',gap:10,alignItems:'center',marginTop:6,padding:'4px 10px'}}>
+                  <div style={{fontSize:12,color:'#6b7280'}}>Collateral Coverage %</div>
+                  <div style={{textAlign:'right',fontWeight:700,color:col.coveragePct==null?'#6b7280':col.coveragePct>=125?'#15803d':col.coveragePct>=100?'#92400e':'#991b1b'}}>
+                    {col.coveragePct === null ? 'n/a' : col.coveragePct.toFixed(0)+'%'}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}>
+              <button type="button" onClick={handlePrintCollateral}
+                style={{background:'#374151',color:'white',border:'none',borderRadius:6,padding:'8px 16px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                🖨 Print Collateral Worksheet
+              </button>
+            </div>
+          </div>
+        );
+      })();
       case "summary": return (
         <div className="step-content">
           <SecHdr icon="📊" title="Balance Sheet Complete" subtitle={data.clientName + " — as of " + data.asOfDate} />
