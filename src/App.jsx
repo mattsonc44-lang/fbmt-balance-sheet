@@ -6932,16 +6932,20 @@ export default function BalanceSheet() {
       /* Page + fonts */
       .app { background: #f6f5f2; font-family: -apple-system, 'Segoe UI', 'Source Sans 3', sans-serif; }
 
-      /* Top bar — dark red block → clean white sticky nav */
-      .top-bar { background: white !important; color: #111 !important; border-bottom: 0.5px solid #e5e7eb; padding: 12px 24px !important; }
+      /* Top bar — sticky white nav, always visible when scrolling.
+         Pair with .tab-bar sticky below so Balance / Budget / Compare /
+         What-if / Inspection chips stay visible along with the Save button. */
+      .top-bar { background: white !important; color: #111 !important; border-bottom: 0.5px solid #e5e7eb; padding: 12px 24px !important; position: sticky !important; top: 0 !important; z-index: 50 !important; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
       .top-bar > button { background: transparent !important; border: none !important; color: #6b7280 !important; font-size: 12px !important; padding: 4px 0 !important; margin-right: 12px !important; }
       .top-bar > button:hover { color: #111 !important; }
       .top-bar .bank-name { font-family: -apple-system, 'Segoe UI', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; letter-spacing: -0.1px !important; color: #111; }
       .top-bar .divider { display: none !important; }
       .top-bar .tool-name { font-size: 11px !important; letter-spacing: normal !important; text-transform: none !important; opacity: 1 !important; color: #6b7280; }
 
-      /* Tab bar — dark maroon → white with underline */
-      .tab-bar { background: white !important; border-bottom: 0.5px solid #e5e7eb; padding: 0 24px !important; gap: 0 !important; }
+      /* Tab bar — sticky under the top bar so you always know which tab
+         you're on. The top: value matches the top-bar's rendered height
+         so there's no gap or overlap. */
+      .tab-bar { background: white !important; border-bottom: 0.5px solid #e5e7eb; padding: 0 24px !important; gap: 0 !important; position: sticky !important; top: 46px !important; z-index: 49 !important; }
       .tab-btn { color: #6b7280 !important; font-size: 13px !important; font-weight: 400 !important; padding: 12px 16px !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; }
       .tab-btn:hover { color: #111 !important; }
       .tab-active { color: #111 !important; background: transparent !important; border-bottom-color: #6B0E1E !important; font-weight: 500 !important; border-radius: 0 !important; }
