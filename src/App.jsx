@@ -11186,6 +11186,24 @@ ${extraPages}
   // ── Step Renderer ──────────────────────────────────────────────────────────
   function renderStep() {
     const CONDITIONS = ["— Select —","Cropland","Irrigated Cropland","Pasture / Rangeland","CRP","Timber","Home / Farmstead","Commercial","Vacant Lot","Other"];
+    // Bulk-toggle the collateral flag across every row of a section — the
+    // header-level "Select all / Deselect all" shortcut for the per-row
+    // Coll checkbox below. Looks at the current rows: if every row is
+    // already pledged, the next click deselects all; otherwise selects all.
+    const CollBulk = ({field, label}) => {
+      const rows = data[field] || [];
+      if (!rows.length) return null;
+      const allOn = rows.every(r => r && r.collateral !== false);
+      const nextVal = !allOn; // click flips to the opposite state
+      return (
+        <button type="button"
+          onClick={() => setData(d => ({...d, [field]: (d[field]||[]).map(r => ({...r, collateral: nextVal}))}))}
+          title={`${nextVal ? 'Mark every' : 'Un-mark every'} ${label || field} row as collateral`}
+          style={{background:'none',border:'0.5px solid #d1d5db',borderRadius:5,padding:'3px 9px',fontSize:11,color:'#4a0810',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+          {allOn ? '☐ Deselect all collateral' : '☑ Select all as collateral'}
+        </button>
+      );
+    };
     // Reusable per-row collateral checkbox — defaults to ON (treat missing
     // flag as pledged). Unchecking excludes this row from the Collateral
     // worksheet without removing it from the balance sheet itself.
@@ -11239,6 +11257,7 @@ ${extraPages}
       case "receivables": return (
         <div className="step-content">
           <SecHdr icon="📋" title="Current Receivables" subtitle="Money owed to the client, collectible within 1 year" />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="receivables" label="receivable" /></div>
           {data.receivables.map((r,i) => (
             <div key={i} className="row-entry" data-rowkey={`receivables-${i}`}>
               <span className="row-num">{i+1}</span>
@@ -11256,6 +11275,7 @@ ${extraPages}
       case "federal_payments": return (
         <div className="step-content">
           <SecHdr icon="🏛" title="Federal Payments Due" subtitle="FSA, ARC/PLC, CRP, CFAP, or other government payments expected" />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="federalPayments" label="payment" /></div>
           {(Array.isArray(data.federalPayments) ? data.federalPayments : [{program:"",amount:""}]).map((r,i) => (
             <div key={i} className="row-entry" data-rowkey={"federalPayments-"+i}>
               <span className="row-num">{i+1}</span>
@@ -11282,6 +11302,7 @@ ${extraPages}
       case "livestock_market": return (
         <div className="step-content">
           <SecHdr icon="🐄" title="Market Livestock" subtitle="Livestock intended for sale — not breeding stock" />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="livestockMarket" label="livestock" /></div>
           {data.livestockMarket.map((r,i) => (
             <div key={i} className="row-entry" data-rowkey={`livestockMarket-${i}`}>
               <span className="row-num">{i+1}</span>
@@ -11308,6 +11329,7 @@ ${extraPages}
       case "farm_products": return (
         <div className="step-content">
           <SecHdr icon="🌾" title="Farm Products on Hand" subtitle="Grain, hay, silage in the bin, stack, or elevator. Qty x Price = Value." />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="farmProducts" label="crop" /></div>
           <div className="fp-header-row">
             <span style={{width:20}}></span>
             <span className="fp-col-label" style={{width:90}}>Quantity</span>
@@ -11377,6 +11399,7 @@ ${extraPages}
       case "crop_investment": return (
         <div className="step-content">
           <SecHdr icon="🌱" title="Cash Investment — Growing Crops" subtitle="Input costs on crops not yet harvested. Acres x Value/Acre = Total." />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="cropInvestment" label="crop" /></div>
           <div className="fp-header-row">
             <span style={{width:20}}></span>
             <span className="fp-col-label" style={{flex:1}}>Crop Type</span>
@@ -11453,6 +11476,7 @@ ${extraPages}
       case "breeding_stock": return (
         <div className="step-content">
           <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding" />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="breedingStock" label="breeding stock" /></div>
           <p className="phase-badge">Intermediate and Long-Term Assets</p>
           {data.breedingStock.map((r,i) => (
             <div key={i} className="row-entry" data-rowkey={`breedingStock-${i}`}>
@@ -11480,6 +11504,7 @@ ${extraPages}
       case "real_estate": return (
         <div className="step-content">
           <SecHdr icon="🏔" title="Real Estate" subtitle="Farmland, pasture, home — list each tract. Acres x Value/Acre = Total." />
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="realEstate" label="tract" /></div>
           <div className="fp-header-row">
             <span style={{width:20}}></span>
             <span className="fp-col-label" style={{width:75}}>Acres</span>
@@ -11553,6 +11578,7 @@ ${extraPages}
                 ❓ {Object.values(vehPriceCheck).filter(x=>x.status==='unknown').length} unknown
               </span>
             )}
+            <CollBulk field="vehicles" label="vehicle" />
             <button type="button" onClick={runVehiclePriceCheck}
               disabled={vehPriceCheckLoading}
               title="Decode VINs via NHTSA, then search KBB / NADA / dealer listings for recent comps on each vehicle."
@@ -11638,6 +11664,7 @@ ${extraPages}
                 ❓ {Object.values(machPriceCheck).filter(x=>x.status==='unknown').length} unknown
               </span>
             )}
+            <CollBulk field="machinery" label="equipment" />
             <button type="button" onClick={runMachineryPriceCheck}
               disabled={machPriceCheckLoading}
               title="Ask AI to estimate a reasonable value range for each piece from year + make/model and flag anything that looks out of range."
