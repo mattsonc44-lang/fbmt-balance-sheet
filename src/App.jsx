@@ -687,6 +687,66 @@ const COLLATERAL_CATEGORIES = [
   { key:'cash',           label:'Cash',                       realization:0.00, liqCost:0.00, section:'cash' },
   { key:'other',          label:'Other Collateral',           realization:0.50, liqCost:0.25, section:'other',     source:'otherCollateralValue' },
 ];
+// Pro-forma projection: replace a sheet's crop + market-livestock arrays with
+// values derived from the Budget (projected harvest + projected cattle sales).
+// Growing-crop investment is zeroed because the budget's projected harvest
+// supersedes it. Everything else (equipment, RE, cash, breeding stock,
+// federal payments, A/R, …) passes through unchanged.
+function applyBudgetProjections(d, commodityPrices = []) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const findCommodityPrice = (name) => {
+    if (!name) return null;
+    const needle = String(name).toLowerCase().trim();
+    const hit = commodityPrices.find(p => p.name && p.name.toLowerCase().trim() === needle);
+    return hit ? hit.price : null;
+  };
+  // Project each budget crop → one "harvested" row carrying the farm-products shape.
+  const projectedFarmProducts = (d.budgetCrops||[])
+    .filter(r => n(r.acres) > 0 && n(r.yieldPerAcre) > 0)
+    .map(r => {
+      const listP = (!r.contracted && !r.customPrice) ? findCommodityPrice(r.crop) : null;
+      const price = String(listP != null ? listP : (r.price || 0));
+      const totalQty = n(r.acres) * n(r.yieldPerAcre);
+      return {
+        kind: r.crop || '',
+        quantity: String(totalQty),
+        unit: r.unit || 'bu',
+        pricePerUnit: price,
+        share: r.share || '100',
+        contracted: !!r.contracted,
+        // Preserve the balance-sheet "collateral" flag if the lender has already
+        // deselected a crop on the current sheet with the same crop name.
+        collateral: (() => {
+          const match = (d.farmProducts||[]).find(x => (x.kind||'').toLowerCase() === (r.crop||'').toLowerCase());
+          return match ? (match.collateral !== false) : true;
+        })(),
+        _source: 'budgetCrops',
+      };
+    });
+  // Project each budget livestock row → livestock-market shape.
+  const projectedLivestockMarket = (d.budgetLivestock||[])
+    .filter(r => n(r.head) > 0 && n(r.lbs) > 0)
+    .map(r => {
+      const listP = findCommodityPrice(r.type);
+      const price = listP != null ? listP : n(r.price);
+      const total = n(r.head) * n(r.lbs) * price;
+      return {
+        number: String(r.head || ''),
+        kind: r.type || '',
+        value: String(total),
+        share: r.share || '100',
+        collateral: true,
+        _source: 'budgetLivestock',
+      };
+    });
+  return {
+    ...d,
+    farmProducts: projectedFarmProducts,
+    cropInvestment: [],          // Growing-crop line rolls into the projected harvest.
+    livestockMarket: projectedLivestockMarket,
+  };
+}
+
 function deriveCollateral(d) {
   const n = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
   const c = d.collateral || {};
@@ -6773,6 +6833,11 @@ export default function BalanceSheet() {
   const [collateralIncludeLinked, setCollateralIncludeLinked] = useState(false);
   const [collateralLinkedData, setCollateralLinkedData] = useState([]);
   const [collateralLinkedLoading, setCollateralLinkedLoading] = useState(false);
+  // 'current' = book from the balance sheet as-of today.
+  // 'proforma' = projected: harvested-crop line replaced by Budget → Crop
+  //   Income projected production, market-livestock line replaced by Budget →
+  //   Livestock Income. Everything else carries from the balance sheet.
+  const [collateralMode, setCollateralMode] = useState('current');
   // Machinery/equipment price-check results, keyed by machinery[] index.
   // Each entry: { status: 'ok'|'high'|'low'|'unknown', low, high, note }
   const [machPriceCheck, setMachPriceCheck] = useState({});
@@ -10673,7 +10738,9 @@ ${extraPages}
     const W = window.open("","_blank","width=900,height=1100");
     if (!W) { alert('Print window was blocked — allow popups for this site.'); return; }
     try {
-      const col = deriveCollateral(data);
+      const isProforma = collateralMode === 'proforma';
+      const sheetForPrint = isProforma ? applyBudgetProjections(data, commodityPrices) : data;
+      const col = deriveCollateral(sheetForPrint);
       const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
       const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       const catRow = (c) => `<tr>
@@ -10705,7 +10772,7 @@ ${extraPages}
 <button class="no-print" onclick="window.print()" style="position:fixed;top:10px;right:10px;background:#6B0E1E;color:white;border:none;padding:8px 18px;border-radius:6px;font-weight:700;cursor:pointer">🖨 Print</button>
 <div class="hdr">
   <div>
-    <h1>Agricultural Collateral Valuation — Current</h1>
+    <h1>Agricultural Collateral Valuation — ${isProforma ? 'Pro-forma (Budget Projection)' : 'Current'}</h1>
     <h2>${esc(data.clientName||'')}</h2>
   </div>
   <div style="text-align:right;font-size:8pt;color:#555">
@@ -11702,24 +11769,33 @@ ${extraPages}
         </div>
       );
       case "collateral": return (() => {
+        // Pro-forma vs current: pro-forma swaps the harvested-crop + market-
+        // livestock arrays for projections derived from the Budget. Applied
+        // to the primary sheet AND to each linked entity's sheet so merged
+        // totals stay internally consistent.
+        const isProforma = collateralMode === 'proforma';
+        const baseSheet = isProforma ? applyBudgetProjections(data, commodityPrices) : data;
         // Build the merged dataset when "Include linked entities" is on.
         // Each linked corp's balance-sheet arrays contribute to this sheet's
         // category totals, scaled by ownership %.
         const linkedData = (collateralLinkedData && collateralLinkedData.length) ? collateralLinkedData : [];
         const buildMergedData = () => {
-          if (!collateralIncludeLinked || !linkedData.length) return data;
+          if (!collateralIncludeLinked || !linkedData.length) return baseSheet;
           const scaleArr = (arr, pct, fields) => (arr||[]).map(r => {
             const o = {...r};
             fields.forEach(f => { if (o[f] !== undefined && o[f] !== '') o[f] = String(Number(String(o[f]).replace(/[^0-9.-]/g,''))*pct || 0); });
             return o;
           });
           const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-          const merged = {...data};
+          const merged = {...baseSheet};
           const push = (field, rows) => { merged[field] = [...(merged[field]||[]), ...rows]; };
           for (const ent of linkedData) {
             const pct = ent.ownership / 100;
             if (!ent.sheet) continue;
-            const p = ent.sheet;
+            // Apply the same projection to each linked entity before scaling,
+            // so pro-forma consolidated numbers reflect projected harvest on
+            // the corp side too.
+            const p = isProforma ? applyBudgetProjections(ent.sheet, commodityPrices) : ent.sheet;
             // Cash fields are special — scalars.
             merged.cashGlacier = String((n(merged.cashGlacier) + n(p.cashGlacier) * pct));
             push('cashOther',       scaleArr(p.cashOther,       pct, ['amount']));
@@ -11750,9 +11826,32 @@ ${extraPages}
         const row = {display:'grid',gridTemplateColumns:'1.5fr 110px 110px 80px 120px 120px',gap:8,padding:'7px 10px',alignItems:'center',borderBottom:'0.5px solid #e5e7eb',fontSize:13};
         return (
           <div className="step-content">
-            <SecHdr icon="🛡" title="Collateral Valuation — Current"
-              subtitle="Lender-side view: how much the pledged collateral would net in a forced liquidation. Values auto-populate from the balance sheet. Edit realization % per row if policy or borrower risk warrants."
+            <SecHdr icon="🛡" title={`Collateral Valuation — ${isProforma ? 'Pro-forma' : 'Current'}`}
+              subtitle={isProforma
+                ? "Projected view: Crops Harvested = Budget → Crop Income (acres × yield × price × share%). Market Livestock = Budget → Livestock Income. Growing-crop investment rolls into the projected harvest. Everything else carries from the balance sheet."
+                : "Lender-side view: how much the pledged collateral would net in a forced liquidation. Values auto-populate from the balance sheet. Edit realization % per row if policy or borrower risk warrants."}
               color="#4a0810" />
+
+            {/* Current / Pro-forma mode switch */}
+            <div style={{display:'flex',gap:0,marginBottom:14,alignItems:'center',gap:12,flexWrap:'wrap'}}>
+              <div style={{display:'inline-flex',border:'1px solid #d1d5db',borderRadius:7,overflow:'hidden'}}>
+                <button type="button" onClick={()=>setCollateralMode('current')}
+                  style={{background:collateralMode==='current'?'#6B0E1E':'white',color:collateralMode==='current'?'white':'#374151',border:'none',padding:'6px 16px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                  Current
+                </button>
+                <button type="button" onClick={()=>setCollateralMode('proforma')}
+                  style={{background:collateralMode==='proforma'?'#6B0E1E':'white',color:collateralMode==='proforma'?'white':'#374151',border:'none',padding:'6px 16px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit',borderLeft:'1px solid #d1d5db'}}>
+                  Pro-forma
+                </button>
+              </div>
+              {isProforma && (
+                <span style={{fontSize:11,color:'#6b7280'}}>
+                  Projection pulls from <strong>{(data.budgetCrops||[]).filter(r=>numVal(r.acres)>0).length}</strong> budget crop row{(data.budgetCrops||[]).filter(r=>numVal(r.acres)>0).length===1?'':'s'}
+                  {(data.budgetLivestock||[]).filter(r=>numVal(r.head)>0).length > 0 && ` + ${(data.budgetLivestock||[]).filter(r=>numVal(r.head)>0).length} livestock row${(data.budgetLivestock||[]).filter(r=>numVal(r.head)>0).length===1?'':'s'}`}
+                  {' '}· edit on the Budget tab to adjust
+                </span>
+              )}
+            </div>
 
             {/* Linked-entity merge toggle */}
             {normalizeLinked(data.linkedEntities).length > 0 && (
@@ -11791,7 +11890,18 @@ ${extraPages}
                 const override = (data.collateral?.realizationOverrides||{})[cat.key];
                 const displayPct = override !== undefined && override !== '' ? override : Math.round(cat.realization * 100);
                 const isManual = !!cat.source;
-                const SOURCE_HINTS = {
+                const SOURCE_HINTS = isProforma ? {
+                  govtPmts:        'from Federal Payments (collateral-flagged rows)',
+                  receivables:     'from Receivables (collateral-flagged rows)',
+                  cropsHarvested:  'projected from Budget → Crop Income (acres × yield × price × share%)',
+                  cropsUnharvested:'rolls into projected harvest',
+                  livestockMkt:    'projected from Budget → Livestock Income (head × lbs × price × share%)',
+                  livestockBreed:  'from Breeding Stock',
+                  farmEquipment:   'from Machinery & Equipment',
+                  rollingStock:    'from Titled Vehicles',
+                  landBuildings:   'from Real Estate (acres × $/ac)',
+                  cash:            'from Cash on Hand & in Bank',
+                } : {
                   govtPmts:        'from Federal Payments (collateral-flagged rows)',
                   receivables:     'from Receivables (collateral-flagged rows)',
                   cropsHarvested:  'from Farm Products on Hand (qty × price × share%, collateral-flagged rows)',
