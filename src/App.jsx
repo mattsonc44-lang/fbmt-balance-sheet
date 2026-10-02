@@ -6219,28 +6219,72 @@ function summarizeSheetChanges(baseline, next) {
       if (Math.abs(d) >= 1) bullets.push(`${k}: ${money(a[k]||0)} → ${money(b[k]||0)} (${sign(d)}${money(Math.abs(d))})`);
     });
   } catch {}
-  // Row-count deltas across every array field present on either side.
-  const arrFields = new Set();
-  Object.keys(baseline).forEach(k => { if (Array.isArray(baseline[k])) arrFields.add(k); });
-  Object.keys(next).forEach(k    => { if (Array.isArray(next[k]))     arrFields.add(k); });
-  const PRETTY = {
-    cashOther:'cash accounts', receivables:'receivables', federalPayments:'federal payments',
-    livestockMarket:'market livestock', farmProducts:'farm products', cropInvestment:'growing crops',
-    supplies:'supplies', otherCurrent:'other current assets',
-    breedingStock:'breeding stock', realEstate:'real estate tracts', reContracts:'RE contracts',
-    vehicles:'vehicles', machinery:'machinery', otherAssets:'other assets',
-    operatingNotes:'operating notes', accountsDue:'accounts due',
-    intermediatDebt:'intermediate debt', reCurrent:'RE current debt',
-    reDebt:'RE debt', reMortgages:'RE mortgages', otherLiabilities:'other liabilities',
-    otherCurrentLiab:'other current liab', budgetCrops:'budget crops',
-    budgetLivestock:'budget livestock', budgetExpenses:'budget expenses',
-    budgetMisc:'budget misc income',
+  // ── Row-level diffs per array section ─────────────────────────────────────
+  // Each entry: label for the section, the identity field (how we match a
+  // row across the two snapshots), and the value fields we report deltas on.
+  // Rows added/removed are listed by their identity; rows that stayed but
+  // changed get a per-field delta bullet.
+  const SECTIONS = {
+    cashOther:        { label:'Cash account',       id:'institution', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    receivables:      { label:'Receivable',         id:'description', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    federalPayments:  { label:'Federal payment',    id:'program',     values:[{k:'amount',       type:'money',  label:'amount'}] },
+    livestockMarket:  { label:'Market livestock',   id:'kind',        values:[{k:'number', type:'num', label:'head'}, {k:'value', type:'money', label:'value'}, {k:'share', type:'pct', label:'share'}] },
+    breedingStock:    { label:'Breeding stock',     id:'kind',        values:[{k:'number', type:'num', label:'head'}, {k:'value', type:'money', label:'value'}, {k:'share', type:'pct', label:'share'}] },
+    farmProducts:     { label:'Farm product',       id:'kind',        values:[{k:'quantity', type:'num', label:'qty'}, {k:'pricePerUnit', type:'money', label:'price'}, {k:'share', type:'pct', label:'share'}] },
+    cropInvestment:   { label:'Growing crop',       id:'cropType',    values:[{k:'acres', type:'num', label:'acres'}, {k:'valuePerAcre', type:'money', label:'$/ac'}] },
+    supplies:         { label:'Supplies',           id:'description', values:[{k:'value',        type:'money',  label:'value'}] },
+    otherCurrent:     { label:'Other current',      id:'description', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    realEstate:       { label:'Real estate',        id:'description', values:[{k:'acres', type:'num', label:'acres'}, {k:'valuePerAcre', type:'money', label:'$/ac'}] },
+    reContracts:      { label:'RE contract',        id:'description', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    vehicles:         { label:'Vehicle',            id:'make',        values:[{k:'year', type:'num', label:'year'}, {k:'mileage', type:'num', label:'mi'}, {k:'value', type:'money', label:'value'}] },
+    machinery:        { label:'Equipment',          id:'make',        values:[{k:'year', type:'num', label:'year'}, {k:'size', type:'text', label:'size'}, {k:'value', type:'money', label:'value'}] },
+    otherAssets:      { label:'Other asset',        id:'description', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    operatingNotes:   { label:'Operating note',     id:'creditor',    values:[{k:'balance', type:'money', label:'balance'}, {k:'pmt', type:'money', label:'pmt'}] },
+    accountsDue:      { label:'Account due',        id:'creditor',    values:[{k:'amount',       type:'money',  label:'amount'}] },
+    intermediatDebt:  { label:'Intermediate debt',  id:'creditor',    values:[{k:'principal', type:'money', label:'principal'}, {k:'annualPmt', type:'money', label:'annual pmt'}, {k:'rate', type:'pct', label:'rate'}] },
+    reCurrent:        { label:'RE current',         id:'creditor',    values:[{k:'annualPmt', type:'money', label:'annual pmt'}, {k:'rate', type:'pct', label:'rate'}] },
+    reDebt:           { label:'RE debt',            id:'lienHolder',  values:[{k:'principal', type:'money', label:'principal'}, {k:'annualPmt', type:'money', label:'annual pmt'}, {k:'rate', type:'pct', label:'rate'}] },
+    reMortgages:      { label:'RE mortgage',        id:'lienHolder',  values:[{k:'principal', type:'money', label:'principal'}, {k:'rate', type:'pct', label:'rate'}] },
+    otherLiabilities: { label:'Other liability',    id:'description', values:[{k:'balance',      type:'money',  label:'balance'}] },
+    otherCurrentLiab: { label:'Other current liab', id:'description', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    budgetCrops:      { label:'Budget crop',        id:'crop',        values:[{k:'acres', type:'num', label:'acres'}, {k:'yieldPerAcre', type:'num', label:'yield'}, {k:'price', type:'money', label:'price'}, {k:'share', type:'pct', label:'share'}] },
+    budgetLivestock:  { label:'Budget livestock',   id:'type',        values:[{k:'head', type:'num', label:'head'}, {k:'lbs', type:'num', label:'lbs'}, {k:'price', type:'money', label:'price'}] },
+    budgetMisc:       { label:'Budget misc income', id:'description', values:[{k:'amount',       type:'money',  label:'amount'}] },
+    budgetExpenses:   { label:'Budget expense',     id:'category',    values:[{k:'amount',       type:'money',  label:'amount'}] },
   };
-  arrFields.forEach(k => {
-    if (!PRETTY[k]) return;
-    const a = (baseline[k]||[]).length;
-    const b = (next[k]||[]).length;
-    if (a !== b) bullets.push(`${PRETTY[k]}: ${a} row${a===1?'':'s'} → ${b} row${b===1?'':'s'}`);
+  const fmtVal = (type, v) => {
+    if (type === 'money') return money(n(v));
+    if (type === 'pct')   return (v === '' || v == null) ? '—' : `${v}%`;
+    if (type === 'num')   return (v === '' || v == null) ? '—' : String(v);
+    return v === '' || v == null ? '—' : String(v);
+  };
+  const identityOf = (r, idKey) => String(r?.[idKey] || '').trim();
+  Object.entries(SECTIONS).forEach(([field, cfg]) => {
+    const a = Array.isArray(baseline[field]) ? baseline[field] : [];
+    const b = Array.isArray(next[field])     ? next[field]     : [];
+    if (!a.length && !b.length) return;
+    // Index both sides by identity. Rows with blank identity fall back to
+    // their row index so we can still match positional edits.
+    const aMap = new Map(); a.forEach((r,i) => { const id = identityOf(r, cfg.id) || `#${i+1}`; if (!aMap.has(id)) aMap.set(id, r); });
+    const bMap = new Map(); b.forEach((r,i) => { const id = identityOf(r, cfg.id) || `#${i+1}`; if (!bMap.has(id)) bMap.set(id, r); });
+    const addedIds   = [...bMap.keys()].filter(id => !aMap.has(id));
+    const removedIds = [...aMap.keys()].filter(id => !bMap.has(id));
+    const commonIds  = [...bMap.keys()].filter(id =>  aMap.has(id));
+    addedIds.forEach(id   => bullets.push(`${cfg.label} added: ${id}`));
+    removedIds.forEach(id => bullets.push(`${cfg.label} removed: ${id}`));
+    commonIds.forEach(id => {
+      const ra = aMap.get(id), rb = bMap.get(id);
+      const changedFields = cfg.values.filter(v => String(ra?.[v.k] ?? '') !== String(rb?.[v.k] ?? ''));
+      if (!changedFields.length) {
+        // Also detect collateral-flag flip (a core piece of the Current/Proforma split).
+        if ((ra?.collateral !== false) !== (rb?.collateral !== false)) {
+          bullets.push(`${cfg.label} "${id}" collateral flag: ${ra?.collateral === false ? 'off' : 'on'} → ${rb?.collateral === false ? 'off' : 'on'}`);
+        }
+        return;
+      }
+      const parts = changedFields.map(v => `${v.label} ${fmtVal(v.type, ra?.[v.k])} → ${fmtVal(v.type, rb?.[v.k])}`);
+      bullets.push(`${cfg.label} "${id}": ${parts.join(', ')}`);
+    });
   });
   // Scalar fields worth flagging.
   const SCALARS = { clientName:'Client name', asOfDate:'As-of date', cashGlacier:'Cash on hand (Glacier)', taxesDue:'Income taxes due' };
