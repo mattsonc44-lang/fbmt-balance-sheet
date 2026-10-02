@@ -8064,12 +8064,20 @@ Question: ${q}`,
       status: 'change_log',
     };
     try {
-      await fetch(SUPABASE_URL + '/rest/v1/ca_edits', {
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/ca_edits', {
         method: 'POST',
         headers: { ...supaHeaders(), 'Prefer': 'return=minimal' },
         body: JSON.stringify(payload),
       });
-    } catch {}
+      if (!resp.ok) {
+        // Surface it — a silent failure here means the CA will never see the
+        // "lender edited this sheet" alert and we need to know why.
+        const txt = await resp.text().catch(()=>'');
+        console.warn('change_log insert failed', resp.status, txt.slice(0,400));
+      }
+    } catch (e) {
+      console.warn('change_log insert threw', e);
+    }
   };
 
   // Find any active CA shares pointing at this sheet_key. For each, refresh
