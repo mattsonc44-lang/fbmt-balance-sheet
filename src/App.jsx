@@ -6736,6 +6736,11 @@ export default function BalanceSheet() {
   // that early return violates Rules of Hooks (hook count changes between
   // renders) → white screen when the CA opens a share.
   const [caDirectSaving, setCaDirectSaving] = useState(false);
+  // Collateral: "include linked entities" toggle + per-entity loaded data
+  // (each entry: { name, ownership, sheet (parsed data blob), asOfDate }).
+  const [collateralIncludeLinked, setCollateralIncludeLinked] = useState(false);
+  const [collateralLinkedData, setCollateralLinkedData] = useState([]);
+  const [collateralLinkedLoading, setCollateralLinkedLoading] = useState(false);
   // Machinery/equipment price-check results, keyed by machinery[] index.
   // Each entry: { status: 'ok'|'high'|'low'|'unknown', low, high, note }
   const [machPriceCheck, setMachPriceCheck] = useState({});
@@ -8684,6 +8689,45 @@ Question: ${q}`,
     }
     fetchAllLinkedNW();
   }, [JSON.stringify(data.linkedEntities), savedSheets.length]);
+
+  // Load the actual balance-sheet payloads for linked entities so the Collateral
+  // worksheet can merge their asset arrays into this sheet's totals. Date-anchored:
+  // each linked entity is matched to the sheet closest-at-or-before this sheet's
+  // as-of date (same policy as linked-entity NW resolution above).
+  useEffect(() => {
+    async function fetchCollateralLinkedData() {
+      if (profile?.role === 'ca' || caOpenShare) { setCollateralLinkedData([]); return; }
+      const entities = normalizeLinked(data.linkedEntities);
+      if (!entities.length) { setCollateralLinkedData([]); return; }
+      setCollateralLinkedLoading(true);
+      const results = [];
+      const anchor = data.asOfDate || '';
+      for (const {name, date, ownership} of entities) {
+        try {
+          const prefix = STORAGE_PREFIX + name.replace(/\s+/g,"_") + ":";
+          const r = await storage.list(prefix);
+          if (!r || !r.keys || !r.keys.length) continue;
+          const target = date || anchor;
+          let key;
+          if (target) {
+            // Prefer exact match; else newest at-or-before anchor; else most recent.
+            key = r.keys.find(k => k.includes(target))
+               || r.keys.filter(k => k.slice(-10) <= target).sort((a,b)=>b.localeCompare(a))[0]
+               || r.keys.sort((a,b)=>b.localeCompare(a))[0];
+          } else {
+            key = r.keys.sort((a,b)=>b.localeCompare(a))[0];
+          }
+          const item = await storage.get(key);
+          if (!item) continue;
+          const sheet = JSON.parse(item.value);
+          results.push({ name, ownership: Number(ownership)||100, sheet, asOfDate: sheet.asOfDate });
+        } catch {}
+      }
+      setCollateralLinkedData(results);
+      setCollateralLinkedLoading(false);
+    }
+    fetchCollateralLinkedData();
+  }, [JSON.stringify(data.linkedEntities), data.asOfDate, savedSheets.length]);
 
 
   // Comparison groups sheets by FOLDER (using the already-loaded savedSheets metadata)
@@ -11203,7 +11247,40 @@ ${extraPages}
         </div>
       );
       case "collateral": return (() => {
-        const col = deriveCollateral(data);
+        // Build the merged dataset when "Include linked entities" is on.
+        // Each linked corp's balance-sheet arrays contribute to this sheet's
+        // category totals, scaled by ownership %.
+        const linkedData = (collateralLinkedData && collateralLinkedData.length) ? collateralLinkedData : [];
+        const buildMergedData = () => {
+          if (!collateralIncludeLinked || !linkedData.length) return data;
+          const scaleArr = (arr, pct, fields) => (arr||[]).map(r => {
+            const o = {...r};
+            fields.forEach(f => { if (o[f] !== undefined && o[f] !== '') o[f] = String(Number(String(o[f]).replace(/[^0-9.-]/g,''))*pct || 0); });
+            return o;
+          });
+          const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+          const merged = {...data};
+          const push = (field, rows) => { merged[field] = [...(merged[field]||[]), ...rows]; };
+          for (const ent of linkedData) {
+            const pct = ent.ownership / 100;
+            if (!ent.sheet) continue;
+            const p = ent.sheet;
+            // Cash fields are special — scalars.
+            merged.cashGlacier = String((n(merged.cashGlacier) + n(p.cashGlacier) * pct));
+            push('cashOther',       scaleArr(p.cashOther,       pct, ['amount']));
+            push('federalPayments', scaleArr(p.federalPayments, pct, ['amount']));
+            push('farmProducts',    scaleArr(p.farmProducts,    pct, ['quantity']));
+            push('cropInvestment',  scaleArr(p.cropInvestment,  pct, ['acres']));
+            push('livestockMarket', scaleArr(p.livestockMarket, pct, ['value']));
+            push('breedingStock',   scaleArr(p.breedingStock,   pct, ['value']));
+            push('machinery',       scaleArr(p.machinery,       pct, ['value']));
+            push('vehicles',        scaleArr(p.vehicles,        pct, ['value']));
+            push('realEstate',      scaleArr(p.realEstate,      pct, ['acres']));
+          }
+          return merged;
+        };
+        const mergedData = buildMergedData();
+        const col = deriveCollateral(mergedData);
         const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
         const setColField = (key, value) => set("collateral", {...(data.collateral||{}), [key]: value});
         const setOverride = (catKey, value) => {
@@ -11221,6 +11298,31 @@ ${extraPages}
             <SecHdr icon="🛡" title="Collateral Valuation — Current"
               subtitle="Lender-side view: how much the pledged collateral would net in a forced liquidation. Values auto-populate from the balance sheet. Edit realization % per row if policy or borrower risk warrants."
               color="#4a0810" />
+
+            {/* Linked-entity merge toggle */}
+            {normalizeLinked(data.linkedEntities).length > 0 && (
+              <div style={{background:'#fdf7f7',border:'0.5px solid #d4a5ac',borderRadius:8,padding:'10px 14px',marginBottom:14,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+                <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,fontWeight:600,color:'#4a0810'}}>
+                  <input type="checkbox" checked={collateralIncludeLinked}
+                    onChange={e => setCollateralIncludeLinked(e.target.checked)} />
+                  Include linked entities (merge collateral by ownership %)
+                </label>
+                {collateralLinkedLoading && <span style={{fontSize:11,color:'#6b7280'}}>loading…</span>}
+                {collateralIncludeLinked && linkedData.length > 0 && (
+                  <div style={{fontSize:11,color:'#6b7280',display:'flex',gap:10,flexWrap:'wrap'}}>
+                    {linkedData.map(e => (
+                      <span key={e.name} style={{background:'white',padding:'2px 8px',borderRadius:4,border:'0.5px solid #e5e7eb'}}>
+                        {e.name} × {e.ownership}% {e.asOfDate ? `(${e.asOfDate})` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {collateralIncludeLinked && !linkedData.length && !collateralLinkedLoading && (
+                  <span style={{fontSize:11,color:'#991b1b'}}>No linked-entity sheets found at or before {data.asOfDate || 'this date'}.</span>
+                )}
+              </div>
+            )}
+
             <div style={{background:'white',border:'0.5px solid #e5e7eb',borderRadius:8,overflow:'hidden',marginBottom:16}}>
               <div style={{...row,...colHead,borderBottom:'none'}}>
                 <div>Category</div>
@@ -11234,11 +11336,28 @@ ${extraPages}
                 const override = (data.collateral?.realizationOverrides||{})[cat.key];
                 const displayPct = override !== undefined && override !== '' ? override : Math.round(cat.realization * 100);
                 const isManual = !!cat.source;
+                const SOURCE_HINTS = {
+                  govtPmts:        'from Federal Payments',
+                  cropsHarvested:  'from Farm Products on Hand (qty × price × share%)',
+                  cropsUnharvested:'from Crop Investment (acres × $/ac)',
+                  livestockMkt:    'from Market Livestock',
+                  livestockBreed:  'from Breeding Stock',
+                  farmEquipment:   'from Machinery & Equipment',
+                  rollingStock:    'from Titled Vehicles',
+                  landBuildings:   'from Real Estate (acres × $/ac)',
+                  cash:            'from Cash on Hand & in Bank',
+                };
+                const hint = SOURCE_HINTS[cat.key];
                 return (
                   <div key={cat.key} style={row}>
                     <div style={{fontWeight: cat.section==='equipment' || cat.section==='realEstate' ? 500 : 400}}>
                       {cat.label}
                       {isManual && <span style={{fontSize:10,color:'#6b7280',marginLeft:6}}>(manual)</span>}
+                      {hint && !isManual && (
+                        <div style={{fontSize:10,color:'#9ca3af',marginTop:2,fontWeight:400}}>
+                          {hint}{collateralIncludeLinked && linkedData.length ? ' + linked entities × ownership%' : ''}
+                        </div>
+                      )}
                     </div>
                     <div style={{textAlign:'right'}}>
                       {isManual ? (
