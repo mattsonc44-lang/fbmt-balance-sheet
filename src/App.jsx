@@ -780,8 +780,10 @@ function deriveCollateral(d) {
     cropsUnharvested:(d.cropInvestment||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
     livestockMkt:    (d.livestockMarket||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(n(r.share||'100')/100), 0),
     livestockBreed:  (d.breedingStock||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(n(r.share||'100')/100), 0),
-    farmEquipment:   (d.machinery||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
-    rollingStock:    (d.vehicles||[]).filter(isColl).reduce((s,r) => s + n(r.value), 0),
+    // Apply the per-row depreciation haircut on top of the collateral flag
+    // so the Collateral worksheet sees the same book value the balance sheet does.
+    farmEquipment:   (d.machinery||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(1 - Math.max(0, Math.min(100, n(r.depreciation)))/100), 0),
+    rollingStock:    (d.vehicles||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(1 - Math.max(0, Math.min(100, n(r.depreciation)))/100), 0),
     otherEquipment:  n(c.otherEquipmentValue),
     landBuildings:   (d.realEstate||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
     buildings:       n(c.buildingsValue),
@@ -9279,8 +9281,17 @@ Question: ${q}`,
   const breedingTotal = data.breedingStock.reduce((s,r)=>s+n(r.value)*(n(r.share||'100')/100),0);
   const reTotal = data.realEstate.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const reConTotal = data.reContracts.reduce((s,r)=>s+n(r.amount),0);
-  const vehiclesVal = data.vehicles.reduce((s,r)=>s+n(r.value),0);
-  const machVal = data.machinery.reduce((s,r)=>s+n(r.value),0);
+  // Per-row depreciation lets the lender haircut each piece of equipment /
+  // each vehicle without touching the borrower's stated value. depreciation
+  // is a percent (0-100) stored on the row. Depreciated value = stated × (1 - d/100).
+  // depreciation null/undefined/'' = no haircut, so existing rows behave the same.
+  const depVal = r => {
+    const v = n(r.value);
+    const d = Math.max(0, Math.min(100, n(r.depreciation)));
+    return v * (1 - d/100);
+  };
+  const vehiclesVal = data.vehicles.reduce((s,r)=>s+depVal(r),0);
+  const machVal = data.machinery.reduce((s,r)=>s+depVal(r),0);
   const otherAssetsTotal = data.otherAssets.reduce((s,r)=>s+n(r.amount),0);
   const totalLTAssets = breedingTotal+reTotal+reConTotal+vehiclesVal+machVal+otherAssetsTotal;
   const linkedEntityVal = normalizeLinked(data.linkedEntities).reduce((s, e) => {
@@ -10779,8 +10790,10 @@ FORMAT RULES — follow exactly:
       const pct = numVal(entry.ownership || '100') || 100;
       return s + (Number(nw) || 0) * (pct / 100);
     }, 0);
-    const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
-    const machVal = (d.machinery||[]).reduce((s,r)=>s+n(r.value),0);
+    // Mirror the wizard's per-row depreciation haircut.
+    const _depVal = r => n(r.value) * (1 - Math.max(0, Math.min(100, n(r.depreciation)))/100);
+    const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+_depVal(r),0);
+    const machVal = (d.machinery||[]).reduce((s,r)=>s+_depVal(r),0);
     const totalCurrentAssets = n(d.cashGlacier)
       +(d.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.receivables||[]).reduce((s,r)=>s+n(r.amount),0)
@@ -11428,6 +11441,32 @@ ${extraPages}
         </button>
       );
     };
+    // Bulk-apply a depreciation % to every row in a field. The lender types
+    // a number into the input; clicking "Apply to all" writes that number
+    // into every row's depreciation field. Blank or "0" clears depreciation.
+    const DeprBulk = ({field, label}) => {
+      const [pct, setPct] = React.useState('');
+      const rows = data[field] || [];
+      if (!rows.length) return null;
+      const apply = () => {
+        const v = String(pct || '').replace(/[^0-9.]/g,'');
+        setData(d => ({...d, [field]: (d[field]||[]).map(r => ({...r, depreciation: v}))}));
+      };
+      return (
+        <span style={{display:'inline-flex',alignItems:'center',gap:6,border:'0.5px solid #d1d5db',borderRadius:5,padding:'2px 6px 2px 10px'}}
+          title={`Apply the same depreciation % to every ${label||field} row at once`}>
+          <span style={{fontSize:11,color:'#6b7280',fontWeight:600}}>Depr all:</span>
+          <input type="text" value={pct} placeholder="e.g. 15"
+            onChange={e=>setPct(e.target.value.replace(/[^0-9.]/g,''))}
+            style={{width:38,border:'1px solid #d1d5db',borderRadius:4,padding:'2px 4px',fontSize:11,fontFamily:'inherit',textAlign:'right'}} />
+          <span style={{fontSize:11,color:'#6b7280'}}>%</span>
+          <button type="button" onClick={apply}
+            style={{background:'#374151',color:'white',border:'none',borderRadius:4,padding:'2px 8px',fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+            Apply
+          </button>
+        </span>
+      );
+    };
     // Reusable per-row collateral checkbox — defaults to ON (treat missing
     // flag as pledged). Unchecking excludes this row from the Collateral
     // worksheet without removing it from the balance sheet itself.
@@ -11802,6 +11841,7 @@ ${extraPages}
                 ❓ {Object.values(vehPriceCheck).filter(x=>x.status==='unknown').length} unknown
               </span>
             )}
+            <DeprBulk field="vehicles" label="vehicle" />
             <CollBulk field="vehicles" label="vehicle" />
             <button type="button" onClick={runVehiclePriceCheck}
               disabled={vehPriceCheckLoading}
@@ -11818,10 +11858,13 @@ ${extraPages}
               <span style={{width:85}}>Mileage</span>
               <span style={{width:95}}>Condition</span>
               <span style={{width:110}}>Value</span>
+              <span style={{width:70}} title="Lender depreciation % — reduces this row's value on the balance sheet and collateral worksheet">Depr %</span>
+              <span style={{width:110}}>Net</span>
               <span style={{width:32}}></span>
             </div>
             {data.vehicles.map((r,i) => {
               const chk = vehPriceCheck[i];
+              const _net = depVal(r);
               return (
               <React.Fragment key={i}>
               <div className="mach-row" data-rowkey={`vehicles-${i}`}>
@@ -11856,6 +11899,17 @@ ${extraPages}
                       onChange={e=>setArr("vehicles",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
+                <div className="mach-col" style={{width:70}}>
+                  <div className="input-wrap" title="Lender depreciation % — subtracts from the stated value">
+                    <input type="text" value={r.depreciation||''} placeholder="0"
+                      onChange={e=>setArr("vehicles",i,"depreciation",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
+                <div className="mach-col" style={{width:110,textAlign:'right',fontWeight:600,color:'#1a5c25'}}
+                  title="Depreciated value = Value × (1 − Depr %)">
+                  {'$' + Math.round(_net).toLocaleString()}
+                </div>
                 <CollChk field="vehicles" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("vehicles",i)}>x</button>
               </div>
@@ -11873,7 +11927,7 @@ ${extraPages}
               );
             })}
           </div>
-          <button className="add-btn" onClick={()=>addRow("vehicles",{year:"",make:"",vin:"",mileage:"",condition:"",value:""})}>+ Add Vehicle</button>
+          <button className="add-btn" onClick={()=>addRow("vehicles",{year:"",make:"",vin:"",mileage:"",condition:"",value:"",depreciation:""})}>+ Add Vehicle</button>
           <div className="subtotal-row total"><span>Total Titled Vehicles</span><strong>{fmt(vehiclesVal)}</strong></div>
         </div>
       );
@@ -11888,6 +11942,7 @@ ${extraPages}
                 ❓ {Object.values(machPriceCheck).filter(x=>x.status==='unknown').length} unknown
               </span>
             )}
+            <DeprBulk field="machinery" label="equipment" />
             <CollBulk field="machinery" label="equipment" />
             <button type="button" onClick={runMachineryPriceCheck}
               disabled={machPriceCheckLoading}
@@ -11904,6 +11959,8 @@ ${extraPages}
               <span style={{width:150}}>Serial #</span>
               <span style={{width:110}}>Condition</span>
               <span style={{width:130}}>Value</span>
+              <span style={{width:70}} title="Lender depreciation % — reduces this row's value on the balance sheet and collateral worksheet">Depr %</span>
+              <span style={{width:120}}>Net</span>
               <span style={{width:140,textAlign:'center'}}>Price Check</span>
               <span style={{width:32}}></span>
             </div>
@@ -11951,6 +12008,17 @@ ${extraPages}
                     <input type="text" value={r.value} placeholder="0"
                       onChange={e=>setArr("machinery",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
+                </div>
+                <div className="mach-col" style={{width:70}}>
+                  <div className="input-wrap" title="Lender depreciation % — subtracts from the stated value">
+                    <input type="text" value={r.depreciation||''} placeholder="0"
+                      onChange={e=>setArr("machinery",i,"depreciation",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
+                <div className="mach-col" style={{width:120,textAlign:'right',fontWeight:600,color:'#1a5c25'}}
+                  title="Depreciated value = Value × (1 − Depr %)">
+                  {money(depVal(r))}
                 </div>
                 <div className="mach-col" style={{width:140,display:'flex',alignItems:'center',justifyContent:'center'}}>
                   {flag ? (
