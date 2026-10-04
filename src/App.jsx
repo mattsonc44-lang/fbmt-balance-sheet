@@ -10124,15 +10124,33 @@ FORMAT RULES — follow exactly:
     return exact ? exact.price : null;
   };
 
+  // Strip lender-only fields before shipping a sheet to the customer. The
+  // `collateral` block is the lender's internal liquidation analysis (realization
+  // overrides, superior encumbrances, loan balances, cushion) — none of it
+  // belongs on the customer's view of their own balance sheet. Also drop the
+  // CA-share snapshot blobs we bake in for the CA path so they don't ride
+  // along to the customer either.
+  const stripLenderOnlyFields = (src) => {
+    if (!src || typeof src !== 'object') return src;
+    const {
+      collateral, _collateralMode,
+      comparisonSnapshot, linkedEntitySnapshots, linkedEntityNWSnapshot,
+      corpPersonalDebtSnapshot,
+      ...rest
+    } = src;
+    return rest;
+  };
+
   const generateBSShare = async (includeBudget = false) => {
     setBSShareStatus('generating'); setShowBSShareModal(true); setShowSharePre(false);
     try {
       const shareId = Math.random().toString(36).slice(2,10).toUpperCase();
       const pin = String(Math.floor(100000 + Math.random() * 900000));
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+      const customerSafe = stripLenderOnlyFields(data);
       const originalData = includeBudget
-        ? { ...data, budgetIncluded: true, budgetData: { budgetCrops: data.budgetCrops||[], budgetLivestock: data.budgetLivestock||[], budgetMisc: data.budgetMisc||[], budgetExpenses: data.budgetExpenses||[], budgetOperatingExpenses: data.budgetOperatingExpenses||[] } }
-        : data;
+        ? { ...customerSafe, budgetIncluded: true, budgetData: { budgetCrops: data.budgetCrops||[], budgetLivestock: data.budgetLivestock||[], budgetMisc: data.budgetMisc||[], budgetExpenses: data.budgetExpenses||[], budgetOperatingExpenses: data.budgetOperatingExpenses||[] } }
+        : customerSafe;
       const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:originalData, expires_at:expires };
       const resp = await fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
       if (!resp.ok) throw new Error(await resp.text());
@@ -10148,8 +10166,11 @@ FORMAT RULES — follow exactly:
       const pin = String(Math.floor(100000 + Math.random() * 900000));
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
       if (includeBS) {
-        // Store as a balance_sheet_shares record with budgetIncluded flag
-        const originalData = { ...data, budgetIncluded: true, budgetData: { budgetCrops: data.budgetCrops||[], budgetLivestock: data.budgetLivestock||[], budgetMisc: data.budgetMisc||[], budgetExpenses: data.budgetExpenses||[], budgetOperatingExpenses: data.budgetOperatingExpenses||[] } };
+        // Store as a balance_sheet_shares record with budgetIncluded flag.
+        // Strip lender-only fields (collateral analysis, CA snapshots, etc.)
+        // so the customer never sees that side of the sheet.
+        const customerSafe = stripLenderOnlyFields(data);
+        const originalData = { ...customerSafe, budgetIncluded: true, budgetData: { budgetCrops: data.budgetCrops||[], budgetLivestock: data.budgetLivestock||[], budgetMisc: data.budgetMisc||[], budgetExpenses: data.budgetExpenses||[], budgetOperatingExpenses: data.budgetOperatingExpenses||[] } };
         const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:originalData, expires_at:expires };
         const resp = await fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
         if (!resp.ok) throw new Error(await resp.text());
@@ -10530,6 +10551,17 @@ FORMAT RULES — follow exactly:
       d.clientName = orig.clientName || draft.clientName || review.client_name || '';
       d.asOfDate   = reviewSaveDate[review.share_id] || review.as_of_date || orig.asOfDate || new Date().toISOString().slice(0,10);
       const key = makeKey(d.clientName, d.asOfDate);
+      // Preserve the lender's existing collateral analysis across a customer
+      // round-trip. The customer's share payload was stripped of `collateral`
+      // (lender-only), so without this restore it would get wiped back to
+      // emptyData() defaults when we save the merged sheet.
+      try {
+        const existing = await storage.get(key);
+        if (existing) {
+          const prior = JSON.parse(existing.value);
+          if (prior && prior.collateral) d.collateral = prior.collateral;
+        }
+      } catch {}
       await storage.set(key, JSON.stringify(d));
       await markReviewed(review.share_id, review.type);
       setData(d);
