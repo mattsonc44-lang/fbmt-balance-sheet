@@ -5943,7 +5943,7 @@ function ForcePasswordChange({ session, onDone }) {
 }
 
 // ─── AdminScreen ─────────────────────────────────────────────────────────────
-function AdminScreen({ session, profile, onSignOut, onClose }) {
+function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList }) {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showAdd, setShowAdd] = React.useState(false);
@@ -6021,6 +6021,30 @@ function AdminScreen({ session, profile, onSignOut, onClose }) {
 
       <div style={{maxWidth:900,margin:'32px auto',padding:'0 24px'}}>
         {msg && <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#166534'}}>{msg} <button onClick={()=>setMsg('')} style={{float:'right',background:'none',border:'none',cursor:'pointer',color:'#166534'}}>✕</button></div>}
+
+        {/* System tables — admin-only shared data (commodity price list,
+            expense-category list) lives here so regular users can't change
+            it from the Budget tab. */}
+        {(onOpenPriceList || onOpenExpenseList) && (
+          <div style={{background:'white',borderRadius:10,padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.08)',marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a',marginBottom:4}}>System Tables</div>
+            <div style={{fontSize:12,color:'#6b7280',marginBottom:12}}>These lists apply to every user. Only admins can edit them.</div>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+              {onOpenPriceList && (
+                <button onClick={()=>{ if (onClose) onClose(); onOpenPriceList(); }}
+                  style={{background:'none',border:'1.5px solid #6B0E1E',borderRadius:7,padding:'8px 16px',color:'#6B0E1E',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                  📋 Commodity Price List
+                </button>
+              )}
+              {onOpenExpenseList && (
+                <button onClick={()=>{ if (onClose) onClose(); onOpenExpenseList(); }}
+                  style={{background:'none',border:'1.5px solid #2d5a8e',borderRadius:7,padding:'8px 16px',color:'#2d5a8e',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                  📝 Expense Category List
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
           <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
@@ -12894,7 +12918,9 @@ ${extraPages}
   // Admin Users screen — admin-only, opened via the "⚙ Users" button on the home top
   if (showAdminScreen && profile?.role === 'admin') {
     return <AdminScreen session={session} profile={profile}
-      onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)} />;
+      onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)}
+      onOpenPriceList={()=>setShowPriceList(true)}
+      onOpenExpenseList={()=>setShowExpenseEditor(true)} />;
   }
 
   // Per-client dashboard — opened by clicking a client folder on the home screen.
@@ -14487,18 +14513,9 @@ ${extraPages}
               style={{fontSize:".85rem"}}>
               Print Budget
             </button>
-            {profile?.role === 'admin' && (
-              <button onClick={()=>setShowPriceList(true)}
-                style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"5px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-                📋 Price List
-              </button>
-            )}
-            {profile?.role === 'admin' && (
-              <button onClick={()=>setShowExpenseEditor(true)}
-                style={{background:"none",border:"1.5px solid #2d5a8e",borderRadius:6,padding:"5px 12px",color:"#2d5a8e",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-                📝 Expense List
-              </button>
-            )}
+            {/* Price List and Expense List moved to Admin → System Tables.
+                Non-admin users can't edit either anymore; admins open them
+                from ⚙ Users → "📋 Commodity Price List" / "📝 Expense Category List". */}
             {!caOpenShare && (
               <>
                 <button onClick={()=>generateBudgetShare(true)}
@@ -14577,7 +14594,7 @@ ${extraPages}
         </div>
       )}
 
-      {showPriceList && (
+      {showPriceList && profile?.role === 'admin' && (
         <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div style={{background:"white",borderRadius:14,padding:28,maxWidth:620,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -14662,7 +14679,7 @@ ${extraPages}
         </div>
       )}
 
-      {showExpenseEditor && (
+      {showExpenseEditor && profile?.role === 'admin' && (
         <ExpenseListEditor
           expenseList={expenseList}
           setExpenseList={setExpenseList}
