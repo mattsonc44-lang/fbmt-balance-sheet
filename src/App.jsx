@@ -11797,6 +11797,9 @@ ${extraPages}
     const grossTotal = rows.reduce((s,r) => s + dOf(r).gross, 0);
     const netTotal   = rows.reduce((s,r) => s + dOf(r).net,   0);
     const anyChecks  = Object.keys(machPriceCheck).length > 0;
+    // Only show the Depr % + Net columns when at least one row has a non-zero
+    // depreciation. Otherwise the printout stays clean and simple.
+    const anyDepr    = rows.some(r => dOf(r).pct > 0);
     const html = `<!DOCTYPE html><html><head><title>Machinery & Equipment — ${esc(data.clientName||'')}</title>
 <style>
   @page { size: letter; margin: .5in; }
@@ -11824,54 +11827,57 @@ ${extraPages}
   <h1>Machinery &amp; Equipment Schedule</h1>
   <div class="meta"><strong>${esc(data.clientName||'(client name)')}</strong> &nbsp;·&nbsp; As of ${esc(data.asOfDate||'')} &nbsp;·&nbsp; Printed ${new Date().toLocaleDateString('en-US',{dateStyle:'medium'})}</div>
 </div>
-<table>
-  <thead><tr>
-    <th style="width:6%">#</th>
-    <th style="width:7%">Year</th>
-    <th style="width:28%">Make &amp; Model</th>
-    <th style="width:10%">Size</th>
-    <th style="width:14%">Serial #</th>
-    <th style="width:9%">Cond.</th>
-    <th class="r" style="width:9%">Value</th>
-    <th class="c" style="width:6%">Depr</th>
-    <th class="r" style="width:9%">Net</th>
-    ${anyChecks ? '<th class="r" style="width:12%">Comp Range</th>' : ''}
-  </tr></thead>
-  <tbody>
-  ${rows.map((r,i) => {
-    const d = dOf(r);
-    const chk = machPriceCheck[i];
-    let compCell = '';
-    if (chk) {
-      const cls = chk.status==='ok'?'cp-ok':chk.status==='high'?'cp-high':chk.status==='low'?'cp-low':'cp-u';
+${(() => {
+  // Build the table header/body/totals with conditional Depr + Net columns.
+  // Column widths rebalance based on which optional columns are present.
+  const cols = [];
+  cols.push({ h:'#',             w:'6%',  cls:'c', body: (_,i) => `${i+1}` });
+  cols.push({ h:'Year',          w:'7%',  cls:'',  body: (r)   => esc(r.year||'') });
+  cols.push({ h:'Make &amp; Model', w: anyDepr || anyChecks ? '26%' : '34%', cls:'', body: (r) => esc(r.make||'') });
+  cols.push({ h:'Size',          w:'10%', cls:'',  body: (r)   => esc(r.size||'') });
+  cols.push({ h:'Serial #',      w: anyDepr || anyChecks ? '13%' : '17%', cls:'mono', body: (r) => esc(r.serial||'') });
+  cols.push({ h:'Cond.',         w:'9%',  cls:'',  body: (r)   => esc(r.condition||'') });
+  cols.push({ h:'Value', w: anyDepr ? '9%' : '13%', cls:'r', body: (r) => `<strong>${money(dOf(r).gross)}</strong>` });
+  if (anyDepr) {
+    cols.push({ h:'Depr', w:'6%', cls:'c', body: (r) => { const d = dOf(r); return d.pct ? d.pct + '%' : '—'; } });
+    cols.push({ h:'Net',  w:'9%', cls:'r', body: (r) => `<strong>${money(dOf(r).net)}</strong>` });
+  }
+  if (anyChecks) {
+    cols.push({ h:'Comp Range', w:'12%', cls:'r', body: (r,i) => {
+      const chk = machPriceCheck[i];
+      if (!chk) return '';
+      const clsStatus = chk.status==='ok'?'cp-ok':chk.status==='high'?'cp-high':chk.status==='low'?'cp-low':'cp-u';
       const flag = chk.status==='ok'?'✓':chk.status==='high'?'▲':chk.status==='low'?'▼':'?';
-      compCell = (chk.low || chk.high) ? `<span class="${cls}">${flag} ${money(chk.low)}–${money(chk.high)}</span>` : `<span class="cp-u">? no comps</span>`;
-    }
-    return `<tr>
-      <td class="c">${i+1}</td>
-      <td>${esc(r.year||'')}</td>
-      <td>${esc(r.make||'')}</td>
-      <td>${esc(r.size||'')}</td>
-      <td class="mono">${esc(r.serial||'')}</td>
-      <td>${esc(r.condition||'')}</td>
-      <td class="r">${money(d.gross)}</td>
-      <td class="c">${d.pct ? d.pct + '%' : '—'}</td>
-      <td class="r"><strong>${money(d.net)}</strong></td>
-      ${anyChecks ? `<td class="r" style="font-size:7pt">${compCell}</td>` : ''}
-    </tr>`;
-  }).join('')}
-  ${rows.length === 0 ? `<tr><td colspan="${anyChecks?10:9}" style="text-align:center;color:#6b7280;padding:14pt;font-style:italic">No machinery or equipment listed.</td></tr>` : ''}
-  </tbody>
-  ${rows.length > 0 ? `<tfoot><tr class="tot">
-    <td colspan="6" class="r">TOTALS</td>
-    <td class="r">${money(grossTotal)}</td>
-    <td></td>
-    <td class="r">${money(netTotal)}</td>
-    ${anyChecks ? '<td></td>' : ''}
-  </tr></tfoot>` : ''}
-</table>
+      return (chk.low || chk.high)
+        ? `<span class="${clsStatus}">${flag} ${money(chk.low)}–${money(chk.high)}</span>`
+        : `<span class="cp-u">? no comps</span>`;
+    }});
+  }
+  const colCount = cols.length;
+  const thead = cols.map(c => `<th${c.cls==='r'||c.cls==='c'?' class="'+c.cls+'"':''} style="width:${c.w}">${c.h}</th>`).join('');
+  const tbody = rows.length === 0
+    ? `<tr><td colspan="${colCount}" style="text-align:center;color:#6b7280;padding:14pt;font-style:italic">No machinery or equipment listed.</td></tr>`
+    : rows.map((r,i) => '<tr>' + cols.map(c =>
+        `<td${c.cls ? ' class="'+c.cls+'"' : ''}${c.cls==='mono' ? ' style="font-size:7pt"' : ''}>${c.body(r,i)}</td>`
+      ).join('') + '</tr>').join('');
+  // Totals row — Value total always shown, Net total only if we have the Net column.
+  // Count label columns (#, Year, Make, Size, Serial, Cond) that come before Value — always 6.
+  const totalCols = [`<td colspan="6" class="r">TOTALS</td>`,
+                     `<td class="r">${money(grossTotal)}</td>`];
+  if (anyDepr) {
+    totalCols.push(`<td></td>`); // Depr column spacer
+    totalCols.push(`<td class="r">${money(netTotal)}</td>`);
+  }
+  if (anyChecks) totalCols.push('<td></td>');
+  const tfoot = rows.length === 0 ? '' : `<tfoot><tr class="tot">${totalCols.join('')}</tr></tfoot>`;
+  return `<table>
+  <thead><tr>${thead}</tr></thead>
+  <tbody>${tbody}</tbody>
+  ${tfoot}
+</table>`;
+})()}
 ${anyChecks ? '<div class="foot">Comp ranges from live web search of auction &amp; dealer listings — sanity-check reference only, not a formal appraisal.</div>' : ''}
-${rows.some(r => (Number(r.depreciation)||0) > 0) ? '<div class="foot">Net = stated Value × (1 − lender Depreciation %).</div>' : ''}
+${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation %).</div>' : ''}
 <script>setTimeout(() => { window.focus(); window.print(); }, 150);</script>
 </body></html>`;
     W.document.open();
