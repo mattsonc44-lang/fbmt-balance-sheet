@@ -9809,6 +9809,11 @@ Question: ${q}`,
               folderPath: p.folderPath || [],
               savedAt: p._savedAt || null,
               clientName: p.clientName || '',
+              // Attach the raw balance-sheet payload so bank-internal tools
+              // (Net Worth Explainer, future analyzers) can decompose values
+              // row-by-row. This mirrors the CA-share snapshot shape so both
+              // paths share the same consumer code.
+              _rawSheet: p,
             });
           }
         } catch {}
