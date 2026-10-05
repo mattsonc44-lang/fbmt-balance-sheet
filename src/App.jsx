@@ -11779,6 +11779,106 @@ ${extraPages}
     setTimeout(()=>W.print(), 400);
   };
 
+  // Print just the Machinery & Equipment schedule — a standalone one-pager
+  // the lender can hand to a borrower or drop in the file. Shows client +
+  // as-of date at the top, each row with stated value, lender depreciation,
+  // net value, and (when available) the price-check comp range.
+  const handlePrintMachinery = () => {
+    const W = window.open("", "_blank", "width=900,height=1100");
+    if (!W) { alert('Print window was blocked — allow popups for this site.'); return; }
+    const money = v => (v === 0 || v === '0' || v === '' || v == null) ? '$0' : '$' + Math.round(Number(String(v).replace(/[^0-9.-]/g,''))||0).toLocaleString();
+    const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const rows = (data.machinery || []).filter(r => r && (r.year || r.make || r.value));
+    const dOf = r => {
+      const v = Number(String(r.value||'').replace(/[^0-9.-]/g,''))||0;
+      const d = Math.max(0, Math.min(100, Number(String(r.depreciation||'').replace(/[^0-9.-]/g,''))||0));
+      return { gross: v, pct: d, net: v * (1 - d/100) };
+    };
+    const grossTotal = rows.reduce((s,r) => s + dOf(r).gross, 0);
+    const netTotal   = rows.reduce((s,r) => s + dOf(r).net,   0);
+    const anyChecks  = Object.keys(machPriceCheck).length > 0;
+    const html = `<!DOCTYPE html><html><head><title>Machinery & Equipment — ${esc(data.clientName||'')}</title>
+<style>
+  @page { size: letter; margin: .5in; }
+  body { font-family: 'Segoe UI','Helvetica Neue',Arial,sans-serif; color:#111; margin:0; padding:0; }
+  .hdr { border-bottom: 2px solid #6B0E1E; padding-bottom: 8pt; margin-bottom: 14pt; }
+  .hdr h1 { margin:0; font-size:14pt; color:#6B0E1E; letter-spacing:.3pt; }
+  .hdr .meta { font-size:9pt; color:#374151; margin-top:3pt; }
+  .hdr .bank { font-size:8pt; color:#6b7280; letter-spacing:1pt; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:8.5pt; }
+  thead th { background:#1a1a1a; color:white; text-align:left; padding:4pt 6pt; font-size:7.5pt; letter-spacing:.4pt; text-transform:uppercase; font-weight:700; }
+  tbody td { padding:3pt 6pt; border-bottom:0.5px solid #e5e7eb; vertical-align:top; }
+  tbody tr:nth-child(even) td { background:#fafafa; }
+  .r { text-align:right; }
+  .c { text-align:center; }
+  .mono { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size:7.5pt; }
+  .tot { border-top:1.5px solid #6B0E1E; background:#fdf7f7; font-weight:700; color:#4a0810; }
+  .foot { font-size:7pt; color:#6b7280; margin-top:10pt; font-style:italic; }
+  .cp-ok   { color:#15803d; font-weight:600; }
+  .cp-high { color:#991b1b; font-weight:600; }
+  .cp-low  { color:#92400e; font-weight:600; }
+  .cp-u    { color:#6b7280; }
+</style></head><body>
+<div class="hdr">
+  <div class="bank">First Bank of Montana · Agricultural Lending</div>
+  <h1>Machinery &amp; Equipment Schedule</h1>
+  <div class="meta"><strong>${esc(data.clientName||'(client name)')}</strong> &nbsp;·&nbsp; As of ${esc(data.asOfDate||'')} &nbsp;·&nbsp; Printed ${new Date().toLocaleDateString('en-US',{dateStyle:'medium'})}</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:6%">#</th>
+    <th style="width:7%">Year</th>
+    <th style="width:28%">Make &amp; Model</th>
+    <th style="width:10%">Size</th>
+    <th style="width:14%">Serial #</th>
+    <th style="width:9%">Cond.</th>
+    <th class="r" style="width:9%">Value</th>
+    <th class="c" style="width:6%">Depr</th>
+    <th class="r" style="width:9%">Net</th>
+    ${anyChecks ? '<th class="r" style="width:12%">Comp Range</th>' : ''}
+  </tr></thead>
+  <tbody>
+  ${rows.map((r,i) => {
+    const d = dOf(r);
+    const chk = machPriceCheck[i];
+    let compCell = '';
+    if (chk) {
+      const cls = chk.status==='ok'?'cp-ok':chk.status==='high'?'cp-high':chk.status==='low'?'cp-low':'cp-u';
+      const flag = chk.status==='ok'?'✓':chk.status==='high'?'▲':chk.status==='low'?'▼':'?';
+      compCell = (chk.low || chk.high) ? `<span class="${cls}">${flag} ${money(chk.low)}–${money(chk.high)}</span>` : `<span class="cp-u">? no comps</span>`;
+    }
+    return `<tr>
+      <td class="c">${i+1}</td>
+      <td>${esc(r.year||'')}</td>
+      <td>${esc(r.make||'')}</td>
+      <td>${esc(r.size||'')}</td>
+      <td class="mono">${esc(r.serial||'')}</td>
+      <td>${esc(r.condition||'')}</td>
+      <td class="r">${money(d.gross)}</td>
+      <td class="c">${d.pct ? d.pct + '%' : '—'}</td>
+      <td class="r"><strong>${money(d.net)}</strong></td>
+      ${anyChecks ? `<td class="r" style="font-size:7pt">${compCell}</td>` : ''}
+    </tr>`;
+  }).join('')}
+  ${rows.length === 0 ? `<tr><td colspan="${anyChecks?10:9}" style="text-align:center;color:#6b7280;padding:14pt;font-style:italic">No machinery or equipment listed.</td></tr>` : ''}
+  </tbody>
+  ${rows.length > 0 ? `<tfoot><tr class="tot">
+    <td colspan="6" class="r">TOTALS</td>
+    <td class="r">${money(grossTotal)}</td>
+    <td></td>
+    <td class="r">${money(netTotal)}</td>
+    ${anyChecks ? '<td></td>' : ''}
+  </tr></tfoot>` : ''}
+</table>
+${anyChecks ? '<div class="foot">Comp ranges from live web search of auction &amp; dealer listings — sanity-check reference only, not a formal appraisal.</div>' : ''}
+${rows.some(r => (Number(r.depreciation)||0) > 0) ? '<div class="foot">Net = stated Value × (1 − lender Depreciation %).</div>' : ''}
+<script>setTimeout(() => { window.focus(); window.print(); }, 150);</script>
+</body></html>`;
+    W.document.open();
+    W.document.write(html);
+    W.document.close();
+  };
+
   const handlePrintCollateral = () => {
     const W = window.open("","_blank","width=900,height=1100");
     if (!W) { alert('Print window was blocked — allow popups for this site.'); return; }
@@ -12528,6 +12628,11 @@ ${extraPages}
             )}
             <DeprBulk field="machinery" label="equipment" />
             <CollBulk field="machinery" label="equipment" />
+            <button type="button" onClick={handlePrintMachinery}
+              title="Print the equipment schedule — client name & as-of date at the top, each row with value, depreciation, and net."
+              style={{background:'#374151',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+              🖨 Print Equipment
+            </button>
             <button type="button" onClick={runMachineryPriceCheck}
               disabled={machPriceCheckLoading}
               title="Ask AI to estimate a reasonable value range for each piece from year + make/model and flag anything that looks out of range."
