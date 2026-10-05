@@ -2173,13 +2173,28 @@ ${insightHtml}
           </button>
         </div>
 
-        {/* Net worth explainer — bank-internal only. Flag turned on in
-            Admin → System Tables. Decomposes Δ NW between the two most
-            recent sheets so the lender can answer "why did it move". */}
+        {/* Net worth explainer — bank-internal only. Flag turned on per-user
+            in Admin → System Users (Features column). Decomposes Δ NW between
+            the two most recent sheets so the lender can answer "why did it
+            move". */}
+        {/* Diagnostic banners — only show once the user has the feature
+            enabled, so non-admin users without the flag see nothing. */}
+        {nwExplainerEnabled && compSheets.length < 2 && (
+          <div style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:7,padding:'6px 10px',marginBottom:10,fontSize:11,color:'#92400e'}}>
+            Net Worth Explainer is enabled, but it needs at least 2 saved balance sheets for this client to decompose Δ NW. Save another year to see it.
+          </div>
+        )}
         {nwExplainerEnabled && compSheets.length >= 2 && (() => {
           const sorted = [...compSheets].sort((a,b) => (a.date||'').localeCompare(b.date||''));
           const prior = sorted[sorted.length-2]?._rawSheet;
           const newer = sorted[sorted.length-1]?._rawSheet;
+          if (!prior || !newer) {
+            return (
+              <div style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:7,padding:'6px 10px',marginBottom:10,fontSize:11,color:'#92400e'}}>
+                Net Worth Explainer is enabled but the comparison snapshot is missing raw sheet data. Click Refresh above to rebuild the comparison, then re-open Year Comparison.
+              </div>
+            );
+          }
           const exp = computeNWExplainer(prior, newer);
           if (!exp) return null;
           const bulletColor = v => v >= 0 ? '#15803d' : '#991b1b';
