@@ -6102,7 +6102,7 @@ function ForcePasswordChange({ session, onDone }) {
 }
 
 // ─── AdminScreen ─────────────────────────────────────────────────────────────
-function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList, featureFlags, onToggleFeature }) {
+function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList }) {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showAdd, setShowAdd] = React.useState(false);
@@ -6205,26 +6205,9 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
           </div>
         )}
 
-        {/* Feature flags — bank-internal toggles that aren't user-level
-            preferences. Each lender's browser reads the same localStorage,
-            admins flip them here. */}
-        {onToggleFeature && (
-          <div style={{background:'white',borderRadius:10,padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.08)',marginBottom:20}}>
-            <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a',marginBottom:4}}>Analysis Features</div>
-            <div style={{fontSize:12,color:'#6b7280',marginBottom:12}}>Bank-internal analysis panels. Enable or disable without a code deploy.</div>
-            <label style={{display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',padding:'8px 10px',border:'0.5px solid #e5e7eb',borderRadius:7}}>
-              <input type="checkbox" checked={!!featureFlags?.nwExplainer}
-                onChange={e=>onToggleFeature('nwExplainer', e.target.checked)}
-                style={{marginTop:3}} />
-              <span>
-                <div style={{fontWeight:600,fontSize:13,color:'#1a1a1a'}}>Net Worth Explainer</div>
-                <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>
-                  Decomposes year-over-year Δ net worth into named contribution buckets (asset value changes, debt paydowns, working capital swing). Shown on Year Comparison. Bank-internal — never shown to customers or CAs.
-                </div>
-              </span>
-            </label>
-          </div>
-        )}
+        {/* Per-user features are now set from each row in the Users table
+            below (click the chip in the Features column to toggle). The
+            previous bank-wide Analysis Features card has been removed. */}
 
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
           <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
@@ -6239,7 +6222,7 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr style={{background:'#1a1a1a',color:'white'}}>
-                  {['Name','Email','Role','Status','Actions'].map(h=>(
+                  {['Name','Email','Role','Status','Features','Actions'].map(h=>(
                     <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,letterSpacing:'.5px'}}>{h}</th>
                   ))}
                 </tr>
@@ -6258,6 +6241,23 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                       <span style={{color:u.is_active!==false?'#15803d':'#dc2626',fontSize:12,fontWeight:600}}>
                         {u.is_active!==false?'Active':'Inactive'}
                       </span>
+                    </td>
+                    <td style={{padding:'10px 16px'}}>
+                      {/* Per-user features — click a chip to toggle. Only
+                          "regular user" and admin roles make sense here;
+                          CAs don't have access to Year Comparison. */}
+                      {u.role !== 'ca' && (
+                        <button
+                          onClick={()=>{
+                            const current = u.features || {};
+                            const nextVal = !current.nwExplainer;
+                            handleUpdateRole(u.id, { features: { ...current, nwExplainer: nextVal } });
+                          }}
+                          title="Net Worth Explainer — year-over-year Δ NW decomposition on the Year Comparison tab"
+                          style={{background:u.features?.nwExplainer?'#dcfce7':'#f3f4f6',color:u.features?.nwExplainer?'#15803d':'#6b7280',border:'1px solid '+(u.features?.nwExplainer?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                          {u.features?.nwExplainer ? '✓ NW Explainer' : 'NW Explainer: off'}
+                        </button>
+                      )}
                     </td>
                     <td style={{padding:'10px 16px'}}>
                       <div style={{display:'flex',gap:6}}>
@@ -13167,13 +13167,7 @@ ${extraPages}
     return <AdminScreen session={session} profile={profile}
       onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)}
       onOpenPriceList={()=>setShowPriceList(true)}
-      onOpenExpenseList={()=>setShowExpenseEditor(true)}
-      featureFlags={featureFlags}
-      onToggleFeature={(key, value)=>{
-        const next = { ...featureFlags, [key]: value };
-        setFeatureFlags(next);
-        saveFeatureFlags(next);
-      }} />;
+      onOpenExpenseList={()=>setShowExpenseEditor(true)} />;
   }
 
   // Per-client dashboard — opened by clicking a client folder on the home screen.
@@ -14842,7 +14836,7 @@ ${extraPages}
               BOLD_ROWS={BOLD_ROWS}
               onDeleteSheet={deleteComparisonSheet}
               currentFolderPath={data.folderPath || []}
-              nwExplainerEnabled={!!featureFlags.nwExplainer && profile?.role !== 'ca' && !caOpenShare}
+              nwExplainerEnabled={!!profile?.features?.nwExplainer && profile?.role !== 'ca' && !caOpenShare}
             />
           </div>
         </div>
