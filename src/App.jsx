@@ -4795,7 +4795,7 @@ function WhatIfView({ data }) {
 // FSA base acres, renewal reminders, and an AI-drafted credit memo.
 function ClientDashboard({
   clientName, savedSheets, pendingReviews, pendingCAEdits,
-  session, sheetTotals,
+  session, profile, sheetTotals,
   onBack, onOpenSheet, onOpenClient, onNewSheet, onOpenComparison, onOpenImport, onOpenAgInspection,
   onOpenReview, onOpenCADiff, onShareCA,
 }) {
@@ -4808,6 +4808,22 @@ function ClientDashboard({
   const [latestMemo, setLatestMemo] = React.useState(null);       // {id, content, based_on_as_of_date, edited, created_at, updated_at}
   const [memoHistory, setMemoHistory] = React.useState([]);       // prior versions
   const [memoStatus, setMemoStatus] = React.useState('');         // 'generating' | 'saving' | 'saved' | 'error:...' | ''
+  // Credit Analysis upload + committee summary. Bank-internal; feature-flagged
+  // per user via profile.features.creditSummary. Stored in localStorage keyed
+  // by clientName — one CA + one summary per client.
+  const [caUpload, setCaUpload] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fbmt_credit_analysis:' + clientName) || 'null') || null; }
+    catch { return null; }
+  });
+  const [caUploadStatus, setCaUploadStatus] = React.useState('');  // 'extracting' | 'summarizing' | 'error:...' | ''
+  const [caSummaryEditing, setCaSummaryEditing] = React.useState(false);
+  const saveCaUpload = (next) => {
+    setCaUpload(next);
+    try {
+      if (next) localStorage.setItem('fbmt_credit_analysis:' + clientName, JSON.stringify(next));
+      else localStorage.removeItem('fbmt_credit_analysis:' + clientName);
+    } catch {}
+  };
   const [memoDraft, setMemoDraft] = React.useState('');           // local edit buffer
   const [showMemoHistory, setShowMemoHistory] = React.useState(false);
   const memoSaveTimer = React.useRef(null);
@@ -5929,6 +5945,185 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             style={{width:'100%',border:CARD_BORDER,borderRadius:5,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',resize:'vertical',lineHeight:1.6}}/>
         </div>
 
+        {/* Credit Analysis upload + Committee Summary (bank-internal, per-user
+            feature-flagged). Lender uploads the written Credit Analysis (PDF),
+            we extract the text, then Claude produces a committee-ready brief:
+            why approve, likely pitfalls, mitigants. The summary is editable. */}
+        {!!profile?.features?.creditSummary && (
+          <div style={{background:CARD_BG,border:'1.5px solid #6B0E1E',borderRadius:8,padding:'18px'}}>
+            {cardHeader(
+              'Credit Analysis → Committee Summary',
+              caUpload?.fileName ? 'Uploaded: ' + caUpload.fileName : 'Bank-internal · upload the written CA to prep for committee',
+              <div style={{display:'flex',gap:8}}>
+                <label style={{fontSize:11,color:ACCENT,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                  {caUpload ? 'Replace file' : '+ Upload CA (PDF)'}
+                  <input type="file" accept="application/pdf,.pdf"
+                    style={{display:'none'}}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      // Hard-cap at ~4MB so we don't blow out localStorage.
+                      if (file.size > 4 * 1024 * 1024) {
+                        setCaUploadStatus('error:File is larger than 4MB — try trimming to the committee pages, or scan at lower resolution.');
+                        return;
+                      }
+                      try {
+                        const reader = new FileReader();
+                        const dataUrl = await new Promise((resolve, reject) => {
+                          reader.onload = () => resolve(reader.result);
+                          reader.onerror = reject;
+                          reader.readAsDataURL(file);
+                        });
+                        const b64 = String(dataUrl).split(',')[1] || '';
+                        // Store the PDF itself — summary pass sends it straight
+                        // to Claude via a document content block. No separate
+                        // text-extract step.
+                        saveCaUpload({ fileName: file.name, pdfBase64: b64, uploadedAt: new Date().toISOString(), summary: '', summaryGeneratedAt: null });
+                        setCaUploadStatus('');
+                      } catch (err) {
+                        setCaUploadStatus('error:' + (err.message || err));
+                      }
+                    }} />
+                </label>
+                {caUpload && (
+                  <button onClick={()=>{ if(window.confirm('Remove the uploaded Credit Analysis and its committee summary?')) saveCaUpload(null); }}
+                    style={{fontSize:11,color:TEXT_MUTED,background:'transparent',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+            {caUploadStatus === 'extracting' && <div style={{fontSize:12,color:TEXT_SEC,padding:'8px 0'}}>Extracting text from PDF…</div>}
+            {caUploadStatus === 'summarizing' && <div style={{fontSize:12,color:TEXT_SEC,padding:'8px 0'}}>Generating committee summary…</div>}
+            {caUploadStatus.startsWith('error:') && <div style={{fontSize:12,color:'#991b1b',padding:'8px 0'}}>⚠ {caUploadStatus.slice(6)}</div>}
+
+            {!caUpload && caUploadStatus === '' && (
+              <div style={{fontSize:12,color:TEXT_SEC,padding:'8px 0'}}>
+                No Credit Analysis uploaded yet. Click <span style={{color:ACCENT}}>+ Upload CA (PDF)</span> to feed Claude the written write-up and get a committee-prep brief back.
+              </div>
+            )}
+
+            {caUpload && (
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <div style={{fontSize:11,color:TEXT_MUTED}}>
+                  Uploaded {new Date(caUpload.uploadedAt).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}
+                  {' · '}{Math.round(((caUpload.pdfBase64||'').length * 0.75) / 1024).toLocaleString()} KB
+                </div>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <button onClick={async () => {
+                    setCaUploadStatus('summarizing');
+                    try {
+                      // Send the PDF itself (document content block) to Claude
+                      // so it reads the written CA directly. No separate
+                      // text-extract step — Claude handles the PDF natively.
+                      const instructions = `You are a senior ag credit officer at First Bank of Montana preparing a credit summary for the loan committee from the attached written Credit Analysis PDF.
+
+Produce the brief in three clearly-labeled Markdown sections:
+
+**1. Why Approve** — the 3–5 strongest reasons to approve, each one sentence citing specific numbers from the CA. Lead with coverage / trend / cushion.
+
+**2. Committee Pitfalls** — the 3–5 sharpest questions the loan committee is likely to raise, phrased as the pushback itself (e.g. "Working capital tightened — can the borrower absorb another dry year?"). Pull specific numbers from the CA.
+
+**3. Mitigants & Open Questions** — for each pitfall, propose a mitigant from the CA or flag the question to go back to the borrower with before committee.
+
+Rules:
+- Be direct and lender-realistic. No marketing fluff.
+- If something in the CA looks weak, say so plainly.
+- Cite concrete numbers from the CA — don't speak in generalities.
+- Each bullet one sentence, two at most.
+- Plain Markdown (headers + bullets). No tables.`;
+                      const resp = await fetch('/.netlify/functions/analyze-stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type':'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+                        body: JSON.stringify({
+                          model: 'claude-haiku-4-5',
+                          max_tokens: 2500,
+                          system: 'You are a precise, numerate agricultural credit analyst. You write for an internal loan committee audience and prioritize accuracy and candor over selling the deal.',
+                          messages: [{
+                            role: 'user',
+                            content: [
+                              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: caUpload.pdfBase64 } },
+                              { type: 'text', text: instructions },
+                            ],
+                          }],
+                        }),
+                      });
+                      if (!resp.ok || !resp.body) throw new Error('Server returned ' + resp.status);
+                      const reader = resp.body.getReader();
+                      const decoder = new TextDecoder();
+                      let acc = '', buf = '';
+                      // eslint-disable-next-line no-constant-condition
+                      while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buf += decoder.decode(value, { stream: true });
+                        let idx;
+                        while ((idx = buf.indexOf('\n\n')) !== -1) {
+                          const chunk = buf.slice(0, idx);
+                          buf = buf.slice(idx + 2);
+                          const dataLine = chunk.split('\n').find(l => l.startsWith('data: '));
+                          if (!dataLine) continue;
+                          const raw = dataLine.slice(6);
+                          if (raw === '[DONE]') continue;
+                          try {
+                            const evt = JSON.parse(raw);
+                            if (evt.type === 'content_block_delta' && evt.delta?.text) {
+                              acc += evt.delta.text;
+                              saveCaUpload({ ...caUpload, summary: acc, summaryGeneratedAt: new Date().toISOString() });
+                            }
+                          } catch {}
+                        }
+                      }
+                      setCaUploadStatus('');
+                    } catch (err) {
+                      setCaUploadStatus('error:' + (err.message || err));
+                    }
+                  }}
+                    disabled={caUploadStatus === 'summarizing'}
+                    style={{background:ACCENT,color:'white',border:'none',borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:caUploadStatus==='summarizing'?'wait':'pointer',fontFamily:'inherit',opacity:caUploadStatus==='summarizing'?.7:1}}>
+                    {caUpload.summary ? '↻ Regenerate committee summary' : '✨ Summarize for committee'}
+                  </button>
+                  {caUpload.summary && (
+                    <>
+                      <button onClick={()=>setCaSummaryEditing(e=>!e)}
+                        style={{background:'white',border:CARD_BORDER,borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',color:TEXT_SEC}}>
+                        {caSummaryEditing ? 'Done editing' : '✎ Edit'}
+                      </button>
+                      <button onClick={()=>{
+                        navigator.clipboard?.writeText(caUpload.summary || '').then(
+                          ()=>{ setCaUploadStatus(''); alert('Summary copied to clipboard.'); },
+                          ()=>alert('Could not copy — select and copy manually.')
+                        );
+                      }}
+                        style={{background:'white',border:CARD_BORDER,borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',color:TEXT_SEC}}>
+                        📋 Copy
+                      </button>
+                    </>
+                  )}
+                </div>
+                {caUpload.summary && (
+                  caSummaryEditing ? (
+                    <textarea value={caUpload.summary}
+                      onChange={e=>saveCaUpload({ ...caUpload, summary: e.target.value })}
+                      rows={16}
+                      style={{width:'100%',border:CARD_BORDER,borderRadius:6,padding:'10px 12px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',lineHeight:1.6,resize:'vertical'}}/>
+                  ) : (
+                    <div style={{background:'#fdf7f7',border:'0.5px solid #d4a5ac',borderRadius:6,padding:'12px 14px',fontSize:13,lineHeight:1.65,whiteSpace:'pre-wrap',color:'#1a1a1a'}}>
+                      {caUpload.summary}
+                    </div>
+                  )
+                )}
+                {caUpload.summaryGeneratedAt && (
+                  <div style={{fontSize:10,color:TEXT_MUTED}}>
+                    Summary generated {new Date(caUpload.summaryGeneratedAt).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Call / meeting log */}
         <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px'}}>
           {cardHeader(
@@ -6266,19 +6461,29 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                     </td>
                     <td style={{padding:'10px 16px'}}>
                       {/* Per-user features — click a chip to toggle. Only
-                          "regular user" and admin roles make sense here;
-                          CAs don't have access to Year Comparison. */}
+                          non-CA roles see these; CAs don't have access to
+                          Year Comparison or the client dashboard tools. */}
                       {u.role !== 'ca' && (
-                        <button
-                          onClick={()=>{
-                            const current = u.features || {};
-                            const nextVal = !current.nwExplainer;
-                            handleUpdateRole(u.id, { features: { ...current, nwExplainer: nextVal } });
-                          }}
-                          title="Net Worth Explainer — year-over-year Δ NW decomposition on the Year Comparison tab"
-                          style={{background:u.features?.nwExplainer?'#dcfce7':'#f3f4f6',color:u.features?.nwExplainer?'#15803d':'#6b7280',border:'1px solid '+(u.features?.nwExplainer?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
-                          {u.features?.nwExplainer ? '✓ NW Explainer' : 'NW Explainer: off'}
-                        </button>
+                        <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                          <button
+                            onClick={()=>{
+                              const current = u.features || {};
+                              handleUpdateRole(u.id, { features: { ...current, nwExplainer: !current.nwExplainer } });
+                            }}
+                            title="Net Worth Explainer — year-over-year Δ NW decomposition on the Year Comparison tab"
+                            style={{background:u.features?.nwExplainer?'#dcfce7':'#f3f4f6',color:u.features?.nwExplainer?'#15803d':'#6b7280',border:'1px solid '+(u.features?.nwExplainer?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                            {u.features?.nwExplainer ? '✓ NW Explainer' : 'NW Explainer'}
+                          </button>
+                          <button
+                            onClick={()=>{
+                              const current = u.features || {};
+                              handleUpdateRole(u.id, { features: { ...current, creditSummary: !current.creditSummary } });
+                            }}
+                            title="Credit Summary — upload the written Credit Analysis on the client dashboard and get a committee-ready brief"
+                            style={{background:u.features?.creditSummary?'#dcfce7':'#f3f4f6',color:u.features?.creditSummary?'#15803d':'#6b7280',border:'1px solid '+(u.features?.creditSummary?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                            {u.features?.creditSummary ? '✓ Credit Summary' : 'Credit Summary'}
+                          </button>
+                        </div>
                       )}
                     </td>
                     <td style={{padding:'10px 16px'}}>
@@ -7291,6 +7496,11 @@ export default function BalanceSheet() {
   const [compLoading, setCompLoading] = useState(false);
   const [compInsight, setCompInsight] = useState("");
   const [compInsightLoading, setCompInsightLoading] = useState(false);
+  // Credit summary — bank-internal "why approve + committee pitfalls" writeup.
+  // Feature-flagged per user (profile.features.creditSummary), rendered on
+  // Year Comparison. Never shared out of the bank.
+  const [creditSummary, setCreditSummary] = useState("");
+  const [creditSummaryLoading, setCreditSummaryLoading] = useState(false);
   const [savedSheets, setSavedSheets] = useState([]);
   const [openFolders, setOpenFolders] = useState({});
   const [showSaveFolderPicker, setShowSaveFolderPicker] = useState(false);
@@ -10206,6 +10416,174 @@ FORMAT RULES — follow exactly:
       setCompInsight("Connection error: " + err.message + ".");
     }
     setCompInsightLoading(false);
+  };
+
+  // ── Credit Summary (bank-internal) ─────────────────────────────────────────
+  // Streams a loan-committee writeup from the latest comparison snapshot:
+  //   • Approval case — why the credit stands up
+  //   • Committee pitfalls — what the reviewing committee is likely to pick at
+  //   • Mitigants / open questions to tee up answers for
+  // Gated per-user via profile.features.creditSummary and never leaves the bank
+  // (stripLenderOnlyFields filters comparisonSnapshot and friends from customer
+  // shares, and the UI renders only on Year Comparison which customers can't
+  // reach).
+  const generateCreditSummary = async (useConsolidated = false) => {
+    if (compSheets.length < 1) return;
+    setCreditSummaryLoading(true); setCreditSummary("");
+    const nm = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const money = v => (v>=0?'$':'-$') + Math.abs(Math.round(v)).toLocaleString();
+    const totalsFor = (s) => (useConsolidated && s.consolidatedTotals) ? s.consolidatedTotals : s.totals;
+    const sorted = [...compSheets].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+    const newer = sorted[sorted.length-1];
+    const prior = sorted.length>=2 ? sorted[sorted.length-2] : null;
+    const nTot = totalsFor(newer) || {};
+    const pTot = prior ? (totalsFor(prior) || {}) : null;
+    const line = (k) => {
+      const v = nTot[k] || 0;
+      if (!pTot) return `${k}: ${money(v)}`;
+      const d = v - (pTot[k] || 0);
+      return `${k}: ${money(v)} (prior ${money(pTot[k]||0)}, Δ ${d>=0?'+':''}${money(d)})`;
+    };
+    const headlineKeys = ['TOTAL ASSETS','TOTAL LIABILITIES','NET WORTH','Total Current Assets','Total Current Liab','WORKING CAPITAL'];
+    const headlines = headlineKeys.map(line).join('\n');
+    // Budget / debt-service snapshot from the newer raw sheet (if present).
+    let budgetBlock = '';
+    const p = newer._rawSheet;
+    if (p) {
+      const listPriceFor = (name) => {
+        if (!name) return null;
+        const needle = String(name).toLowerCase().trim();
+        const hit = commodityPrices.find(x => x.name && x.name.toLowerCase().trim() === needle);
+        return hit ? nm(hit.price) : null;
+      };
+      const cropInc = (p.budgetCrops||[]).reduce((s,r) => {
+        const cp = (!r.contracted && !r.customPrice) ? listPriceFor(r.crop) : null;
+        const px = (cp != null ? cp : 0) || nm(r.price);
+        return s + nm(r.acres)*nm(r.yieldPerAcre)*px*(nm(r.share||'100')/100);
+      }, 0);
+      const lsInc = (p.budgetLivestock||[]).reduce((s,r) => {
+        const cp = listPriceFor(r.type);
+        const px = (cp != null ? cp : 0) || nm(r.price);
+        return s + nm(r.head)*nm(r.lbs)*px*(nm(r.share||'100')/100);
+      }, 0);
+      const miscInc = (p.budgetMisc||[]).reduce((s,r)=>s+nm(r.amount),0);
+      const opEx = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((s,r)=>s+nm(r.amount),0);
+      const dsIntermed = (p.intermediatDebt||[]).reduce((s,r)=>s+nm(r.annualPmt),0);
+      const dsRE       = (p.reCurrent||[]).reduce((s,r)=>s+nm(r.annualPmt),0);
+      const dsProposed = (p.budgetProposedDebt||[]).reduce((s,r)=>s+nm(r.annualPmt),0);
+      const totalInc = cropInc + lsInc + miscInc;
+      const debtSvc = dsIntermed + dsRE + dsProposed;
+      const netMargin = totalInc - opEx;
+      const dscr = debtSvc > 0 ? (netMargin / debtSvc) : null;
+      budgetBlock = `\nPROJECTED CASH FLOW (newer-year budget):\n`
+        + `  Projected income: ${money(totalInc)} (crops ${money(cropInc)}, livestock ${money(lsInc)}, misc ${money(miscInc)})\n`
+        + `  Operating expenses: ${money(opEx)}\n`
+        + `  Net margin (pre-debt): ${money(netMargin)}\n`
+        + `  Debt service: ${money(debtSvc)}\n`
+        + `  Projected DSCR: ${dscr == null ? 'n/a' : dscr.toFixed(2) + 'x'}\n`;
+    }
+    // Collateral snapshot — reuse deriveCollateral on the newer raw sheet.
+    let collBlock = '';
+    try {
+      if (p) {
+        const col = deriveCollateral({ ...p, _collateralMode: 'current' });
+        collBlock = `\nCOLLATERAL (lender-side, current mode):\n`
+          + `  Net liquidation proceeds: ${money(col.totalNetProceeds)}\n`
+          + `  Loan balance: ${money(col.loanBalance)}\n`
+          + `  Cushion: ${money(col.cushion)}\n`
+          + `  Coverage: ${col.coveragePct == null ? 'n/a' : col.coveragePct.toFixed(0)+'%'}\n`;
+      }
+    } catch {}
+    const prompt =
+`You are a seasoned ag credit analyst at First Bank of Montana preparing a credit summary for loan committee.
+
+CLIENT: ${newer.clientName || compSheets[0]?.clientName || 'client'}
+AS-OF: ${newer.date || ''}${prior ? ` (prior sheet ${prior.date})` : ''}
+
+HEADLINE BALANCE SHEET:
+${headlines}
+${budgetBlock}${collBlock}
+Write a committee-ready credit summary with three clearly-labeled sections:
+
+**1. Why Approve** — the strongest 3–5 bullet reasons to approve. Cite specific numbers from the data above. Lead with what the committee most wants to hear (coverage, trend, cushion).
+
+**2. Committee Pitfalls** — anticipate the 3–5 sharpest questions the loan committee is likely to raise. Phrase each as the pushback itself (e.g. "Working capital tightened by $X — can the borrower absorb another dry year?"), not just a category.
+
+**3. Mitigants & Open Questions** — for each pitfall, propose a mitigant or flag the question the lender should go back to the borrower with before committee.
+
+Rules:
+- Be direct and lender-realistic. No marketing fluff.
+- Call out concrete numbers, don't speak in generalities.
+- If something looks weak, say so plainly — this is for internal review, not sales.
+- Keep each bullet one sentence, two at most.
+- Use plain Markdown (section headers, bullets). No tables.`;
+
+    const requestBody = {
+      model: 'claude-haiku-4-5',
+      max_tokens: 2500,
+      system: 'You are a precise, numerate agricultural credit analyst. You write for an internal loan committee audience and prioritize accuracy and candor over selling the deal.',
+      messages: [{ role:'user', content: prompt }],
+    };
+    try {
+      const resp = await fetch('/.netlify/functions/analyze-stream', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify(requestBody),
+      });
+      if (!resp.ok || !resp.body) {
+        const errText = await resp.text().catch(()=>'');
+        if (resp.status === 404) {
+          const fb = await fetch('/.netlify/functions/analyze', {
+            method:'POST', headers:{'Content-Type':'application/json','x-fbmt-secret': window.FBMT_FUNCTION_SECRET || ''},
+            body: JSON.stringify({ ...requestBody, max_tokens: 1500 }),
+          });
+          if (!fb.ok) { setCreditSummary('Error from server ('+fb.status+'): '+(await fb.text())); setCreditSummaryLoading(false); return; }
+          const json = await fb.json();
+          setCreditSummary(json.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || 'Unable to generate credit summary.');
+          setCreditSummaryLoading(false);
+          return;
+        }
+        setCreditSummary('Error from server ('+resp.status+'): '+errText);
+        setCreditSummaryLoading(false);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = '', buf = '', stopReason = null;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLine = chunk.split('\n').find(l => l.startsWith('data: '));
+          if (!dataLine) continue;
+          const raw = dataLine.slice(6);
+          if (raw === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
+              acc += evt.delta.text;
+              setCreditSummary(acc);
+            } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
+              stopReason = evt.delta.stop_reason;
+            } else if (evt.type === 'error' && evt.error) {
+              setCreditSummary('Model error: ' + (evt.error.message || 'unknown'));
+            }
+          } catch {}
+        }
+      }
+      if (stopReason === 'max_tokens' && acc) {
+        setCreditSummary(acc + '\n\n---\n\n⚠️ **Credit summary was cut off at the token limit.** Click Regenerate.');
+      }
+      if (!acc) setCreditSummary('Model returned no text — try again.');
+    } catch (err) {
+      setCreditSummary('Connection error: ' + err.message + '.');
+    }
+    setCreditSummaryLoading(false);
   };
 
 
@@ -13208,6 +13586,7 @@ ${extraPages}
       pendingReviews={pendingReviews}
       pendingCAEdits={pendingCAEdits}
       session={session}
+      profile={profile}
       sheetTotals={sheetTotals}
       onBack={() => setDashboardClient(null)}
       onOpenClient={(name) => setDashboardClient(name)}
