@@ -6102,7 +6102,7 @@ function ForcePasswordChange({ session, onDone }) {
 }
 
 // ─── AdminScreen ─────────────────────────────────────────────────────────────
-function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList }) {
+function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList, onSelfProfileChanged }) {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showAdd, setShowAdd] = React.useState(false);
@@ -6147,6 +6147,13 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
   const handleUpdateRole = async (userId, updates) => {
     await adminCall('update_profile', { userId, updates });
     await loadUsers(); setEditUser(null); setMsg('User updated');
+    // If the admin just edited their OWN profile row (e.g. flipped a feature
+    // flag on themselves), the parent app's cached `profile` object is stale
+    // — refresh it immediately so gates like the NW Explainer go live without
+    // requiring sign-out / sign-in.
+    if (userId === session?.user?.id && onSelfProfileChanged) {
+      try { await onSelfProfileChanged(); } catch {}
+    }
   };
 
   const handleResetPassword = async () => {
@@ -13167,7 +13174,10 @@ ${extraPages}
     return <AdminScreen session={session} profile={profile}
       onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)}
       onOpenPriceList={()=>setShowPriceList(true)}
-      onOpenExpenseList={()=>setShowExpenseEditor(true)} />;
+      onOpenExpenseList={()=>setShowExpenseEditor(true)}
+      onSelfProfileChanged={async ()=>{
+        try { const p = await supaGetProfile(); setProfile(p); } catch {}
+      }} />;
   }
 
   // Per-client dashboard — opened by clicking a client folder on the home screen.
