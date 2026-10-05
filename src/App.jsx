@@ -389,6 +389,20 @@ function saveCommodityPrices(prices) {
   try { localStorage.setItem("fbmt_commodityPrices", JSON.stringify(prices)); } catch {}
 }
 
+// Admin feature flags. Each lender's browser reads these, admins flip them
+// from Admin → System Tables. Same pattern as the commodity price list.
+const FEATURE_FLAGS_KEY = "fbmt_feature_flags";
+function loadFeatureFlags() {
+  try {
+    const stored = localStorage.getItem(FEATURE_FLAGS_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return { nwExplainer: false };
+}
+function saveFeatureFlags(flags) {
+  try { localStorage.setItem(FEATURE_FLAGS_KEY, JSON.stringify(flags)); } catch {}
+}
+
 const numVal = v => Number(String(v||"").replace(/[^0-9.-]/g,""))||0;
 const fmt = v => { const n = numVal(v); return n ? "$"+n.toLocaleString("en-US",{maximumFractionDigits:0}) : ""; };
 
@@ -1484,10 +1498,94 @@ function renderInlineMd(str) {
 }
 
 // ─── ComparisonView ───────────────────────────────────────────────────────────
+// ── Net worth explainer (bank-internal only) ──────────────────────────────
+// Decomposes Δ NW between two balance sheets into named contribution buckets
+// so lenders can answer "why did net worth move this much" at a glance.
+// Enabled via admin toggle (localStorage key fbmt_nw_explainer_enabled).
+// Never shipped to the customer (stripLenderOnlyFields and the customer form
+// has no notion of a Year Comparison tab anyway) and gated out of CA mode
+// by the renderer, so this stays purely bank-internal.
+function computeNWExplainer(priorSheet, newerSheet) {
+  if (!priorSheet || !newerSheet) return null;
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const sumArr = (arr, k) => (Array.isArray(arr)?arr:[]).reduce((s,r) => s + n(r[k]), 0);
+  // Totals for each side (inline to avoid cross-dependencies).
+  const totals = (d) => {
+    const _dep = r => n(r.value) * (1 - Math.max(0, Math.min(100, n(r.depreciation)))/100);
+    const cash = n(d.cashGlacier) + sumArr(d.cashOther, 'amount');
+    const rec  = sumArr(d.receivables, 'amount');
+    const fed  = Array.isArray(d.federalPayments) ? sumArr(d.federalPayments, 'amount') : n(d.federalPayments);
+    const ls   = sumArr(d.livestockMarket, 'value');
+    const fp   = (Array.isArray(d.farmProducts)?d.farmProducts:[]).reduce((s,r)=>s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0);
+    const ci   = (Array.isArray(d.cropInvestment)?d.cropInvestment:[]).reduce((s,r)=>s + n(r.acres)*n(r.valuePerAcre), 0);
+    const sup  = sumArr(d.supplies, 'value');
+    const oc   = sumArr(d.otherCurrent, 'amount');
+    const tc   = cash+rec+fed+ls+fp+ci+sup+oc;
+    const bs   = sumArr(d.breedingStock, 'value');
+    const re   = (Array.isArray(d.realEstate)?d.realEstate:[]).reduce((s,r)=>s + n(r.acres)*n(r.valuePerAcre), 0);
+    const veh  = (d.vehicles ||[]).reduce((s,r)=>s + _dep(r), 0);
+    const mch  = (d.machinery||[]).reduce((s,r)=>s + _dep(r), 0);
+    const oa   = sumArr(d.otherAssets, 'amount');
+    const tlt  = bs+re+veh+mch+oa;
+    const ta   = tc+tlt;
+    const on   = sumArr(d.operatingNotes, 'balance');
+    const ad   = sumArr(d.accountsDue, 'amount');
+    const idp  = sumArr(d.intermediatDebt, 'principal');
+    const rem  = sumArr(d.reMortgages, 'principal') + sumArr(d.reDebt, 'principal');
+    const tx   = n(d.taxesDue);
+    const ocl  = sumArr(d.otherCurrentLiab, 'amount');
+    const ol   = sumArr(d.otherLiabilities, 'balance');
+    const tl   = on+ad+idp+rem+tx+ocl+ol;
+    return {
+      ta, tl, nw:ta-tl, tc, tcl:on+ad+tx+ocl, wc:tc-(on+ad+tx+ocl),
+      re, veh, mch, bs, ls, fp, ci,
+      opLoc:on, termDebt:idp, reDebt:rem,
+    };
+  };
+  const a = totals(priorSheet);
+  const b = totals(newerSheet);
+  // Buckets.
+  const dRE     = b.re  - a.re;
+  const dEquip  = (b.veh + b.mch) - (a.veh + a.mch);
+  const dBreed  = b.bs  - a.bs;
+  const dLstMkt = b.ls  - a.ls;
+  const dCropOH = b.fp  - a.fp;
+  const dCropInv= b.ci  - a.ci;
+  const dWC     = b.wc  - a.wc;
+  // Debt moves negative = paydown adds to NW; positive = new debt reduces NW.
+  const dOp     = -(b.opLoc - a.opLoc);
+  const dTerm   = -(b.termDebt - a.termDebt);
+  const dReDebt = -(b.reDebt - a.reDebt);
+  // Operating-side budget P&L if the newer sheet carries one.
+  const nmd = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const cropInc = (newerSheet.budgetCrops||[]).reduce((s,r) => s + nmd(r.acres)*nmd(r.yieldPerAcre)*nmd(r.price)*(nmd(r.share||'100')/100), 0);
+  const lsInc   = (newerSheet.budgetLivestock||[]).reduce((s,r) => s + nmd(r.head)*nmd(r.lbs)*nmd(r.price)*(nmd(r.share||'100')/100), 0);
+  const miscInc = (newerSheet.budgetMisc||[]).reduce((s,r) => s + nmd(r.amount), 0);
+  const opEx    = (newerSheet.budgetExpenses||[]).filter(r => !r.prepaid).reduce((s,r) => s + nmd(r.amount), 0);
+  const budgetNet = (cropInc + lsInc + miscInc) - opEx;
+  const totalExplained = dRE + dEquip + dBreed + dLstMkt + dCropOH + dCropInv + dWC + dOp + dTerm + dReDebt;
+  const dNW = b.nw - a.nw;
+  const residual = dNW - totalExplained;
+  const buckets = [
+    { key:'re',       label:'Real-estate value',          value:dRE,     hint:'Change in land + buildings on the balance sheet' },
+    { key:'equip',    label:'Equipment + Vehicles value', value:dEquip,  hint:'After per-row depreciation' },
+    { key:'breed',    label:'Breeding stock value',       value:dBreed },
+    { key:'lsMkt',    label:'Market livestock value',     value:dLstMkt },
+    { key:'cropOH',   label:'Crops on hand value',        value:dCropOH, hint:'Farm products × share %' },
+    { key:'cropInv',  label:'Growing crop investment',    value:dCropInv },
+    { key:'wc',       label:'Working capital swing',      value:dWC,     hint:'Current assets − short-term liab' },
+    { key:'opLoc',    label:'Operating line paydown',     value:dOp,     hint:'Positive = line went down' },
+    { key:'term',     label:'Term debt paydown',          value:dTerm },
+    { key:'reDebt',   label:'RE debt paydown',            value:dReDebt },
+  ].filter(b => Math.abs(b.value) >= 1);
+  return { priorNW:a.nw, newerNW:b.nw, dNW, buckets, residual, budgetNet,
+           priorDate:priorSheet.asOfDate, newerDate:newerSheet.asOfDate };
+}
+
 function ComparisonView({
   compSheets: rawCompSheets, compLoading, compInsight, compInsightLoading,
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS,
-  onDeleteSheet, currentFolderPath,
+  onDeleteSheet, currentFolderPath, nwExplainerEnabled,
 }) {
   const [selectedYears, setSelectedYears] = React.useState(null);
   // Default: show every sheet for this client (matches how comparison always worked).
@@ -2074,6 +2172,65 @@ ${insightHtml}
             🖨 Print
           </button>
         </div>
+
+        {/* Net worth explainer — bank-internal only. Flag turned on in
+            Admin → System Tables. Decomposes Δ NW between the two most
+            recent sheets so the lender can answer "why did it move". */}
+        {nwExplainerEnabled && compSheets.length >= 2 && (() => {
+          const sorted = [...compSheets].sort((a,b) => (a.date||'').localeCompare(b.date||''));
+          const prior = sorted[sorted.length-2]?._rawSheet;
+          const newer = sorted[sorted.length-1]?._rawSheet;
+          const exp = computeNWExplainer(prior, newer);
+          if (!exp) return null;
+          const bulletColor = v => v >= 0 ? '#15803d' : '#991b1b';
+          return (
+            <div style={{background:'#fdf7f7',border:'1.5px solid #6B0E1E',borderRadius:10,padding:'14px 18px',marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:4,gap:12,flexWrap:'wrap'}}>
+                <div style={{fontSize:11,fontWeight:800,color:'#4a0810',textTransform:'uppercase',letterSpacing:.6}}>
+                  Net Worth Explainer · Bank-internal
+                </div>
+                <div style={{fontSize:11,color:'#6b7280'}}>
+                  {exp.priorDate} → {exp.newerDate}
+                </div>
+              </div>
+              <div style={{fontSize:14,color:'#1a1a1a',marginBottom:10}}>
+                <strong>Net worth {exp.dNW >= 0 ? '↑' : '↓'} {fmt(Math.abs(exp.dNW))}</strong>
+                {' '}({fmt(exp.priorNW)} → {fmt(exp.newerNW)})
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1.6fr 110px',gap:'6px 12px',fontSize:13,marginBottom:10}}>
+                {exp.buckets.map(b => (
+                  <React.Fragment key={b.key}>
+                    <div style={{color:'#374151'}}>
+                      {b.label}
+                      {b.hint && <div style={{fontSize:10,color:'#9ca3af'}}>{b.hint}</div>}
+                    </div>
+                    <div style={{textAlign:'right',fontWeight:600,color:bulletColor(b.value)}}>
+                      {b.value >= 0 ? '+' : '−'}{fmt(Math.abs(b.value))}
+                    </div>
+                  </React.Fragment>
+                ))}
+                {Math.abs(exp.residual) >= 1 && (
+                  <>
+                    <div style={{color:'#6b7280',fontStyle:'italic',borderTop:'0.5px solid #e5e7eb',paddingTop:6}}>
+                      Unexplained residual
+                      <div style={{fontSize:10}}>Draws/distributions, gifts, revaluations, data entry drift</div>
+                    </div>
+                    <div style={{textAlign:'right',fontWeight:600,color:'#6b7280',borderTop:'0.5px solid #e5e7eb',paddingTop:6}}>
+                      {exp.residual >= 0 ? '+' : '−'}{fmt(Math.abs(exp.residual))}
+                    </div>
+                  </>
+                )}
+              </div>
+              {Math.abs(exp.budgetNet) >= 1 && (
+                <div style={{fontSize:11,color:'#6b7280',borderTop:'0.5px solid #d4a5ac',paddingTop:8}}>
+                  Reference: newer sheet's budget projects net cash flow of{' '}
+                  <strong style={{color:exp.budgetNet>=0?'#15803d':'#991b1b'}}>{fmt(exp.budgetNet)}</strong>{' '}
+                  (income − operating expenses, pre-debt-service). Compare against residual + working-capital swing to sense-check draws.
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {compInsightLoading && (
           <div className="insight-loading">
             <div className="insight-spinner"></div>
@@ -5945,7 +6102,7 @@ function ForcePasswordChange({ session, onDone }) {
 }
 
 // ─── AdminScreen ─────────────────────────────────────────────────────────────
-function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList }) {
+function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, onOpenExpenseList, featureFlags, onToggleFeature }) {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showAdd, setShowAdd] = React.useState(false);
@@ -6045,6 +6202,27 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Feature flags — bank-internal toggles that aren't user-level
+            preferences. Each lender's browser reads the same localStorage,
+            admins flip them here. */}
+        {onToggleFeature && (
+          <div style={{background:'white',borderRadius:10,padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.08)',marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a',marginBottom:4}}>Analysis Features</div>
+            <div style={{fontSize:12,color:'#6b7280',marginBottom:12}}>Bank-internal analysis panels. Enable or disable without a code deploy.</div>
+            <label style={{display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',padding:'8px 10px',border:'0.5px solid #e5e7eb',borderRadius:7}}>
+              <input type="checkbox" checked={!!featureFlags?.nwExplainer}
+                onChange={e=>onToggleFeature('nwExplainer', e.target.checked)}
+                style={{marginTop:3}} />
+              <span>
+                <div style={{fontWeight:600,fontSize:13,color:'#1a1a1a'}}>Net Worth Explainer</div>
+                <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>
+                  Decomposes year-over-year Δ net worth into named contribution buckets (asset value changes, debt paydowns, working capital swing). Shown on Year Comparison. Bank-internal — never shown to customers or CAs.
+                </div>
+              </span>
+            </label>
           </div>
         )}
 
@@ -7058,6 +7236,7 @@ export default function BalanceSheet() {
   const [showShareBudget, setShowShareBudget] = useState(false);
   const [showPriceList, setShowPriceList] = useState(false);
   const [commodityPrices, setCommodityPrices] = useState(() => loadCommodityPrices());
+  const [featureFlags, setFeatureFlags] = useState(() => loadFeatureFlags());
   const [expenseList, setExpenseList] = useState(() => loadExpenseList());
   const [showExpenseEditor, setShowExpenseEditor] = useState(false);
   const [hasCustomerResponse, setHasCustomerResponse] = useState(false);
@@ -12988,7 +13167,13 @@ ${extraPages}
     return <AdminScreen session={session} profile={profile}
       onSignOut={handleSignOut} onClose={()=>setShowAdminScreen(false)}
       onOpenPriceList={()=>setShowPriceList(true)}
-      onOpenExpenseList={()=>setShowExpenseEditor(true)} />;
+      onOpenExpenseList={()=>setShowExpenseEditor(true)}
+      featureFlags={featureFlags}
+      onToggleFeature={(key, value)=>{
+        const next = { ...featureFlags, [key]: value };
+        setFeatureFlags(next);
+        saveFeatureFlags(next);
+      }} />;
   }
 
   // Per-client dashboard — opened by clicking a client folder on the home screen.
@@ -14657,6 +14842,7 @@ ${extraPages}
               BOLD_ROWS={BOLD_ROWS}
               onDeleteSheet={deleteComparisonSheet}
               currentFolderPath={data.folderPath || []}
+              nwExplainerEnabled={!!featureFlags.nwExplainer && profile?.role !== 'ca' && !caOpenShare}
             />
           </div>
         </div>
