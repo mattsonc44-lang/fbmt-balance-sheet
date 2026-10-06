@@ -11898,6 +11898,170 @@ ${extraPages}
   // the lender can hand to a borrower or drop in the file. Shows client +
   // as-of date at the top, each row with stated value, lender depreciation,
   // net value, and (when available) the price-check comp range.
+  // ── Machinery import (CSV + PDF) ──────────────────────────────────────────
+  // Standalone importer that only touches data.machinery — handy for feeding
+  // in a borrower's insurance scheduled-equipment list, a dealer printout,
+  // or a Schedule F equipment roll. The lender can append to or replace the
+  // existing list. CSV is parsed in the browser; PDF goes to Claude via the
+  // document content block on analyze.js, same path as the credit-summary
+  // uploader.
+  const [showMachImport, setShowMachImport] = useState(false);
+  const [machImportFile, setMachImportFile] = useState(null);   // {name, size}
+  const [machImportRows, setMachImportRows] = useState([]);     // parsed rows
+  const [machImportStatus, setMachImportStatus] = useState(''); // '', 'extracting', 'error:...'
+  const [machImportMode, setMachImportMode] = useState('append'); // 'append' | 'replace'
+  const resetMachImport = () => {
+    setMachImportFile(null); setMachImportRows([]); setMachImportStatus(''); setMachImportMode('append');
+  };
+
+  // CSV parser — tolerant of header-name variations ("make/model", "value ($)",
+  // "s/n", etc.) and messy quoting. Returns an array of {year, make, size,
+  // serial, condition, value} rows ready to drop into data.machinery.
+  const parseMachineryCSV = (text) => {
+    const lines = text.replace(/\r\n/g,'\n').split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return [];
+    // Very small CSV splitter that handles basic quoting.
+    const splitRow = (line) => {
+      const out = []; let cur = '', q = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') { q = !q; continue; }
+        if (c === ',' && !q) { out.push(cur); cur = ''; continue; }
+        cur += c;
+      }
+      out.push(cur);
+      return out.map(s => s.trim());
+    };
+    const headerCells = splitRow(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g,''));
+    // Map common header spellings to our field names.
+    const map = {};
+    headerCells.forEach((h, idx) => {
+      if (/^year$|yr/.test(h))                                    map.year = idx;
+      else if (/make.?model|makemodel|^make$|^model$|description/.test(h) && map.make === undefined) map.make = idx;
+      else if (/size|hp|horsepower|cap/.test(h) && map.size === undefined) map.size = idx;
+      else if (/serial|vin|sn$|^sn|serial.?num|identifier/.test(h))        map.serial = idx;
+      else if (/cond/.test(h))                                             map.condition = idx;
+      else if (/value|amount|price|cost|appraisal|appraised/.test(h))      map.value = idx;
+    });
+    const dataLines = headerCells.length > 1 ? lines.slice(1) : lines; // if no clear header row, use everything
+    const rows = [];
+    for (const line of dataLines) {
+      const cells = splitRow(line);
+      if (!cells.length || cells.every(c => !c)) continue;
+      const grab = (k) => map[k] !== undefined ? (cells[map[k]] || '') : '';
+      // If no header mapping found, assume positional: year, make, size, serial, condition, value.
+      const positional = Object.keys(map).length === 0;
+      const row = {
+        year:      (positional ? cells[0] : grab('year'))        || '',
+        make:      (positional ? cells[1] : grab('make'))        || '',
+        size:      (positional ? cells[2] : grab('size'))        || '',
+        serial:    (positional ? cells[3] : grab('serial'))      || '',
+        condition: (positional ? cells[4] : grab('condition'))   || '',
+        value:     String((positional ? cells[5] : grab('value')) || '').replace(/[^0-9.-]/g,''),
+      };
+      // Drop rows that are entirely empty.
+      if (!row.year && !row.make && !row.size && !row.serial && !row.value) continue;
+      rows.push(row);
+    }
+    return rows;
+  };
+
+  // PDF path — ask Claude to pull a structured equipment list out of whatever
+  // the lender uploaded (insurance declaration, dealer invoice, Schedule F
+  // equipment roll). Returns strict JSON that we parse into rows.
+  const extractMachineryFromPDF = async (b64) => {
+    const resp = await fetch('/.netlify/functions/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 4000,
+        system: 'You extract structured equipment lists from PDFs. Return strict JSON only, no commentary.',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
+            { type: 'text', text:
+`Extract every piece of farm/ranch equipment and machinery listed in this document. Common source documents: insurance scheduled-equipment listings, dealer printouts, Schedule F depreciation lists, loan collateral schedules.
+
+Return STRICT JSON ONLY (no markdown fences, no commentary):
+{"items":[{"year":"2019","make":"John Deere 8320R","size":"320hp","serial":"RW8320P123456","condition":"Good","value":"185000"}]}
+
+Rules:
+- One row per distinct piece of equipment. Group matching lines (same serial) into one row.
+- year: 4-digit year if present, else empty string.
+- make: manufacturer + model/trim ("John Deere 8320R", "Case IH Magnum 340"). Keep model number in the make field.
+- size: horsepower, capacity, cutting width — whatever size descriptor appears ("320hp", "35ft", "500bu"). Empty string if none.
+- serial: serial number / VIN exactly as printed. Empty string if missing.
+- condition: Excellent / Good / Fair / Poor if stated. Empty string if not.
+- value: USD number only, no commas or $, as a string. Use scheduled value / appraised value / insurance limit depending on what's shown. Empty string if no value appears.
+- Skip buildings, real estate, and vehicles (vehicles go on a separate schedule).
+- If the document contains no equipment list, return {"items":[]}.`
+            },
+          ],
+        }],
+      }),
+    });
+    if (!resp.ok) throw new Error('Server returned ' + resp.status);
+    const json = await resp.json();
+    const text = json.content?.filter(b => b.type === 'text').map(b => b.text).join('') || '';
+    const clean = text.replace(/```json|```/g,'').trim();
+    const match = clean.match(/\{[\s\S]*"items"[\s\S]*\}/);
+    const raw = match ? match[0] : clean;
+    const parsed = JSON.parse(raw);
+    return (parsed.items || []).map(r => ({
+      year: String(r.year || ''),
+      make: String(r.make || ''),
+      size: String(r.size || ''),
+      serial: String(r.serial || ''),
+      condition: String(r.condition || ''),
+      value: String(r.value || '').replace(/[^0-9.-]/g,''),
+    }));
+  };
+
+  const handleMachImport = async (file) => {
+    if (!file) return;
+    setMachImportFile({ name: file.name, size: file.size });
+    setMachImportStatus('extracting'); setMachImportRows([]);
+    try {
+      const name = (file.name || '').toLowerCase();
+      if (name.endsWith('.csv') || file.type === 'text/csv') {
+        const text = await file.text();
+        const rows = parseMachineryCSV(text);
+        setMachImportRows(rows); setMachImportStatus('');
+      } else if (name.endsWith('.pdf') || file.type === 'application/pdf') {
+        if (file.size > 10 * 1024 * 1024) throw new Error('PDF larger than 10MB — split it first.');
+        const reader = new FileReader();
+        const dataUrl = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const b64 = String(dataUrl).split(',')[1] || '';
+        const rows = await extractMachineryFromPDF(b64);
+        setMachImportRows(rows); setMachImportStatus('');
+      } else {
+        throw new Error('Unsupported file type — use CSV or PDF.');
+      }
+    } catch (e) {
+      setMachImportStatus('error:' + (e.message || e));
+    }
+  };
+
+  const applyMachImport = () => {
+    if (!machImportRows.length) return;
+    const incoming = machImportRows.map(r => ({ ...r, depreciation: '', collateral: true }));
+    if (machImportMode === 'replace') {
+      set('machinery', incoming);
+    } else {
+      // Append — but drop any skeleton empty row that may be at the end of the current list.
+      const current = (data.machinery || []).filter(r => r && (r.year || r.make || r.size || r.serial || r.value));
+      set('machinery', [...current, ...incoming]);
+    }
+    setShowMachImport(false);
+    resetMachImport();
+  };
+
   const handlePrintMachinery = () => {
     const W = window.open("", "_blank", "width=900,height=1100");
     if (!W) { alert('Print window was blocked — allow popups for this site.'); return; }
@@ -12749,6 +12913,11 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             )}
             <DeprBulk field="machinery" label="equipment" />
             <CollBulk field="machinery" label="equipment" />
+            <button type="button" onClick={()=>{resetMachImport(); setShowMachImport(true);}}
+              title="Import an equipment list from CSV or PDF (insurance schedule, dealer printout, Schedule F)."
+              style={{background:'#1B4332',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+              📥 Import list
+            </button>
             <button type="button" onClick={handlePrintMachinery}
               title="Print the equipment schedule — client name & as-of date at the top, each row with value, depreciation, and net."
               style={{background:'#374151',color:'white',border:'none',borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
@@ -13959,6 +14128,123 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           </div>
 
           {/* Needs attention lives further down, right above the Ask panel — it merges renewals + pending items into one box. */}
+
+          {/* ── Machinery Import Modal ─────────────────────────────────────
+              CSV (parsed in-browser) or PDF (Claude extracts). Only touches
+              data.machinery; everything else on the balance sheet is left
+              alone. Preview before applying + append/replace toggle. */}
+          {showMachImport && (
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:2000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:20}}>
+              <div style={{background:'white',borderRadius:10,maxWidth:860,width:'100%',padding:'22px 26px',boxShadow:'0 10px 40px rgba(0,0,0,.2)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+                  <h2 style={{margin:0,fontSize:18,color:'#1a1a1a'}}>Import Equipment List</h2>
+                  <button onClick={()=>{setShowMachImport(false);resetMachImport();}}
+                    style={{background:'transparent',border:'none',fontSize:20,cursor:'pointer',color:'#6b7280',padding:0}}>×</button>
+                </div>
+                <div style={{fontSize:12,color:'#6b7280',marginBottom:14}}>
+                  Drop in a CSV or PDF — scheduled-equipment insurance list, dealer printout, Schedule F equipment roll. The parsed rows preview below; nothing changes on your balance sheet until you click Apply.
+                </div>
+
+                {!machImportFile && (
+                  <label style={{display:'block',border:'2px dashed #d1d5db',borderRadius:10,padding:'36px 20px',textAlign:'center',cursor:'pointer',background:'#fafafa',color:'#374151',marginBottom:14}}>
+                    <div style={{fontSize:28,marginBottom:6}}>📥</div>
+                    <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>Click to choose a file</div>
+                    <div style={{fontSize:11,color:'#9ca3af'}}>CSV or PDF · max 10MB</div>
+                    <input type="file" accept=".csv,text/csv,.pdf,application/pdf"
+                      style={{display:'none'}}
+                      onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleMachImport(f); }} />
+                  </label>
+                )}
+
+                {machImportFile && (
+                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10,fontSize:13,color:'#374151'}}>
+                    <span>📄</span>
+                    <strong>{machImportFile.name}</strong>
+                    <span style={{color:'#9ca3af',fontSize:11}}>· {Math.round(machImportFile.size/1024).toLocaleString()} KB</span>
+                    <button onClick={resetMachImport}
+                      style={{marginLeft:'auto',background:'transparent',border:'none',color:'#6b7280',fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>
+                      Choose different file
+                    </button>
+                  </div>
+                )}
+
+                {machImportStatus === 'extracting' && (
+                  <div style={{fontSize:13,color:'#1d4ed8',padding:'10px 14px',background:'#eff6ff',borderRadius:6,marginBottom:10}}>
+                    Extracting equipment… {machImportFile?.name?.toLowerCase().endsWith('.pdf') ? 'Claude is reading the PDF.' : ''}
+                  </div>
+                )}
+                {machImportStatus.startsWith('error:') && (
+                  <div style={{fontSize:13,color:'#991b1b',padding:'10px 14px',background:'#fef2f2',borderRadius:6,marginBottom:10}}>
+                    ⚠ {machImportStatus.slice(6)}
+                  </div>
+                )}
+
+                {machImportRows.length > 0 && (
+                  <>
+                    <div style={{fontSize:13,color:'#1a1a1a',margin:'8px 0 6px',fontWeight:600}}>
+                      Preview — {machImportRows.length} row{machImportRows.length===1?'':'s'}
+                    </div>
+                    <div style={{border:'1px solid #e5e7eb',borderRadius:6,maxHeight:280,overflowY:'auto',marginBottom:10}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                        <thead style={{background:'#1a1a1a',color:'white',position:'sticky',top:0}}>
+                          <tr>
+                            <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Year</th>
+                            <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Make &amp; Model</th>
+                            <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Size</th>
+                            <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Serial</th>
+                            <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Cond.</th>
+                            <th style={{padding:'5px 8px',textAlign:'right',fontWeight:700,fontSize:11,letterSpacing:.3}}>Value</th>
+                            <th style={{width:28}}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {machImportRows.map((r,i) => (
+                            <tr key={i} style={{borderBottom:'0.5px solid #f0f0f0'}}>
+                              <td style={{padding:'4px 8px'}}>{r.year}</td>
+                              <td style={{padding:'4px 8px'}}>{r.make}</td>
+                              <td style={{padding:'4px 8px'}}>{r.size}</td>
+                              <td style={{padding:'4px 8px',fontFamily:'monospace',fontSize:11}}>{r.serial}</td>
+                              <td style={{padding:'4px 8px'}}>{r.condition}</td>
+                              <td style={{padding:'4px 8px',textAlign:'right'}}>{r.value ? '$' + Number(r.value).toLocaleString() : '—'}</td>
+                              <td style={{padding:'4px 4px',textAlign:'center'}}>
+                                <button onClick={()=>setMachImportRows(rs => rs.filter((_,j) => j !== i))}
+                                  title="Drop this row from the import"
+                                  style={{background:'transparent',border:'none',color:'#9ca3af',fontSize:14,cursor:'pointer',padding:0}}>×</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{display:'flex',gap:14,fontSize:12,color:'#374151',marginBottom:10}}>
+                      <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                        <input type="radio" name="machImportMode" checked={machImportMode==='append'}
+                          onChange={()=>setMachImportMode('append')} />
+                        Append to existing list ({(data.machinery||[]).filter(r => r && (r.year||r.make||r.value)).length} row{(data.machinery||[]).filter(r => r && (r.year||r.make||r.value)).length===1?'':'s'} on file)
+                      </label>
+                      <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                        <input type="radio" name="machImportMode" checked={machImportMode==='replace'}
+                          onChange={()=>setMachImportMode('replace')} />
+                        Replace existing list
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                <div style={{display:'flex',justifyContent:'flex-end',gap:8,borderTop:'0.5px solid #e5e7eb',paddingTop:12,marginTop:4}}>
+                  <button onClick={()=>{setShowMachImport(false);resetMachImport();}}
+                    style={{background:'white',border:'1px solid #d1d5db',color:'#374151',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                    Cancel
+                  </button>
+                  <button onClick={applyMachImport} disabled={!machImportRows.length}
+                    style={{background: machImportRows.length ? '#1B4332' : '#9ca3af',color:'white',border:'none',borderRadius:6,padding:'7px 18px',fontSize:13,fontWeight:700,cursor: machImportRows.length ? 'pointer' : 'not-allowed',fontFamily:'inherit'}}>
+                    {machImportMode === 'replace' ? 'Replace & apply' : 'Append & apply'} ({machImportRows.length})
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Import Modal ── */}
           {showImport && (
