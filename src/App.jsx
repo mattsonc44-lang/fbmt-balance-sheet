@@ -378,15 +378,69 @@ const DEFAULT_COMMODITY_PRICES = [
   {name:"Lambs Fats",    price:"1.50", unit:"lb",  category:"Livestock"},
 ];
 
-function loadCommodityPrices() {
+// Commodity price list — bank-wide. Supabase is the source of truth
+// (app_settings table, admin-only writes via RLS). localStorage mirrors the
+// last-known value so the first paint is instant and the app still works on
+// a flaky connection.
+function loadCommodityPricesLocal() {
   try {
     const stored = localStorage.getItem("fbmt_commodityPrices");
     if (stored) return JSON.parse(stored);
   } catch {}
   return DEFAULT_COMMODITY_PRICES.map((p,i) => ({...p, id:i}));
 }
+// Sync fallback used by useState initializers — paints the cached list
+// immediately; the async fetch below replaces it when Supabase answers.
+function loadCommodityPrices() {
+  return loadCommodityPricesLocal();
+}
+// Async fetch from Supabase. Caller passes a setter so the UI updates when
+// the server copy arrives. Returns the fetched list (or the local cache on
+// failure). Also backfills the server if it's empty but we have a local copy.
+async function fetchCommodityPricesFromServer(setter, isAdmin) {
+  if (typeof window === 'undefined' || !window.SUPABASE_URL) return;
+  try {
+    const r = await fetch(window.SUPABASE_URL + '/rest/v1/app_settings?key=eq.commodity_prices&select=value', {
+      headers: {
+        apikey: window.SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + (window.__currentAccessToken || window.SUPABASE_ANON_KEY),
+      },
+    });
+    if (!r.ok) return;
+    const rows = await r.json();
+    const serverVal = Array.isArray(rows) && rows[0] ? rows[0].value : null;
+    if (Array.isArray(serverVal) && serverVal.length) {
+      // Server has data — use it, update cache, update UI.
+      try { localStorage.setItem("fbmt_commodityPrices", JSON.stringify(serverVal)); } catch {}
+      if (setter) setter(serverVal);
+    } else if (isAdmin) {
+      // Server is empty but admin is signed in — backfill from local so
+      // this bank's seed data makes it to the DB.
+      const local = loadCommodityPricesLocal();
+      await saveCommodityPricesToServer(local);
+    }
+  } catch { /* offline — the local cache keeps the UI alive */ }
+}
+async function saveCommodityPricesToServer(prices) {
+  if (typeof window === 'undefined' || !window.SUPABASE_URL || !window.__currentAccessToken) return;
+  try {
+    await fetch(window.SUPABASE_URL + '/rest/v1/app_settings?on_conflict=key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: window.SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + window.__currentAccessToken,
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({ key: 'commodity_prices', value: prices, updated_at: new Date().toISOString() }),
+    });
+  } catch {}
+}
 function saveCommodityPrices(prices) {
+  // Mirror to localStorage always (fast re-paint on next load), push to
+  // Supabase in the background. RLS silently drops non-admin writes.
   try { localStorage.setItem("fbmt_commodityPrices", JSON.stringify(prices)); } catch {}
+  saveCommodityPricesToServer(prices);
 }
 
 // Admin feature flags. Each lender's browser reads these, admins flip them
@@ -583,12 +637,51 @@ const DEFAULT_EXPENSE_LIST = [
   'Insurance - Farm','Depreciation','Other',
 ];
 
-function loadExpenseList() {
+// Expense category list — bank-wide, same Supabase+cache pattern as commodity prices.
+function loadExpenseListLocal() {
   try { const s=localStorage.getItem('fbmt_expenseList'); if(s) return JSON.parse(s); } catch {}
   return DEFAULT_EXPENSE_LIST.map((name,id)=>({id,name}));
 }
+function loadExpenseList() { return loadExpenseListLocal(); }
+async function fetchExpenseListFromServer(setter, isAdmin) {
+  if (typeof window === 'undefined' || !window.SUPABASE_URL) return;
+  try {
+    const r = await fetch(window.SUPABASE_URL + '/rest/v1/app_settings?key=eq.expense_list&select=value', {
+      headers: {
+        apikey: window.SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + (window.__currentAccessToken || window.SUPABASE_ANON_KEY),
+      },
+    });
+    if (!r.ok) return;
+    const rows = await r.json();
+    const serverVal = Array.isArray(rows) && rows[0] ? rows[0].value : null;
+    if (Array.isArray(serverVal) && serverVal.length) {
+      try { localStorage.setItem('fbmt_expenseList', JSON.stringify(serverVal)); } catch {}
+      if (setter) setter(serverVal);
+    } else if (isAdmin) {
+      const local = loadExpenseListLocal();
+      await saveExpenseListToServer(local);
+    }
+  } catch {}
+}
+async function saveExpenseListToServer(list) {
+  if (typeof window === 'undefined' || !window.SUPABASE_URL || !window.__currentAccessToken) return;
+  try {
+    await fetch(window.SUPABASE_URL + '/rest/v1/app_settings?on_conflict=key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: window.SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + window.__currentAccessToken,
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({ key: 'expense_list', value: list, updated_at: new Date().toISOString() }),
+    });
+  } catch {}
+}
 function saveExpenseList(list) {
-  try { localStorage.setItem('fbmt_expenseList',JSON.stringify(list)); } catch {}
+  try { localStorage.setItem('fbmt_expenseList', JSON.stringify(list)); } catch {}
+  saveExpenseListToServer(list);
 }
 
 // ── Expense Typeahead Dropdown ────────────────────────────────────────────────
@@ -8255,6 +8348,28 @@ Question: ${q}`,
     }
     setQaLoading(false);
   };
+
+  // Keep a global handle on the current access token so the module-level
+  // settings helpers (loadCommodityPrices / loadExpenseList → their async
+  // fetch pair) can authenticate without threading state through every call
+  // site. Also kicks off the Supabase pull for the shared app_settings lists
+  // the moment a session is available.
+  useEffect(() => {
+    if (session?.access_token) {
+      window.__currentAccessToken = session.access_token;
+    } else {
+      window.__currentAccessToken = null;
+    }
+  }, [session?.access_token]);
+
+  // Pull server copies of commodity prices + expense list once we know the
+  // user's role (admin triggers the first-time backfill from local defaults).
+  useEffect(() => {
+    if (!session?.access_token) return;
+    const isAdmin = profile?.role === 'admin';
+    fetchCommodityPricesFromServer(setCommodityPrices, isAdmin);
+    fetchExpenseListFromServer(setExpenseList, isAdmin);
+  }, [session?.access_token, profile?.role]);
 
   // Auto-refresh JWT — check on mount, then every 50 min (token expires after 1hr)
   useEffect(() => {
