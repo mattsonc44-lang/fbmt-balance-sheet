@@ -11528,27 +11528,30 @@ Rules:
 
         const html = `<!DOCTYPE html><html><head><title>Balance Sheet - ${d.clientName}</title>
 <style>
-body{font-family:Arial,sans-serif;font-size:7.5pt;color:#000;margin:.45in .4in;}
-h1{font-size:13pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:4pt;}
-h2{font-size:11pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:8pt;}
-.logo-box{border:2pt solid #6B0E1E;padding:4pt 7pt;display:inline-block;text-align:center;font-weight:900;color:#6B0E1E;}
-.hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6pt;}
-.name-row{border-bottom:1pt solid #000;padding-bottom:3pt;margin-bottom:5pt;font-weight:700;}
-.body{display:flex;gap:8pt;}
+/* Balance-sheet print — tuned to fill a letter page with comfortable
+   reading size. Bumped roughly +30% from the original tight print and
+   gave each row a bit more vertical breathing room. */
+body{font-family:Arial,sans-serif;font-size:9.5pt;color:#000;margin:.4in .4in;line-height:1.3;}
+h1{font-size:17pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:6pt;letter-spacing:.3pt;}
+h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;margin-bottom:10pt;}
+.logo-box{border:2pt solid #6B0E1E;padding:6pt 10pt;display:inline-block;text-align:center;font-weight:900;color:#6B0E1E;font-size:11pt;}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8pt;}
+.name-row{border-bottom:1pt solid #000;padding-bottom:4pt;margin-bottom:7pt;font-weight:700;font-size:11pt;}
+.body{display:flex;gap:10pt;}
 .col{flex:1;}
-.col-head{background:#000;color:#fff;font-weight:700;font-size:8pt;text-align:center;padding:2pt 4pt;display:flex;justify-content:space-between;}
-.sec{font-style:italic;font-size:7pt;margin:3pt 0 1pt;color:#333;}
-.row{display:flex;justify-content:space-between;min-height:12pt;border-bottom:.5pt dotted #ccc;padding:.5pt 2pt;}
-.trow{display:flex;min-height:11pt;border-bottom:.5pt dotted #ccc;font-size:7pt;padding:.5pt 0;}
+.col-head{background:#000;color:#fff;font-weight:700;font-size:10.5pt;text-align:center;padding:4pt 6pt;display:flex;justify-content:space-between;letter-spacing:.3pt;}
+.sec{font-style:italic;font-size:9pt;margin:5pt 0 2pt;color:#333;font-weight:600;}
+.row{display:flex;justify-content:space-between;min-height:16pt;border-bottom:.5pt dotted #ccc;padding:2pt 3pt;}
+.trow{display:flex;min-height:14pt;border-bottom:.5pt dotted #ccc;font-size:9pt;padding:1pt 0;}
 .c1{flex:1.4;} .c2{flex:1;} .c3{flex:.8;text-align:right;} .c4{flex:.8;text-align:right;} .c5{flex:.9;text-align:right;font-weight:600;}
-.th{font-weight:700;font-size:6pt;text-transform:uppercase;border-bottom:1pt solid #000;margin-bottom:1pt;}
-.subtot{display:flex;justify-content:space-between;border-top:1pt solid #000;padding-top:2pt;margin:2pt 0;font-weight:700;font-size:8pt;}
-.tot{display:flex;justify-content:space-between;background:#000;color:#fff;padding:2pt 4pt;font-weight:700;font-size:8.5pt;margin:3pt 0;}
-.net{display:flex;justify-content:space-between;border:1.5pt solid #000;padding:2pt 4pt;font-weight:700;font-size:8.5pt;margin:2pt 0;}
-.sig{margin-top:10pt;border-top:1pt solid #000;padding-top:6pt;font-size:7pt;}
-.sig-row{display:flex;gap:20pt;margin-top:8pt;}
-.sig-line{flex:1;border-top:1pt solid #000;padding-top:2pt;}
-.page2{page-break-before:always;padding-top:.2in;}
+.th{font-weight:700;font-size:7.5pt;text-transform:uppercase;border-bottom:1pt solid #000;margin-bottom:2pt;letter-spacing:.3pt;}
+.subtot{display:flex;justify-content:space-between;border-top:1pt solid #000;padding-top:3pt;margin:3pt 0;font-weight:700;font-size:10pt;}
+.tot{display:flex;justify-content:space-between;background:#000;color:#fff;padding:4pt 6pt;font-weight:700;font-size:11pt;margin:4pt 0;letter-spacing:.3pt;}
+.net{display:flex;justify-content:space-between;border:1.5pt solid #000;padding:4pt 6pt;font-weight:700;font-size:11pt;margin:3pt 0;}
+.sig{margin-top:14pt;border-top:1pt solid #000;padding-top:8pt;font-size:9pt;}
+.sig-row{display:flex;gap:22pt;margin-top:10pt;}
+.sig-line{flex:1;border-top:1pt solid #000;padding-top:3pt;}
+.page2{page-break-before:always;padding-top:.25in;}
 /* Print-safe defaults — collapse margins between sections so page breaks
    don't create empty leftover pages between the cover, main sheet, and
    schedule/supplement pages. */
