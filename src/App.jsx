@@ -11761,18 +11761,26 @@ Rules:
     const opNotesTot = (d.operatingNotes||[]).reduce((s,r)=>s+n(r.balance),0)
       +(d.accountsDue||[]).reduce((s,r)=>s+n(r.amount),0);
     // Current-portion of term debt + RE current-portion + taxes flow into
-    // "current liabilities" bucket on the printed sheet.
+    // "current liabilities" bucket on the printed sheet. The reDebt array
+    // (unified RE debt entry) contributes its annualPmt here just like the
+    // on-screen math does; otherwise the printed Working Capital drifts
+    // from what the wizard shows.
     const intermedCurrent = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
-    const reCurrentTot    = (d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const reDebtCurrent   = (d.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+    const reCurrentTot    = (d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0) + reDebtCurrent;
     // taxesDue is a plain string in the app schema, not an array.
     const taxesDueVal     = n(d.taxesDue);
     const otherCurLiabTot = (d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
     const totalCurrentLiab = opNotesTot + intermedCurrent + reCurrentTot + taxesDueVal + otherCurLiabTot;
-    // Long-term portions: intermediate-debt principal minus current-portion, RE mortgages, other liabilities.
+    // Long-term portions: intermediate-debt principal minus current-portion,
+    // RE mortgages, reDebt long-term portion (principal − annualPmt),
+    // other liabilities. The reDebt LT bucket was previously missing too, so
+    // Total Liabilities under-reported by the sum of all those LT portions.
     const intermedPrincipal = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0);
     const reMortTot         = (d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0);
+    const reDebtLT          = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal) - n(r.annualPmt)), 0);
     const otherLiabTot      = (d.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
-    const totalLTLiab       = Math.max(intermedPrincipal - intermedCurrent, 0) + reMortTot + otherLiabTot;
+    const totalLTLiab       = Math.max(intermedPrincipal - intermedCurrent, 0) + reMortTot + reDebtLT + otherLiabTot;
     const totalLiabilities  = totalCurrentLiab + totalLTLiab;
     const netWorth          = totalAssets - totalLiabilities;
     const workingCapital    = totalCurrentAssets - totalCurrentLiab;
