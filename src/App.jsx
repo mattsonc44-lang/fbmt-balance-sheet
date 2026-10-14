@@ -520,6 +520,57 @@ function validateSheet(d) {
     });
   }
 
+  // ── Ag-inspection deviation gate ──────────────────────────────────────
+  // Any crop or livestock row with ≥5% deviation needs a reason written in.
+  // Majors (≥20%) block save as a hard error. Minors (5–20%) warn but can
+  // be acknowledged. If the inspection hasn't been started (no rows), skip.
+  const _devPct = (actual, budgeted) => {
+    const a = numVal(actual), b = numVal(budgeted);
+    if (!b) return null;
+    return ((a - b) / b) * 100;
+  };
+  (d.inspCrops || []).forEach((r, i) => {
+    if (!r || (!r.actualAcres && !r.actualYield)) return; // inspection untouched
+    // Acreage deviation
+    if (r.actualAcres && r.budgetedAcres) {
+      const p = _devPct(r.actualAcres, r.budgetedAcres);
+      if (p != null && Math.abs(p) >= 5 && !String(r.deviationReason||'').trim()) {
+        issues.push({
+          severity: Math.abs(p) >= 20 ? 'error' : 'warning',
+          code: 'insp_crop_dev_reason',
+          message: `Ag Inspection — ${r.budgetedCrop||'row '+(i+1)}: acreage deviation ${p.toFixed(0)}% (budget ${r.budgetedAcres} → actual ${r.actualAcres}) needs a reason.`,
+          section: 'Ag Inspection',
+        });
+      }
+    }
+    // Yield deviation (same gate — ≥5% needs a reason)
+    if (r.actualYield && r.budgetedYield) {
+      const p = _devPct(r.actualYield, r.budgetedYield);
+      if (p != null && Math.abs(p) >= 5 && !String(r.deviationReason||'').trim()) {
+        issues.push({
+          severity: Math.abs(p) >= 20 ? 'error' : 'warning',
+          code: 'insp_yield_dev_reason',
+          message: `Ag Inspection — ${r.budgetedCrop||'row '+(i+1)}: yield deviation ${p.toFixed(0)}% (budget ${r.budgetedYield} → actual ${r.actualYield}) needs a reason.`,
+          section: 'Ag Inspection',
+        });
+      }
+    }
+  });
+  (d.inspLivestock || []).forEach((r, i) => {
+    if (!r || (!r.actualHead && !r.estWeight)) return;
+    if (r.actualHead && r.budgetedHead) {
+      const p = _devPct(r.actualHead, r.budgetedHead);
+      if (p != null && Math.abs(p) >= 5 && !String(r.deviationReason||'').trim()) {
+        issues.push({
+          severity: Math.abs(p) >= 20 ? 'error' : 'warning',
+          code: 'insp_ls_dev_reason',
+          message: `Ag Inspection — ${r.budgetedType||'row '+(i+1)}: head deviation ${p.toFixed(0)}% (budget ${r.budgetedHead} → actual ${r.actualHead}) needs a reason.`,
+          section: 'Ag Inspection',
+        });
+      }
+    }
+  });
+
   // Sheet-level: everything zero (probably forgot to enter data)
   const allZeroTotals =
     numVal(d.cashGlacier) === 0 &&
@@ -2846,6 +2897,83 @@ function InspectionView({data,setData}){
       React.createElement('div',{style:{background:ISH,borderRadius:6,padding:'14px 20px',marginBottom:20}},
         React.createElement('div',{style:{fontSize:11,color:'rgba(255,255,255,.55)',letterSpacing:2,marginBottom:10,textTransform:'uppercase',fontWeight:700}},'Financial Summary'),
         React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}},[['Crop Value',cropTot],['Livestock Value',lsTot],['Inventory Value',invTot],['GRAND TOTAL',grand]].map(([label,val])=>React.createElement('div',{key:label,style:{background:label==='GRAND TOTAL'?'rgba(200,134,10,0.2)':'rgba(255,255,255,.07)',borderRadius:5,padding:'10px 12px',textAlign:'center',border:`1px solid ${label==='GRAND TOTAL'?IGOLD:'rgba(255,255,255,.1)'}`}},React.createElement('div',{style:{fontSize:10,color:'rgba(255,255,255,.55)',letterSpacing:.5,marginBottom:4,textTransform:'uppercase'}},label),React.createElement('div',{style:{fontSize:label==='GRAND TOTAL'?20:16,fontWeight:700,color:label==='GRAND TOTAL'?IGOLD:'white'}},iFmt$(val)))))),
+
+      // ── Yield Projection: Inspection vs Budget ──────────────────────
+      // Compares the budgeted crop income (what the lender signed off on at
+      // the start of the year) to the inspection-adjusted projection using
+      // the actual acres + actual yield + actual price observed on the farm.
+      // Shows a line per crop + grand total + Δ. Only renders if any crop
+      // row has an inspection figure that differs from the budgeted figure.
+      (() => {
+        const nm = v => parseFloat(String(v||'').replace(/[^0-9.-]/g,''))||0;
+        const rows = crops.map(r => {
+          const budAc  = nm(r.budgetedAcres);
+          const budYd  = nm(r.budgetedYield);
+          const budPx  = nm(r.budgetedPrice);
+          const actAc  = nm(r.actualAcres);
+          const actYd  = nm(r.actualYield);
+          const actPx  = nm(r.valuePerUnit) || budPx;
+          const budProj = budAc * budYd * budPx;
+          // Use actual where present, fall back to budget otherwise so the
+          // projection is realistic for partially-inspected rows.
+          const projProj = (actAc || budAc) * (actYd || budYd) * (actPx || budPx);
+          const diff = projProj - budProj;
+          const diffPct = budProj > 0 ? (diff / budProj) * 100 : null;
+          return {
+            id: r.id,
+            crop: r.budgetedCrop || r.substituteCrop || '—',
+            budAc, budYd, budPx, actAc, actYd, actPx,
+            budProj, projProj, diff, diffPct,
+          };
+        }).filter(r => r.budProj > 0 || r.projProj > 0);
+        if (!rows.length) return null;
+        const totalBud  = rows.reduce((s,r) => s + r.budProj, 0);
+        const totalProj = rows.reduce((s,r) => s + r.projProj, 0);
+        const totalDiff = totalProj - totalBud;
+        const totalPct  = totalBud > 0 ? (totalDiff / totalBud) * 100 : null;
+        const anyDiff = rows.some(r => Math.abs(r.diff) >= 1);
+        if (!anyDiff) return null;
+        const diffColor = (v) => v > 0 ? '#15803d' : v < 0 ? '#dc2626' : '#6b7280';
+        return React.createElement('div',{style:{background:'white',borderRadius:6,padding:16,marginBottom:20,border:'1px solid #e5e7eb',boxShadow:'0 1px 4px rgba(0,0,0,.06)'}},
+          React.createElement('div',{style:{fontWeight:700,fontSize:14,color:ISH,marginBottom:4}},
+            '📊  Yield Projection — Inspection vs Budgeted'),
+          React.createElement('div',{style:{fontSize:11,color:'#6b7280',marginBottom:12}},
+            'Budgeted = acres × yield × price from the start-of-year budget. Projection = inspected acres × inspected yield × inspected price. Difference signals whether the file is tracking above or below plan.'),
+          React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+            React.createElement('thead',null,React.createElement('tr',{style:{background:'#f8f6f2',color:ISH}},
+              ['Crop','Budget (ac × yld × $)','Projection (ac × yld × $)','Δ','Δ %'].map((h,i) =>
+                React.createElement('th',{key:i,style:{padding:'6px 8px',textAlign:i===0?'left':'right',fontSize:11,fontWeight:700,letterSpacing:.3,borderBottom:'1px solid #e5e7eb'}},h))
+            )),
+            React.createElement('tbody',null,rows.map(r =>
+              React.createElement('tr',{key:r.id,style:{borderBottom:'0.5px solid #f0f0f0'}},
+                React.createElement('td',{style:{padding:'5px 8px',fontWeight:600}},r.crop),
+                React.createElement('td',{style:{padding:'5px 8px',textAlign:'right',color:'#6b7280'}},
+                  r.budAc + ' × ' + r.budYd + ' × $' + r.budPx + ' = ', React.createElement('strong',{style:{color:'#1a1a1a'}},iFmt$(r.budProj))),
+                React.createElement('td',{style:{padding:'5px 8px',textAlign:'right',color:'#6b7280'}},
+                  (r.actAc||r.budAc) + ' × ' + (r.actYd||r.budYd) + ' × $' + (r.actPx||r.budPx) + ' = ', React.createElement('strong',{style:{color:'#15803d'}},iFmt$(r.projProj))),
+                React.createElement('td',{style:{padding:'5px 8px',textAlign:'right',fontWeight:700,color:diffColor(r.diff)}},
+                  (r.diff>=0?'+':'') + iFmt$(r.diff)),
+                React.createElement('td',{style:{padding:'5px 8px',textAlign:'right',fontWeight:700,color:diffColor(r.diff)}},
+                  r.diffPct==null ? '—' : (r.diffPct>=0?'+':'') + r.diffPct.toFixed(1) + '%')
+              )
+            )),
+            React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5',borderTop:'2px solid '+ISH}},
+              React.createElement('td',{style:{padding:'8px',fontWeight:700,color:ISH}},'TOTAL'),
+              React.createElement('td',{style:{padding:'8px',textAlign:'right',fontWeight:700,color:'#1a1a1a'}},iFmt$(totalBud)),
+              React.createElement('td',{style:{padding:'8px',textAlign:'right',fontWeight:700,color:'#15803d'}},iFmt$(totalProj)),
+              React.createElement('td',{style:{padding:'8px',textAlign:'right',fontWeight:800,color:diffColor(totalDiff),fontSize:13}},
+                (totalDiff>=0?'+':'') + iFmt$(totalDiff)),
+              React.createElement('td',{style:{padding:'8px',textAlign:'right',fontWeight:800,color:diffColor(totalDiff),fontSize:13}},
+                totalPct==null ? '—' : (totalPct>=0?'+':'') + totalPct.toFixed(1) + '%')
+            ))
+          ),
+          Math.abs(totalPct || 0) >= 10 && React.createElement('div',{style:{marginTop:10,padding:'8px 12px',background:totalDiff>=0?'#f0fdf4':'#fef2f2',border:'1px solid '+(totalDiff>=0?'#86efac':'#fca5a5'),borderRadius:5,fontSize:12,color:totalDiff>=0?'#166534':'#991b1b'}},
+            totalDiff >= 0
+              ? '⬆ Projection is tracking ' + Math.abs(totalPct).toFixed(0) + '% above budget — flag for a revised cash-flow review.'
+              : '⬇ Projection is tracking ' + Math.abs(totalPct).toFixed(0) + '% below budget — flag for a revised DSCR and operating-line sizing review.')
+        );
+      })(),
+
       // Deviation summary
       crops.some(r=>{const p=devPct(r.actualAcres,r.budgetedAcres);return p!==null&&Math.abs(p)>=5;})&&React.createElement('div',{style:{background:'#fffbeb',border:'2px solid #f59e0b',borderRadius:6,padding:16,marginBottom:20}},
         React.createElement('div',{style:{fontWeight:700,fontSize:14,color:'#92400e',marginBottom:10}},'⚠️ Budget Deviation Summary'),
