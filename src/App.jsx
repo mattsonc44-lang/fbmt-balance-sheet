@@ -15299,6 +15299,118 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         </div>
       )}
 
+      {/* ── Machinery Import Modal (wizard-level) ────────────────────────
+          Mirror render at the wizard surface so the "📥 Import list" button
+          on the Machinery tab actually opens the dialog. Only one subtree
+          mounts at a time (home vs wizard) so the home-screen render below
+          doesn't double-mount this. */}
+      {showMachImport && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:2000,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',padding:20}}>
+          <div style={{background:'white',borderRadius:10,maxWidth:860,width:'100%',padding:'22px 26px',boxShadow:'0 10px 40px rgba(0,0,0,.2)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+              <h2 style={{margin:0,fontSize:18,color:'#1a1a1a'}}>Import Equipment List</h2>
+              <button onClick={()=>{setShowMachImport(false);resetMachImport();}}
+                style={{background:'transparent',border:'none',fontSize:20,cursor:'pointer',color:'#6b7280',padding:0}}>×</button>
+            </div>
+            <div style={{fontSize:12,color:'#6b7280',marginBottom:14}}>
+              Drop in a CSV or PDF — scheduled-equipment insurance list, dealer printout, Schedule F equipment roll. The parsed rows preview below; nothing changes on your balance sheet until you click Apply.
+            </div>
+            {!machImportFile && (
+              <label style={{display:'block',border:'2px dashed #d1d5db',borderRadius:10,padding:'36px 20px',textAlign:'center',cursor:'pointer',background:'#fafafa',color:'#374151',marginBottom:14}}>
+                <div style={{fontSize:28,marginBottom:6}}>📥</div>
+                <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>Click to choose a file</div>
+                <div style={{fontSize:11,color:'#9ca3af'}}>CSV or PDF · max 10MB</div>
+                <input type="file" accept=".csv,text/csv,.pdf,application/pdf"
+                  style={{display:'none'}}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleMachImport(f); }} />
+              </label>
+            )}
+            {machImportFile && (
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10,fontSize:13,color:'#374151'}}>
+                <span>📄</span>
+                <strong>{machImportFile.name}</strong>
+                <span style={{color:'#9ca3af',fontSize:11}}>· {Math.round(machImportFile.size/1024).toLocaleString()} KB</span>
+                <button onClick={resetMachImport}
+                  style={{marginLeft:'auto',background:'transparent',border:'none',color:'#6b7280',fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>
+                  Choose different file
+                </button>
+              </div>
+            )}
+            {machImportStatus === 'extracting' && (
+              <div style={{fontSize:13,color:'#1d4ed8',padding:'10px 14px',background:'#eff6ff',borderRadius:6,marginBottom:10}}>
+                Extracting equipment… {machImportFile?.name?.toLowerCase().endsWith('.pdf') ? 'Claude is reading the PDF.' : ''}
+              </div>
+            )}
+            {machImportStatus.startsWith('error:') && (
+              <div style={{fontSize:13,color:'#991b1b',padding:'10px 14px',background:'#fef2f2',borderRadius:6,marginBottom:10}}>
+                ⚠ {machImportStatus.slice(6)}
+              </div>
+            )}
+            {machImportRows.length > 0 && (
+              <>
+                <div style={{fontSize:13,color:'#1a1a1a',margin:'8px 0 6px',fontWeight:600}}>
+                  Preview — {machImportRows.length} row{machImportRows.length===1?'':'s'}
+                </div>
+                <div style={{border:'1px solid #e5e7eb',borderRadius:6,maxHeight:280,overflowY:'auto',marginBottom:10}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead style={{background:'#1a1a1a',color:'white',position:'sticky',top:0}}>
+                      <tr>
+                        <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Year</th>
+                        <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Make &amp; Model</th>
+                        <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Size</th>
+                        <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Serial</th>
+                        <th style={{padding:'5px 8px',textAlign:'left',fontWeight:700,fontSize:11,letterSpacing:.3}}>Cond.</th>
+                        <th style={{padding:'5px 8px',textAlign:'right',fontWeight:700,fontSize:11,letterSpacing:.3}}>Value</th>
+                        <th style={{width:28}}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {machImportRows.map((r,i) => (
+                        <tr key={i} style={{borderBottom:'0.5px solid #f0f0f0'}}>
+                          <td style={{padding:'4px 8px'}}>{r.year}</td>
+                          <td style={{padding:'4px 8px'}}>{r.make}</td>
+                          <td style={{padding:'4px 8px'}}>{r.size}</td>
+                          <td style={{padding:'4px 8px',fontFamily:'monospace',fontSize:11}}>{r.serial}</td>
+                          <td style={{padding:'4px 8px'}}>{r.condition}</td>
+                          <td style={{padding:'4px 8px',textAlign:'right'}}>{r.value ? '$' + Number(r.value).toLocaleString() : '—'}</td>
+                          <td style={{padding:'4px 4px',textAlign:'center'}}>
+                            <button onClick={()=>setMachImportRows(rs => rs.filter((_,j) => j !== i))}
+                              title="Drop this row from the import"
+                              style={{background:'transparent',border:'none',color:'#9ca3af',fontSize:14,cursor:'pointer',padding:0}}>×</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:'flex',gap:14,fontSize:12,color:'#374151',marginBottom:10}}>
+                  <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                    <input type="radio" name="machImportModeW" checked={machImportMode==='append'}
+                      onChange={()=>setMachImportMode('append')} />
+                    Append to existing list ({(data.machinery||[]).filter(r => r && (r.year||r.make||r.value)).length} row{(data.machinery||[]).filter(r => r && (r.year||r.make||r.value)).length===1?'':'s'} on file)
+                  </label>
+                  <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                    <input type="radio" name="machImportModeW" checked={machImportMode==='replace'}
+                      onChange={()=>setMachImportMode('replace')} />
+                    Replace existing list
+                  </label>
+                </div>
+              </>
+            )}
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8,borderTop:'0.5px solid #e5e7eb',paddingTop:12,marginTop:4}}>
+              <button onClick={()=>{setShowMachImport(false);resetMachImport();}}
+                style={{background:'white',border:'1px solid #d1d5db',color:'#374151',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                Cancel
+              </button>
+              <button onClick={applyMachImport} disabled={!machImportRows.length}
+                style={{background: machImportRows.length ? '#1B4332' : '#9ca3af',color:'white',border:'none',borderRadius:6,padding:'7px 18px',fontSize:13,fontWeight:700,cursor: machImportRows.length ? 'pointer' : 'not-allowed',fontFamily:'inherit'}}>
+                {machImportMode === 'replace' ? 'Replace & apply' : 'Append & apply'} ({machImportRows.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Balance Sheet Splitter Modal ── */}
       {showSplitter && <BSSplitter
         data={data} setData={setData}
