@@ -7699,6 +7699,23 @@ export default function BalanceSheet() {
   const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
   const [saveStatus, setSaveStatus] = useState(null);
+  // Autosave state — distinct from the manual save button's status so clicks
+  // and auto-pushes can coexist without stepping on each other's labels.
+  //   'idle'  — nothing pending, sheet is clean
+  //   'dirty' — edits since the last save, autosave timer running
+  //   'saving'— HTTP write in flight
+  //   'saved' — last save succeeded; `autoSaveAt` has the timestamp
+  //   'error' — last autosave failed; falls back to manual save
+  const [autoSaveState, setAutoSaveState] = useState('idle');
+  const [autoSaveAt, setAutoSaveAt] = useState(null);
+  const autoSaveTimerRef = React.useRef(null);
+  // Tick to force re-render of the relative time ("Saved 12s ago") every 15s
+  // without touching other state.
+  const [, _tickRel] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => _tickRel(n => n + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
   const [data, setData] = useState(emptyData());
   // Storage key the sheet was loaded from, so we can delete the old row if
   // the user renames the client (or changes as-of date) and saves.
@@ -8589,7 +8606,17 @@ Question: ${q}`,
         const prior = await storage.get(key);
         if (prior) { try { baselineForLog = JSON.parse(prior.value) || {}; } catch {} }
       } catch {}
-      const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString() };
+      // Stamp the save with the current user so the "Last modified by …" line
+      // in the top bar has something to show. _savedAt is the timestamp,
+      // _savedBy is { id, name, email } of whoever clicked Save (or whoever
+      // triggered autosave). CA direct saves keep their own _lastCAEdit stamp
+      // via ca-save.js, so this doesn't collide.
+      const _savedBy = session?.user?.id ? {
+        id:    session.user.id,
+        name:  profile?.full_name || session.user.email || 'Lender',
+        email: session.user.email || '',
+      } : null;
+      const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString(), _savedBy };
       await storage.set(key, JSON.stringify(savePayload));
       // Only delete the OLD key when this is a pure rename — client name
       // changed but the as-of date is unchanged. Changing the date means the
@@ -8607,6 +8634,10 @@ Question: ${q}`,
       setOriginalKey(key);
       set("folderPath", fp);
       setSaveStatus("saved");
+      // Reset the autosave label so the indicator snaps to "✓ Saved just now"
+      // after a manual save (otherwise it can be stuck on "Unsaved changes").
+      setAutoSaveAt(new Date());
+      setAutoSaveState('saved');
       await loadSavedList();
       // If this sheet is shared with any CA(s), notify them + refresh their
       // snapshot + write a change-log row per share so each CA can view a diff.
@@ -8616,6 +8647,82 @@ Question: ${q}`,
       setSaveStatus(err.message || "error");
       setTimeout(() => setSaveStatus(null), 8000);
     }
+  };
+
+  // ── Autosave ───────────────────────────────────────────────────────────────
+  // Runs on every data edit while the wizard is open. Debounced ~2s after the
+  // last keystroke so we're not hammering Supabase on every character. Only
+  // fires when the sheet has a valid identity (clientName + asOfDate), when
+  // we've already saved it once before (originalKey is set) so we don't
+  // auto-create new sheets without the folder-picker confirmation, and when
+  // the user isn't a CA (CAs save through ca-save.js, not here).
+  const autoSaveNow = async () => {
+    if (!data.clientName || !data.asOfDate) return;
+    if (!originalKey) return;              // Never auto-create a new sheet
+    if (profile?.role === 'ca' || caOpenShare) return;
+    setAutoSaveState('saving');
+    try {
+      const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
+      // Pure write — doesn't retrigger the folder-picker, doesn't delete the
+      // original on rename (autosave skips those branches on purpose). The
+      // manual Save button is still the way to rename / move a sheet.
+      if (key !== originalKey) return;     // Rename detected — bail to manual
+      const fp = data.folderPath || [];
+      const _savedBy = session?.user?.id ? {
+        id:    session.user.id,
+        name:  profile?.full_name || session.user.email || 'Lender',
+        email: session.user.email || '',
+      } : null;
+      const savePayload = { ...data, folderPath: fp, _savedAt: new Date().toISOString(), _savedBy, _autosaved: true };
+      await storage.set(key, JSON.stringify(savePayload));
+      setAutoSaveAt(new Date());
+      setAutoSaveState('saved');
+    } catch (e) {
+      console.warn('autosave failed', e);
+      setAutoSaveState('error');
+    }
+  };
+
+  // Debounce timer — any state change in `data` resets the clock.
+  useEffect(() => {
+    // Skip the very first render (no edits yet).
+    if (!data.clientName || !originalKey) return;
+    if (profile?.role === 'ca' || caOpenShare) return;
+    setAutoSaveState(prev => (prev === 'saving' ? prev : 'dirty'));
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveNow();
+    }, 2000);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+    // JSON.stringify on data is coarse but reliable — any field change triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(data), originalKey]);
+
+  // Flush any pending autosave when the tab unmounts / page unloads.
+  useEffect(() => {
+    const flush = () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveNow();
+      }
+    };
+    window.addEventListener('beforeunload', flush);
+    return () => window.removeEventListener('beforeunload', flush);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(data), originalKey]);
+
+  // Helper — "3s ago" / "2m ago" / "just now".
+  const relTime = (then) => {
+    if (!then) return '';
+    const t = (then instanceof Date) ? then : new Date(then);
+    const secs = Math.floor((Date.now() - t.getTime()) / 1000);
+    if (secs < 5)   return 'just now';
+    if (secs < 60)  return secs + 's ago';
+    if (secs < 3600)return Math.floor(secs/60) + 'm ago';
+    if (secs < 86400) return Math.floor(secs/3600) + 'h ago';
+    return t.toLocaleDateString('en-US', { month:'short', day:'numeric' });
   };
 
   // Write a change-log row to ca_edits so the counterparty can view a diff of
@@ -15608,6 +15715,27 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         <span className="divider">|</span>
         <span className="tool-name">Agricultural Financial Tools</span>
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+          {/* Autosave indicator + last-modified line. Shows just left of the
+              Save button whenever the wizard has a loaded sheet. The label
+              flips with autoSaveState; the smaller line underneath shows who
+              last touched it (and when) so the lender knows who to ask when
+              numbers look off. */}
+          {data.clientName && screen === "wizard" && originalKey && !caOpenShare && (
+            <div style={{textAlign:'right',lineHeight:1.3,marginRight:4,fontSize:'.72rem'}}>
+              <div style={{color: autoSaveState==='error' ? '#dc2626' : autoSaveState==='saving' ? '#9ca3af' : autoSaveState==='dirty' ? '#92400e' : '#15803d', fontWeight:600}}>
+                {autoSaveState === 'saving' ? '💾 Saving…'
+                 : autoSaveState === 'dirty' ? '✎ Unsaved changes'
+                 : autoSaveState === 'error' ? '⚠ Autosave failed'
+                 : autoSaveState === 'saved' ? `✓ Saved ${autoSaveAt ? relTime(autoSaveAt) : ''}`
+                 : (data._savedAt ? `✓ Saved ${relTime(data._savedAt)}` : '')}
+              </div>
+              {data._savedBy && (
+                <div style={{color:'#9ca3af',fontSize:'.65rem',fontWeight:500}}>
+                  Last by {data._savedBy.name || data._savedBy.email || 'unknown'}
+                </div>
+              )}
+            </div>
+          )}
           {/* Always-visible Save button — works from any wizard step, no more trip to Summary. */}
           {data.clientName && (screen === "wizard") && (
             caOpenShare ? (
