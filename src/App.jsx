@@ -2826,7 +2826,22 @@ function InspectionView({data,setData}){
           React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12.5}},
             React.createElement('thead',null,React.createElement('tr',null,['Crop','Budget Ac','Actual Ac','Deviation','Location','Condition','Yield/Ac','Value/Unit','Total',''].map((h,i)=>React.createElement('th',{key:i,style:{...ITHS,minWidth:i===5?190:i===0?100:80,textAlign:i===0||i===4?'left':'center',background:i===1?'#374151':ITH}},h)))),
             React.createElement('tbody',null,crops.map((r,i)=>{
-              const pct=devPct(r.actualAcres,r.budgetedAcres),showDev=pct!==null&&Math.abs(pct)>=5,ds=r.actualAcres?devStyle(pct):{};
+              // Deviation can come from EITHER acreage OR yield. The reason row
+              // opens whenever either crosses ±5% so the lender has somewhere
+              // to explain a lower bu/acre even when acres stayed on plan.
+              const pct = devPct(r.actualAcres, r.budgetedAcres);
+              const yldPct = devPct(r.actualYield, r.budgetedYield);
+              const absAc  = pct    !== null ? Math.abs(pct)    : 0;
+              const absYld = yldPct !== null ? Math.abs(yldPct) : 0;
+              const worstPct = absYld > absAc ? yldPct : pct;
+              const worstAbs = Math.max(absAc, absYld);
+              const showDev = worstPct !== null && worstAbs >= 5;
+              const devLabel = (absYld >= 5 && absYld >= absAc)
+                ? `yield ${yldPct > 0 ? '+' : ''}${yldPct.toFixed(0)}% (budget ${r.budgetedYield} → actual ${r.actualYield})`
+                : (absAc >= 5)
+                  ? `acreage ${pct > 0 ? '+' : ''}${pct.toFixed(0)}% (budget ${r.budgetedAcres} → actual ${r.actualAcres})`
+                  : '';
+              const ds = r.actualAcres ? devStyle(pct) : {};
               return React.createElement(React.Fragment,{key:r.id},
                 React.createElement('tr',{style:{background:ds.background||(i%2===0?'white':'#f9fafb'),...(ds.borderLeft?{borderLeft:ds.borderLeft}:{})}},
                   React.createElement('td',{style:ITDS},r.budgetedCrop?React.createElement('div',null,React.createElement('div',{style:{fontWeight:600,fontSize:13}},r.budgetedCrop),r.substituted&&React.createElement('div',{style:{marginTop:4}},React.createElement('div',{style:{fontSize:10,color:'#d97706',fontWeight:700}},'SUBSTITUTED →'),iInp(r.substituteCrop,v=>uC(r.id,'substituteCrop',v),'Actual crop…','text',{fontSize:12})),React.createElement('button',{type:'button',onClick:()=>uC(r.id,'substituted',!r.substituted),style:{marginTop:3,fontSize:10,background:'none',border:'none',color:r.substituted?'#dc2626':'#9ca3af',cursor:'pointer',padding:0,fontWeight:600}},r.substituted?'✕ Remove':'↺ Different crop?')):iInp(r.budgetedCrop,v=>uC(r.id,'budgetedCrop',v),'Crop name…')),
@@ -2839,11 +2854,12 @@ function InspectionView({data,setData}){
                   React.createElement('td',{style:ITDS},iInp(r.valuePerUnit||r.budgetedPrice,v=>uC(r.id,'valuePerUnit',v),r.budgetedPrice||'$0','number')),
                   React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',whiteSpace:'nowrap'}},cRT(r)>0?iFmt$(cRT(r)):'—'),
                   React.createElement('td',{style:ITDS},React.createElement('button',{type:'button',onClick:()=>rC(r.id),style:{background:'#fee2e2',color:'#b91c1c',border:'none',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:14}},'×'))),
-                showDev&&React.createElement('tr',{style:{background:Math.abs(pct)>=20?'#fef2f2':'#fffbeb'}},
+                showDev&&React.createElement('tr',{style:{background:worstAbs>=20?'#fef2f2':'#fffbeb'}},
                   React.createElement('td',{colSpan:10,style:{padding:'6px 10px 8px 32px',borderBottom:'1px solid #f0f0f0'}},
-                    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
-                      React.createElement('span',{style:{fontSize:11,fontWeight:700,color:Math.abs(pct)>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}},Math.abs(pct)>=20?'⛔':'⚠️',' Deviation reason:'),
-                      iInp(r.deviationReason,v=>uC(r.id,'deviationReason',v),Math.abs(pct)>=20?'Required — explain major deviation…':'Explain deviation…','text',{border:`1px solid ${Math.abs(pct)>=20?'#fca5a5':'#fcd34d'}`,background:'white'})))));
+                    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+                      React.createElement('span',{style:{fontSize:11,fontWeight:700,color:worstAbs>=20?'#dc2626':'#d97706',whiteSpace:'nowrap'}},worstAbs>=20?'⛔':'⚠️',' Deviation reason:'),
+                      devLabel && React.createElement('span',{style:{fontSize:10,color:'#6b7280',whiteSpace:'nowrap'}}, devLabel),
+                      iInp(r.deviationReason,v=>uC(r.id,'deviationReason',v),worstAbs>=20?'Required — explain major deviation…':'Explain deviation…','text',{border:`1px solid ${worstAbs>=20?'#fca5a5':'#fcd34d'}`,background:'white',flex:1,minWidth:220})))));
             })),
             React.createElement('tfoot',null,React.createElement('tr',{style:{background:'#ecfdf5'}},React.createElement('td',{colSpan:8,style:{...ITDS,textAlign:'right',fontWeight:700,color:ISH,fontSize:13}},'CROP TOTAL'),React.createElement('td',{style:{...ITDS,textAlign:'right',fontWeight:700,color:'#15803d',fontSize:14}},iFmt$(cropTot)),React.createElement('td',null))))),
         React.createElement('button',{type:'button',onClick:aC,style:{marginTop:10,background:'#f0fdf4',color:ITH,border:`1.5px dashed ${ITH}`,borderRadius:4,padding:'5px 14px',cursor:'pointer',fontSize:13,fontWeight:600}},'+ Add Crop Row'),
