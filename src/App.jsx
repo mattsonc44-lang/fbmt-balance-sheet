@@ -936,14 +936,44 @@ function deriveCollateral(d) {
     receivables:     (d.receivables||[]).filter(isColl).reduce((s,r) => s + n(r.amount), 0),
     cropsHarvested:  (d.farmProducts||[]).filter(isColl).reduce((s,r) => s + n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100), 0),
     cropsUnharvested:(d.cropInvestment||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
-    livestockMkt:    (d.livestockMarket||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(n(r.share||'100')/100), 0),
-    livestockBreed:  (d.breedingStock||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(n(r.share||'100')/100), 0),
+    livestockMkt:    (d.livestockMarket||[]).filter(isColl).reduce((s,r) => {
+      // Mirror the balance-sheet helper: head × wt × price (per lb or cwt)
+      // or head × $/head, falling back to r.value for legacy rows.
+      const head  = n(r.number);
+      const wt    = n(r.weightPerHd);
+      const price = n(r.pricePerUnit);
+      const basis = r.priceBasis || (wt > 0 ? 'cwt' : 'head');
+      let computed = 0;
+      if (head > 0 && price > 0) {
+        if (basis === 'head')     computed = head * price;
+        else if (basis === 'lb')  computed = head * wt * price;
+        else if (basis === 'cwt') computed = head * (wt / 100) * price;
+      }
+      const rv = computed > 0 ? computed : n(r.value);
+      return s + rv * (n(r.share||'100')/100);
+    }, 0),
+    livestockBreed:  (d.breedingStock||[]).filter(isColl).reduce((s,r) => {
+      const head = n(r.number);
+      const vph  = n(r.valuePerHd);
+      const computed = head * vph;
+      const rv = computed > 0 ? computed : n(r.value);
+      return s + rv * (n(r.share||'100')/100);
+    }, 0),
     // Apply the per-row depreciation haircut on top of the collateral flag
     // so the Collateral worksheet sees the same book value the balance sheet does.
     farmEquipment:   (d.machinery||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(1 - Math.max(0, Math.min(100, n(r.depreciation)))/100), 0),
     rollingStock:    (d.vehicles||[]).filter(isColl).reduce((s,r) => s + n(r.value)*(1 - Math.max(0, Math.min(100, n(r.depreciation)))/100), 0),
+    // Livestock & breeding share percentages are applied in the
+    // `isColl.filter → row-value helpers` below.
     otherEquipment:  n(c.otherEquipmentValue),
-    landBuildings:   (d.realEstate||[]).filter(isColl).reduce((s,r) => s + n(r.acres)*n(r.valuePerAcre), 0),
+    landBuildings:   (d.realEstate||[]).filter(isColl).reduce((s,r) => {
+      // Mirror the balance-sheet helper: respect the per-row value basis
+      // (acre / lot / total) so a city lot entered flat doesn't get silently
+      // multiplied by its acres column.
+      const basis = r.valueBasis || 'acre';
+      const vpu = n(r.valuePerAcre);
+      return s + (basis === 'acre' ? n(r.acres) * vpu : vpu);
+    }, 0),
     buildings:       n(c.buildingsValue),
     cash:            n(d.cashGlacier) + (d.cashOther||[]).filter(isColl).reduce((s,r) => s + n(r.amount), 0),
     other:           n(c.otherCollateralValue),
@@ -1034,7 +1064,7 @@ function emptyData() {
     // the Current-Portion section and the (principal − annual pmt) in the
     // Long-Term section. Older sheets with reCurrent/reMortgages continue to
     // work; totals combine both sources.
-    reDebt:[{lienHolder:"",annualPmt:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false}],
+    reDebt:[{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false}],
     // ── Collateral valuation (lender-side analysis) ─────────────────────────
     // Everything else on the sheet is the borrower's financial picture.
     // `collateral` is the BANK's view of what the pledged assets would really
@@ -5400,7 +5430,8 @@ function ClientDashboard({
       const miscInc = (latestData.budgetMisc||[]).reduce((s,r) => s + nm(r.amount), 0);
       const opEx = (latestData.budgetExpenses||[]).filter(r => !r.prepaid).reduce((s,r) => s + nm(r.amount), 0);
       const debtSvc = (latestData.intermediatDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
-                    + (latestData.reCurrent||[]).reduce((s,r) => s + nm(r.annualPmt), 0);
+                    + (latestData.reCurrent||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
+                    + (latestData.reDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0);
       const budgetIncome = cropInc + livestockInc + miscInc;
       const dscr = debtSvc > 0 ? ((budgetIncome - opEx) / debtSvc).toFixed(2) : 'n/a';
 
@@ -8410,6 +8441,7 @@ ${items.map((r,k) => describe(r,k)).join('\n')}`;
         const opEx = (p.budgetExpenses||[]).filter(r => !r.prepaid).reduce((s,r) => s + nm(r.amount), 0);
         const debtSvc = (p.intermediatDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
                       + (p.reCurrent||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
+                      + (p.reDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0)
                       + (p.budgetProposedDebt||[]).reduce((s,r) => s + nm(r.annualPmt), 0);
         const budgetIncome = cropInc + livestockInc + miscInc;
         const dscr = debtSvc > 0 ? (budgetIncome - opEx) / debtSvc : null;
@@ -10049,14 +10081,52 @@ Question: ${q}`,
   const fedPay = Array.isArray(data.federalPayments)
     ? data.federalPayments.reduce((s,r)=>s+n(r.amount),0)
     : n(data.federalPayments);
-  const lsMktTotal = data.livestockMarket.reduce((s,r)=>s+n(r.value)*(n(r.share||'100')/100),0);
+  // Market livestock row value — supports both the detailed inputs
+  // (# head × avg weight × price per lb/cwt or # head × $/head) AND the
+  // legacy single-Value field for sheets saved before this breakout. If
+  // the detailed inputs produce a non-zero total, use that; otherwise
+  // fall back to r.value so pre-existing data keeps working.
+  const marketLineValue = (r) => {
+    const head  = n(r.number);
+    const wt    = n(r.weightPerHd);
+    const price = n(r.pricePerUnit);
+    const basis = r.priceBasis || (wt > 0 ? 'cwt' : 'head');  // default to cwt when a weight is present
+    let computed = 0;
+    if (head > 0 && price > 0) {
+      if (basis === 'head')     computed = head * price;
+      else if (basis === 'lb')  computed = head * wt * price;
+      else if (basis === 'cwt') computed = head * (wt / 100) * price;
+    }
+    return computed > 0 ? computed : n(r.value);
+  };
+  const lsMktTotal = data.livestockMarket.reduce((s,r)=>s+marketLineValue(r)*(n(r.share||'100')/100),0);
   const farmProdTotal = data.farmProducts.reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||"100")/100),0);
   const cropInv = data.cropInvestment.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
   const suppliesTotal = data.supplies.reduce((s,r)=>s+n(r.value),0);
   const otherCurTotal = data.otherCurrent.reduce((s,r)=>s+n(r.amount),0);
   const totalCurrentAssets = cashTotal+recTotal+fedPay+lsMktTotal+farmProdTotal+cropInv+suppliesTotal+otherCurTotal;
-  const breedingTotal = data.breedingStock.reduce((s,r)=>s+n(r.value)*(n(r.share||'100')/100),0);
-  const reTotal = data.realEstate.reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
+  // Breeding stock row value — # head × $/head when both are entered,
+  // otherwise fall back to the legacy single Value field so older sheets
+  // keep working untouched.
+  const breedingLineValue = (r) => {
+    const head = n(r.number);
+    const vph  = n(r.valuePerHd);
+    const computed = head * vph;
+    return computed > 0 ? computed : n(r.value);
+  };
+  const breedingTotal = data.breedingStock.reduce((s,r)=>s+breedingLineValue(r)*(n(r.share||'100')/100),0);
+  // Real-estate row value — supports three bases:
+  //   'acre' (default/legacy): acres × valuePerAcre
+  //   'lot':  flat $/lot (acres field becomes informational)
+  //   'total': lump total value typed directly
+  // The valuePerAcre field is reused as the number entered under any basis.
+  const reLineValue = (r) => {
+    const basis = r.valueBasis || 'acre';
+    const vpu = n(r.valuePerAcre);
+    if (basis === 'acre') return n(r.acres) * vpu;
+    return vpu; // lot or total — flat value
+  };
+  const reTotal = data.realEstate.reduce((s,r) => s + reLineValue(r), 0);
   const reConTotal = data.reContracts.reduce((s,r)=>s+n(r.amount),0);
   // Per-row depreciation lets the lender haircut each piece of equipment /
   // each vehicle without touching the borrower's stated value. depreciation
@@ -10124,7 +10194,16 @@ Question: ${q}`,
   const budgetOperatingExpenses = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
-  const debtServiceRE = data.reCurrent.filter(r=>r.creditor && n(r.annualPmt)>0);
+  // Pull RE debt from BOTH the legacy reCurrent array AND the unified reDebt
+  // array. reDebt uses lienHolder instead of creditor; the filter accepts
+  // either so a row from either source shows up in the budget's debt-service
+  // line and in the DSCR denominator.
+  const debtServiceRE = [
+    ...data.reCurrent.filter(r => r.creditor && n(r.annualPmt) > 0),
+    ...((data.reDebt || []).filter(r => (r.lienHolder || r.creditor) && n(r.annualPmt) > 0)
+      // Normalize so downstream rendering (which reads r.creditor) still works.
+      .map(r => ({ ...r, creditor: r.lienHolder || r.creditor }))),
+  ];
   // "corp pays" is any row with either the new corpPaidBy name string OR the legacy corpPaid boolean.
   const _isCorpPaid = r => !!(r.corpPaidBy || r.corpPaid);
   const debtServiceTermsPersonal = debtServiceTerms.filter(r=>!_isCorpPaid(r));
@@ -10475,6 +10554,7 @@ Question: ${q}`,
       const opEx         = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((a,r) => a + nm(r.amount), 0);
       const debtSvc      = (p.intermediatDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
                          + (p.reCurrent||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
+                         + (p.reDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
                          + (p.budgetProposedDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0);
       return { cropInc, livestockInc, miscInc, opEx, debtSvc, totalInc: cropInc+livestockInc+miscInc };
     };
@@ -12832,28 +12912,90 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
       );
       case "livestock_market": return (
         <div className="step-content">
-          <SecHdr icon="🐄" title="Market Livestock" subtitle="Livestock intended for sale — not breeding stock" />
+          <SecHdr icon="🐄" title="Market Livestock" subtitle="Livestock intended for sale — enter # head × wt × price, or $/head directly" />
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="livestockMarket" label="livestock" /></div>
-          {data.livestockMarket.map((r,i) => (
-            <div key={i} className="row-entry" data-rowkey={`livestockMarket-${i}`}>
-              <span className="row-num">{i+1}</span>
-              <TxtInp label="Number" value={r.number} onChange={v=>setArr("livestockMarket",i,"number",v)} placeholder="# head" />
-              <TxtInp label="Kind and Weight" value={r.kind} onChange={v=>setArr("livestockMarket",i,"kind",v)} placeholder="e.g., 450 lb steers" />
-              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("livestockMarket",i,"value",v)} />
-              <div className="input-group" style={{width:80,flexShrink:0}}>
-                <label>Share %</label>
-                <div className="input-wrap">
-                  <input type="text" value={r.share ?? "100"} placeholder="100"
-                    title="Ownership share — total value × share%"
-                    onChange={e=>setArr("livestockMarket",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
-                  <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+          <div className="fp-header-row" style={{gap:6}}>
+            <span style={{width:20}}></span>
+            <span className="fp-col-label" style={{width:70}}># Head</span>
+            <span className="fp-col-label" style={{flex:1,minWidth:140}}>Kind</span>
+            <span className="fp-col-label" style={{width:80}}>Wt / Head</span>
+            <span className="fp-col-label" style={{width:95}}>Price</span>
+            <span className="fp-col-label" style={{width:70}}>Basis</span>
+            <span className="fp-col-label" style={{width:110,textAlign:'right'}}>Row Value</span>
+            <span className="fp-col-label" style={{width:60}}>Share%</span>
+            <span style={{width:32}}></span>
+          </div>
+          {data.livestockMarket.map((r,i) => {
+            const rowVal = marketLineValue(r);
+            const basis  = r.priceBasis || (numVal(r.weightPerHd) > 0 ? 'cwt' : 'head');
+            const hintParts = [];
+            if (numVal(r.number) > 0) hintParts.push(`${numVal(r.number)} hd`);
+            if (basis !== 'head' && numVal(r.weightPerHd) > 0) hintParts.push(`${numVal(r.weightPerHd)} lb`);
+            if (numVal(r.pricePerUnit) > 0) hintParts.push(`$${r.pricePerUnit}/${basis === 'head' ? 'hd' : basis}`);
+            const hint = hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' + fmt(rowVal) : '';
+            return (
+              <div key={i} className="fp-row" data-rowkey={`livestockMarket-${i}`} style={{gap:6}}>
+                <span className="row-num">{i+1}</span>
+                <div className="input-group" style={{width:70,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.number} placeholder="0"
+                      onChange={e=>setArr("livestockMarket",i,"number",e.target.value.replace(/[^0-9.]/g,""))} />
+                  </div>
                 </div>
+                <div className="input-group" style={{flex:1,minWidth:140}}>
+                  <input className="text-input" type="text" value={r.kind} placeholder="e.g., Angus steers"
+                    onChange={e=>setArr("livestockMarket",i,"kind",e.target.value)} />
+                </div>
+                <div className="input-group" style={{width:80,flexShrink:0}}>
+                  <div className="input-wrap" title="Average weight per head (lbs). Leave 0 to price per head.">
+                    <input type="text" value={r.weightPerHd||''} placeholder="0"
+                      onChange={e=>setArr("livestockMarket",i,"weightPerHd",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:11}}>lb</span>
+                  </div>
+                </div>
+                <div className="input-group" style={{width:95,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <span className="prefix">$</span>
+                    <input type="text" value={r.pricePerUnit||''} placeholder="0.00"
+                      onChange={e=>setArr("livestockMarket",i,"pricePerUnit",e.target.value.replace(/[^0-9.]/g,""))} />
+                  </div>
+                </div>
+                <div className="input-group" style={{width:70,flexShrink:0}}>
+                  <select className="unit-select" value={basis}
+                    title="Price basis — /head (per animal), /lb (per pound), /cwt (per hundredweight — most common for cattle)"
+                    onChange={e=>setArr("livestockMarket",i,"priceBasis",e.target.value)}>
+                    <option value="head">/head</option>
+                    <option value="cwt">/cwt</option>
+                    <option value="lb">/lb</option>
+                  </select>
+                </div>
+                <div className="input-group" style={{width:110,flexShrink:0}}>
+                  <div className="input-wrap" title="Row value. Auto-computes from the detailed inputs above, or type in a lump-sum override.">
+                    <span className="prefix">$</span>
+                    <input type="text" value={rowVal > 0 ? Math.round(rowVal).toLocaleString() : (r.value||'')}
+                      readOnly={rowVal > 0 && !(numVal(r.value) > 0 && numVal(r.number) === 0)}
+                      style={{textAlign:'right',background:rowVal>0?'#f0fdf4':'white'}}
+                      onChange={e=>setArr("livestockMarket",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
+                  </div>
+                </div>
+                <div className="input-group" style={{width:60,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.share ?? "100"} placeholder="100"
+                      onChange={e=>setArr("livestockMarket",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
+                <CollChk field="livestockMarket" i={i} r={r} />
+                <button className="remove-btn" onClick={()=>removeRow("livestockMarket",i)}>x</button>
+                {hint && (
+                  <div style={{flexBasis:'100%',marginLeft:28,marginTop:-4,fontSize:10,color:'#6b7280'}}>
+                    {hint}{numVal(r.share||'100') < 100 ? ` · share ${numVal(r.share||'100')}% = ${fmt(rowVal * (numVal(r.share||'100')/100))}` : ''}
+                  </div>
+                )}
               </div>
-              <CollChk field="livestockMarket" i={i} r={r} />
-              <button className="remove-btn" onClick={()=>removeRow("livestockMarket",i)}>x</button>
-            </div>
-          ))}
-          <button className="add-btn" onClick={()=>addRow("livestockMarket",{number:"",kind:"",value:"",share:"100"})}>+ Add Livestock</button>
+            );
+          })}
+          <button className="add-btn" onClick={()=>addRow("livestockMarket",{number:"",kind:"",weightPerHd:"",pricePerUnit:"",priceBasis:"cwt",value:"",share:"100"})}>+ Add Livestock</button>
           <div className="subtotal-row"><span>Total Market Livestock</span><strong>{fmt(lsMktTotal)}</strong></div>
         </div>
       );
@@ -13006,71 +13148,129 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
       );
       case "breeding_stock": return (
         <div className="step-content">
-          <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding" />
+          <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding — enter # head × $/head" />
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="breedingStock" label="breeding stock" /></div>
           <p className="phase-badge">Intermediate and Long-Term Assets</p>
-          {data.breedingStock.map((r,i) => (
-            <div key={i} className="row-entry" data-rowkey={`breedingStock-${i}`}>
-              <span className="row-num">{i+1}</span>
-              <TxtInp label="Number" value={r.number} onChange={v=>setArr("breedingStock",i,"number",v)} placeholder="# head" />
-              <TxtInp label="Kind" value={r.kind} onChange={v=>setArr("breedingStock",i,"kind",v)} placeholder="e.g., Angus cows" />
-              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("breedingStock",i,"value",v)} />
-              <div className="input-group" style={{width:80,flexShrink:0}}>
-                <label>Share %</label>
-                <div className="input-wrap">
-                  <input type="text" value={r.share ?? "100"} placeholder="100"
-                    title="Ownership share — total value × share%"
-                    onChange={e=>setArr("breedingStock",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
-                  <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+          <div className="fp-header-row" style={{gap:6}}>
+            <span style={{width:20}}></span>
+            <span className="fp-col-label" style={{width:70}}># Head</span>
+            <span className="fp-col-label" style={{flex:1,minWidth:160}}>Kind</span>
+            <span className="fp-col-label" style={{width:120}}>Value / Head</span>
+            <span className="fp-col-label" style={{width:120,textAlign:'right'}}>Row Value</span>
+            <span className="fp-col-label" style={{width:60}}>Share%</span>
+            <span style={{width:32}}></span>
+          </div>
+          {data.breedingStock.map((r,i) => {
+            const rowVal = breedingLineValue(r);
+            const hintParts = [];
+            if (numVal(r.number) > 0) hintParts.push(`${numVal(r.number)} hd`);
+            if (numVal(r.valuePerHd) > 0) hintParts.push(`$${r.valuePerHd}/hd`);
+            const hint = hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' + fmt(rowVal) : '';
+            return (
+              <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`} style={{gap:6}}>
+                <span className="row-num">{i+1}</span>
+                <div className="input-group" style={{width:70,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.number} placeholder="0"
+                      onChange={e=>setArr("breedingStock",i,"number",e.target.value.replace(/[^0-9.]/g,""))} />
+                  </div>
                 </div>
+                <div className="input-group" style={{flex:1,minWidth:160}}>
+                  <input className="text-input" type="text" value={r.kind} placeholder="e.g., Angus cows"
+                    onChange={e=>setArr("breedingStock",i,"kind",e.target.value)} />
+                </div>
+                <div className="input-group" style={{width:120,flexShrink:0}}>
+                  <div className="input-wrap" title="Average value per head. Row value = # head × this.">
+                    <span className="prefix">$</span>
+                    <input type="text" value={r.valuePerHd||''} placeholder="0.00"
+                      onChange={e=>setArr("breedingStock",i,"valuePerHd",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:11}}>/hd</span>
+                  </div>
+                </div>
+                <div className="input-group" style={{width:120,flexShrink:0}}>
+                  <div className="input-wrap" title="Row value. Auto-computes when # head × $/head are both entered; otherwise accepts a lump-sum override.">
+                    <span className="prefix">$</span>
+                    <input type="text" value={rowVal > 0 ? Math.round(rowVal).toLocaleString() : (r.value||'')}
+                      readOnly={rowVal > 0 && !(numVal(r.value) > 0 && numVal(r.number) === 0)}
+                      style={{textAlign:'right',background:rowVal>0?'#f0fdf4':'white'}}
+                      onChange={e=>setArr("breedingStock",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
+                  </div>
+                </div>
+                <div className="input-group" style={{width:60,flexShrink:0}}>
+                  <div className="input-wrap">
+                    <input type="text" value={r.share ?? "100"} placeholder="100"
+                      onChange={e=>setArr("breedingStock",i,"share",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
+                  </div>
+                </div>
+                <CollChk field="breedingStock" i={i} r={r} />
+                <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
+                {hint && (
+                  <div style={{flexBasis:'100%',marginLeft:28,marginTop:-4,fontSize:10,color:'#6b7280'}}>
+                    {hint}{numVal(r.share||'100') < 100 ? ` · share ${numVal(r.share||'100')}% = ${fmt(rowVal * (numVal(r.share||'100')/100))}` : ''}
+                  </div>
+                )}
               </div>
-              <CollChk field="breedingStock" i={i} r={r} />
-              <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
-            </div>
-          ))}
-          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",value:"",share:"100"})}>+ Add Breeding Stock</button>
+            );
+          })}
+          <button className="add-btn" onClick={()=>addRow("breedingStock",{number:"",kind:"",valuePerHd:"",value:"",share:"100"})}>+ Add Breeding Stock</button>
           <div className="subtotal-row"><span>Total Breeding Stock</span><strong>{fmt(breedingTotal)}</strong></div>
         </div>
       );
       case "real_estate": return (
         <div className="step-content">
-          <SecHdr icon="🏔" title="Real Estate" subtitle="Farmland, pasture, home — list each tract. Acres x Value/Acre = Total." />
+          <SecHdr icon="🏔" title="Real Estate" subtitle="Farmland, pasture, lots, home — pick a value basis per tract: $/acre, $/lot, or lump total." />
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="realEstate" label="tract" /></div>
-          <div className="fp-header-row">
+          <div className="fp-header-row" style={{gap:6}}>
             <span style={{width:20}}></span>
             <span className="fp-col-label" style={{width:75}}>Acres</span>
-            <span className="fp-col-label" style={{width:130}}>Type of RE</span>
+            <span className="fp-col-label" style={{width:120}}>Type of RE</span>
             <span className="fp-col-label" style={{flex:1}}>Description</span>
-            <span className="fp-col-label" style={{width:115}}>Value/Acre</span>
-            <span className="fp-col-label" style={{width:115}}>Total</span>
+            <span className="fp-col-label" style={{width:80}}>Basis</span>
+            <span className="fp-col-label" style={{width:115}}>Value</span>
+            <span className="fp-col-label" style={{width:115,textAlign:'right'}}>Row Total</span>
             <span style={{width:32}}></span>
           </div>
           {data.realEstate.map((r,i) => {
-            const rv = numVal(r.acres) * numVal(r.valuePerAcre);
+            const basis = r.valueBasis || 'acre';
+            const rv = reLineValue(r);
+            // Label the Value column based on basis — "$/acre" vs "$/lot" vs "$ total".
+            const valueLabel = basis === 'acre' ? '/ac' : basis === 'lot' ? '/lot' : 'total';
             return (
-              <div key={i} className="fp-row" data-rowkey={`realEstate-${i}`}>
+              <div key={i} className="fp-row" data-rowkey={`realEstate-${i}`} style={{gap:6}}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:75,flexShrink:0}}>
-                  <div className="input-wrap">
+                  <div className="input-wrap" title={basis==='acre' ? 'Acres — multiplied by Value/Acre' : 'Acres (informational — not used in row total under this basis)'}>
                     <input type="text" value={r.acres} placeholder="0"
+                      style={basis!=='acre'?{color:'#9ca3af'}:undefined}
                       onChange={e=>setArr("realEstate",i,"acres",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
-                <div className="input-group" style={{width:130,flexShrink:0}}>
+                <div className="input-group" style={{width:120,flexShrink:0}}>
                   <select className="unit-select" value={r.reType} onChange={e=>setArr("realEstate",i,"reType",e.target.value)}>
                     {CONDITIONS.map(c=><option key={c}>{c}</option>)}
                   </select>
                 </div>
                 <div className="input-group" style={{flex:1}}>
                   <input className="text-input" type="text" value={r.description}
-                    placeholder="e.g., NW Sec 12, Cascade Co."
+                    placeholder="e.g., NW Sec 12, Cascade Co. / Lot 4 Blk 2"
                     onChange={e=>setArr("realEstate",i,"description",e.target.value)} />
+                </div>
+                <div className="input-group" style={{width:80,flexShrink:0}}>
+                  <select className="unit-select" value={basis}
+                    title="How this tract is valued. $/acre = acres × value/acre. $/lot = flat value per lot. $ total = lump total."
+                    onChange={e=>setArr("realEstate",i,"valueBasis",e.target.value)}>
+                    <option value="acre">$/acre</option>
+                    <option value="lot">$/lot</option>
+                    <option value="total">$ total</option>
+                  </select>
                 </div>
                 <div className="input-group" style={{width:115,flexShrink:0}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
                     <input type="text" value={r.valuePerAcre} placeholder="0"
                       onChange={e=>setArr("realEstate",i,"valuePerAcre",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:10}}>{valueLabel}</span>
                   </div>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
@@ -13438,16 +13638,28 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
             const currentPortion = n(r.annualPmt);
             const ltPortion = Math.max(0, n(r.principal) - currentPortion);
+            // Accrued interest = unpaid interest sitting on the loan as of the
+            // as-of date. Next payment splits into principal reduction +
+            // accrued interest, so the lender sees a true picture of where
+            // the next cash check goes. If accruedInterest is blank, we fall
+            // back to a straight-line estimate (principal × rate × ½) just
+            // so the breakdown isn't blank on a fresh row.
+            const accruedInt = n(r.accruedInterest);
+            const principalPmt = Math.max(0, currentPortion - accruedInt);
             return (
-            <div key={i} className="row-entry" data-rowkey={`reDebt-${i}`} style={{alignItems:'flex-end'}}>
+            <div key={i} className="row-entry" data-rowkey={`reDebt-${i}`} style={{alignItems:'flex-end',flexWrap:'wrap'}}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr fixed" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
               <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("reDebt",i,"annualPmt",v)} />
+              <Inp label="Accrued Int" prefix="$" value={r.accruedInterest||''} onChange={v=>setArr("reDebt",i,"accruedInterest",v)} />
               <Inp label="Principal (total)" prefix="$" value={r.principal} onChange={v=>setArr("reDebt",i,"principal",v)} />
-              <div style={{display:"flex",flexDirection:"column",fontSize:11,color:"#6b7280",minWidth:150,paddingBottom:6}}>
-                <span>Prints as:</span>
+              <div style={{display:"flex",flexDirection:"column",fontSize:11,color:"#6b7280",minWidth:170,paddingBottom:6}}>
+                <span>Next payment splits:</span>
+                <span>• Interest: <strong style={{color:"#92400e"}}>{fmt(accruedInt)}</strong></span>
+                <span>• Principal: <strong style={{color:"#15803d"}}>{fmt(principalPmt)}</strong></span>
+                <span style={{marginTop:4,paddingTop:4,borderTop:'0.5px solid #f0f0f0'}}>Prints as:</span>
                 <span>• Current: <strong style={{color:"#991b1b"}}>{fmt(currentPortion)}</strong></span>
                 <span>• Long-term: <strong style={{color:"#991b1b"}}>{fmt(ltPortion)}</strong></span>
               </div>
@@ -13466,7 +13678,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row">
             <span>Current-portion total</span><strong className="red">{fmt(reDebtCurrentPortion)}</strong>
           </div>
