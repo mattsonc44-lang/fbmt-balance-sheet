@@ -6901,11 +6901,15 @@ function summarizeSheetChanges(baseline, next) {
     const ad  = sumArr(d.accountsDue, 'amount');
     const idp = sumArr(d.intermediatDebt, 'annualPmt');
     const idLT= sumArr(d.intermediatDebt, 'principal') - idp;
-    const rc  = sumArr(d.reCurrent, 'annualPmt') + sumArr(d.reDebt, 'annualPmt');
+    // RE debt current portion = principal reduction from next payment +
+    // accrued interest (both become current liabilities).
+    const reDebtPrinCur = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.annualPmt)-n(r.accruedInterest)),0);
+    const reDebtAcc     = (d.reDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0);
+    const rc  = sumArr(d.reCurrent, 'annualPmt') + reDebtPrinCur + reDebtAcc;
     const tx  = n(d.taxesDue);
     const ocl = sumArr(d.otherCurrentLiab, 'amount');
     const tcl = on+ad+idp+rc+tx+ocl;
-    const rm  = sumArr(d.reMortgages, 'principal') + Math.max(0, sumArr(d.reDebt, 'principal') - sumArr(d.reDebt, 'annualPmt'));
+    const rm  = sumArr(d.reMortgages, 'principal') + (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal)-Math.max(0, n(r.annualPmt)-n(r.accruedInterest))),0);
     const ol  = sumArr(d.otherLiabilities, 'balance');
     const tl  = tcl+idLT+rm+ol;
     return { 'TOTAL ASSETS':ta,'TOTAL LIABILITIES':tl,'NET WORTH':ta-tl,'WORKING CAPITAL':tc-tcl };
@@ -10155,8 +10159,13 @@ Question: ${q}`,
   // Unified reDebt contributes BOTH to current-portion totals (annual pmt)
   // and long-term totals (principal − annual pmt). Legacy reCurrent + reMortgages
   // arrays still contribute separately so older sheets keep working.
-  const reDebtCurrentPortion = (data.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
-  const reDebtLTPortion     = (data.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal)-n(r.annualPmt)),0);
+  // Current portion = principal that comes off in the next 12 months +
+  // accrued interest owed now. Only (annualPmt − accruedInt) actually reduces
+  // principal; the interest piece is a current liability by itself.
+  const reDebtPrinCurrent   = (data.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.annualPmt) - n(r.accruedInterest)),0);
+  const reDebtAccruedTotal  = (data.reDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0);
+  const reDebtCurrentPortion = reDebtPrinCurrent + reDebtAccruedTotal;
+  const reDebtLTPortion     = (data.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal)-Math.max(0, n(r.annualPmt) - n(r.accruedInterest))),0);
   const reCurrentTotal = data.reCurrent.reduce((s,r)=>s+n(r.annualPmt),0) + reDebtCurrentPortion;
   const taxesDueVal = n(data.taxesDue);
   const otherCLTotal = data.otherCurrentLiab.reduce((s,r)=>s+n(r.amount),0);
@@ -11870,19 +11879,25 @@ Rules:
     // on-screen math does; otherwise the printed Working Capital drifts
     // from what the wizard shows.
     const intermedCurrent = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
-    const reDebtCurrent   = (d.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
-    const reCurrentTot    = (d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0) + reDebtCurrent;
+    // Current portion of RE debt = principal that will come off in the next
+    // 12 months. If accrued interest is set, the next payment covers interest
+    // first and only the remainder reduces principal, so the current-portion
+    // of principal = max(0, annualPmt − accruedInt). Accrued interest itself
+    // is a current liability, added separately below.
+    const reDebtPrinCur   = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.annualPmt) - n(r.accruedInterest)), 0);
+    const reDebtAccrued   = (d.reDebt||[]).reduce((s,r)=>s+n(r.accruedInterest), 0);
+    const reCurrentTot    = (d.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0) + reDebtPrinCur + reDebtAccrued;
     // taxesDue is a plain string in the app schema, not an array.
     const taxesDueVal     = n(d.taxesDue);
     const otherCurLiabTot = (d.otherCurrentLiab||[]).reduce((s,r)=>s+n(r.amount),0);
     const totalCurrentLiab = opNotesTot + intermedCurrent + reCurrentTot + taxesDueVal + otherCurLiabTot;
     // Long-term portions: intermediate-debt principal minus current-portion,
-    // RE mortgages, reDebt long-term portion (principal − annualPmt),
-    // other liabilities. The reDebt LT bucket was previously missing too, so
-    // Total Liabilities under-reported by the sum of all those LT portions.
+    // RE mortgages, reDebt long-term portion = principal − principal reduction
+    // from the next payment (NOT the whole payment — the interest piece
+    // doesn't reduce the balance).
     const intermedPrincipal = (d.intermediatDebt||[]).reduce((s,r)=>s+n(r.principal),0);
     const reMortTot         = (d.reMortgages||[]).reduce((s,r)=>s+n(r.principal),0);
-    const reDebtLT          = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal) - n(r.annualPmt)), 0);
+    const reDebtLT          = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, n(r.principal) - Math.max(0, n(r.annualPmt) - n(r.accruedInterest))), 0);
     const otherLiabTot      = (d.otherLiabilities||[]).reduce((s,r)=>s+n(r.balance),0);
     const totalLTLiab       = Math.max(intermedPrincipal - intermedCurrent, 0) + reMortTot + reDebtLT + otherLiabTot;
     const totalLiabilities  = totalCurrentLiab + totalLTLiab;
@@ -12010,7 +12025,7 @@ ${(d.reDebt||[]).filter(r=>r.lienHolder||r.annualPmt||r.principal).map(r=>`<div 
 <div class="subtot"><span>TOTAL CURRENT LIABILITIES:</span><span>${pFmt(totalCurrentLiab)||"$0"}</span></div>
 <div class="sec">RE Mortgages (long-term):</div>
 ${blank(d.reMortgages.filter(r=>r.lienHolder),3).map(r=>`<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c5">${pFmt(r.principal)}</span></div>`).join("")}
-${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const lt=Math.max(0,n(r.principal)-n(r.annualPmt));return `<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c5">${pFmt(lt)}</span></div>`;}).join("")}
+${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const prinCur=Math.max(0,n(r.annualPmt)-n(r.accruedInterest));const lt=Math.max(0,n(r.principal)-prinCur);return `<div class="trow"><span class="c1">${r.lienHolder||""}</span><span class="c2">${r.terms||""}</span><span class="c3">${r.rate?r.rate+"%":""}</span><span class="c5">${pFmt(lt)}</span></div>`;}).join("")}
 <div class="tot"><span>TOTAL LIABILITIES</span><span>${pFmt(totalLiabilities)||"$0"}</span></div>
 <div class="net"><span>WORKING CAPITAL</span><span>${pFmt(workingCapital)||"$0"}</span></div>
 <div class="net"><span>NET WORTH</span><span>${pFmt(netWorth)||"$0"}</span></div>
