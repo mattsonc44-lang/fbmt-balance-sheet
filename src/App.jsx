@@ -12921,7 +12921,6 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             <span className="fp-col-label" style={{width:80}}>Wt / Head</span>
             <span className="fp-col-label" style={{width:95}}>Price</span>
             <span className="fp-col-label" style={{width:70}}>Basis</span>
-            <span className="fp-col-label" style={{width:110,textAlign:'right'}}>Row Value</span>
             <span className="fp-col-label" style={{width:60}}>Share%</span>
             <span style={{width:32}}></span>
           </div>
@@ -12932,7 +12931,12 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             if (numVal(r.number) > 0) hintParts.push(`${numVal(r.number)} hd`);
             if (basis !== 'head' && numVal(r.weightPerHd) > 0) hintParts.push(`${numVal(r.weightPerHd)} lb`);
             if (numVal(r.pricePerUnit) > 0) hintParts.push(`$${r.pricePerUnit}/${basis === 'head' ? 'hd' : basis}`);
-            const hint = hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' + fmt(rowVal) : '';
+            // Show hint whenever we have a non-zero row value — covers both
+            // the detailed-inputs case and any legacy lump-sum rows whose
+            // `value` field was saved before the breakout.
+            const hint = rowVal > 0
+              ? (hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' : 'Row total: ') + fmt(rowVal)
+              : '';
             return (
               <div key={i} className="fp-row" data-rowkey={`livestockMarket-${i}`} style={{gap:6}}>
                 <span className="row-num">{i+1}</span>
@@ -12968,15 +12972,6 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     <option value="cwt">/cwt</option>
                     <option value="lb">/lb</option>
                   </select>
-                </div>
-                <div className="input-group" style={{width:110,flexShrink:0}}>
-                  <div className="input-wrap" title="Row value. Auto-computes from the detailed inputs above, or type in a lump-sum override.">
-                    <span className="prefix">$</span>
-                    <input type="text" value={rowVal > 0 ? Math.round(rowVal).toLocaleString() : (r.value||'')}
-                      readOnly={rowVal > 0 && !(numVal(r.value) > 0 && numVal(r.number) === 0)}
-                      style={{textAlign:'right',background:rowVal>0?'#f0fdf4':'white'}}
-                      onChange={e=>setArr("livestockMarket",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
-                  </div>
                 </div>
                 <div className="input-group" style={{width:60,flexShrink:0}}>
                   <div className="input-wrap">
@@ -13156,7 +13151,6 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             <span className="fp-col-label" style={{width:70}}># Head</span>
             <span className="fp-col-label" style={{flex:1,minWidth:160}}>Kind</span>
             <span className="fp-col-label" style={{width:120}}>Value / Head</span>
-            <span className="fp-col-label" style={{width:120,textAlign:'right'}}>Row Value</span>
             <span className="fp-col-label" style={{width:60}}>Share%</span>
             <span style={{width:32}}></span>
           </div>
@@ -13165,7 +13159,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             const hintParts = [];
             if (numVal(r.number) > 0) hintParts.push(`${numVal(r.number)} hd`);
             if (numVal(r.valuePerHd) > 0) hintParts.push(`$${r.valuePerHd}/hd`);
-            const hint = hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' + fmt(rowVal) : '';
+            const hint = rowVal > 0
+              ? (hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' : 'Row total: ') + fmt(rowVal)
+              : '';
             return (
               <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`} style={{gap:6}}>
                 <span className="row-num">{i+1}</span>
@@ -13180,20 +13176,11 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     onChange={e=>setArr("breedingStock",i,"kind",e.target.value)} />
                 </div>
                 <div className="input-group" style={{width:120,flexShrink:0}}>
-                  <div className="input-wrap" title="Average value per head. Row value = # head × this.">
+                  <div className="input-wrap" title="Average value per head. Row total shows below the row as # head × this.">
                     <span className="prefix">$</span>
                     <input type="text" value={r.valuePerHd||''} placeholder="0.00"
                       onChange={e=>setArr("breedingStock",i,"valuePerHd",e.target.value.replace(/[^0-9.]/g,""))} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:11}}>/hd</span>
-                  </div>
-                </div>
-                <div className="input-group" style={{width:120,flexShrink:0}}>
-                  <div className="input-wrap" title="Row value. Auto-computes when # head × $/head are both entered; otherwise accepts a lump-sum override.">
-                    <span className="prefix">$</span>
-                    <input type="text" value={rowVal > 0 ? Math.round(rowVal).toLocaleString() : (r.value||'')}
-                      readOnly={rowVal > 0 && !(numVal(r.value) > 0 && numVal(r.number) === 0)}
-                      style={{textAlign:'right',background:rowVal>0?'#f0fdf4':'white'}}
-                      onChange={e=>setArr("breedingStock",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:60,flexShrink:0}}>
