@@ -11824,17 +11824,41 @@ Rules:
     const _depVal = r => n(r.value) * (1 - Math.max(0, Math.min(100, n(r.depreciation)))/100);
     const vehiclesVal = (d.vehicles||[]).reduce((s,r)=>s+_depVal(r),0);
     const machVal = (d.machinery||[]).reduce((s,r)=>s+_depVal(r),0);
+    // Market livestock + breeding stock use detailed head/wt/price inputs; fall
+    // back to r.value only when no computed total is available. Keep in sync
+    // with marketLineValue/breedingLineValue in the wizard.
+    const _mktLs = r => {
+      const head = n(r.number), wt = n(r.weightPerHd), price = n(r.pricePerUnit);
+      const basis = r.priceBasis || (wt > 0 ? 'cwt' : 'head');
+      let c = 0;
+      if (head > 0 && price > 0) {
+        if (basis === 'head') c = head * price;
+        else if (basis === 'lb') c = head * wt * price;
+        else if (basis === 'cwt') c = head * (wt/100) * price;
+      }
+      return (c > 0 ? c : n(r.value)) * (n(r.share||'100')/100);
+    };
+    const _brLs = r => {
+      const head = n(r.number), vph = n(r.valuePerHd);
+      const c = head * vph;
+      return (c > 0 ? c : n(r.value)) * (n(r.share||'100')/100);
+    };
+    const _reVal = r => {
+      const basis = r.valueBasis || 'acre';
+      const vpu = n(r.valuePerAcre);
+      return basis === 'acre' ? n(r.acres) * vpu : vpu;
+    };
     const totalCurrentAssets = n(d.cashGlacier)
       +(d.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.receivables||[]).reduce((s,r)=>s+n(r.amount),0)
       +(d.federalPayments||[]).reduce((s,r)=>s+n(r.amount),0)
-      +(d.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0)
+      +(d.livestockMarket||[]).reduce((s,r)=>s+_mktLs(r),0)
       +(d.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||'100')/100),0)
       +(d.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
       +(d.supplies||[]).reduce((s,r)=>s+n(r.value),0)
       +(d.otherCurrent||[]).reduce((s,r)=>s+n(r.amount),0);
-    const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+n(r.value),0)
-      +(d.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0)
+    const totalLTAssets = (d.breedingStock||[]).reduce((s,r)=>s+_brLs(r),0)
+      +(d.realEstate||[]).reduce((s,r)=>s+_reVal(r),0)
       +vehiclesVal+machVal+(d.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0)
       +linkedEntityVal;
     const totalAssets = totalCurrentAssets + totalLTAssets;
@@ -11948,15 +11972,15 @@ ${(Array.isArray(d.federalPayments)?d.federalPayments:[{program:"Federal Payment
 ${blank(d.farmProducts.filter(r=>r.kind),3).map(r=>{const sh=numVal(r.share||"100");const val=numVal(r.quantity)*numVal(r.pricePerUnit)*(sh/100);const tags=[];if(sh<100)tags.push(sh+"% share");if(r.contracted)tags.push("contracted");return`<div class="trow"><span class="c1">${r.quantity?r.quantity+" "+r.unit:""}</span><span class="c2">${r.kind||""}${tags.length?" ("+tags.join(", ")+")":""}</span><span class="c3">${r.pricePerUnit?"$"+r.pricePerUnit+"/"+r.unit:""}</span><span class="c5">${pFmt(val)}</span></div>`;}).join("")}
 <div class="sec">Growing Crops:</div>
 ${blank(d.cropInvestment.filter(r=>r.cropType),2).map(r=>`<div class="trow"><span class="c1">${r.cropType||""}</span><span class="c2">${r.acres?" acres: "+r.acres:""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
-${(d.livestockMarket||[]).filter(r=>r.kind||r.value).length>0?`<div class="sec">Market Livestock:</div>${(d.livestockMarket||[]).filter(r=>r.kind||r.value).map(r=>`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}`:""}
+${(d.livestockMarket||[]).filter(r=>r.kind||_mktLs(r)>0).length>0?`<div class="sec">Market Livestock:</div>${(d.livestockMarket||[]).filter(r=>r.kind||_mktLs(r)>0).map(r=>{const sh=numVal(r.share||"100");const basis=r.priceBasis||(numVal(r.weightPerHd)>0?"cwt":"head");const bits=[];if(numVal(r.weightPerHd)>0&&basis!=="head")bits.push(numVal(r.weightPerHd)+" lb");if(numVal(r.pricePerUnit)>0)bits.push("$"+r.pricePerUnit+"/"+(basis==="head"?"hd":basis));if(sh<100)bits.push(sh+"% share");const tag=bits.length?" ("+bits.join(", ")+")":"";return`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}${tag}</span><span class="c5">${pFmt(_mktLs(r))}</span></div>`;}).join("")}`:""}
 ${(d.supplies||[]).filter(r=>r.description||r.value).length>0?`<div class="sec">Supplies & Prepaid:</div>${(d.supplies||[]).filter(r=>r.description||r.value).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.value)}</span></div>`).join("")}`:""}
 ${(d.otherCurrent||[]).filter(r=>r.description||r.amount).length>0?`<div class="sec">Other Current Assets:</div>${(d.otherCurrent||[]).filter(r=>r.description||r.amount).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
 <div class="subtot"><span>TOTAL CURRENT ASSETS:</span><span>${pFmt(totalCurrentAssets)||"$0"}</span></div>
 <div class="sec">Breeding Stock:</div>
-${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}</span><span class="c5">${pFmt(r.value)}</span></div>`).join("")}
+${blank(d.breedingStock.filter(r=>r.kind),3).map(r=>{const sh=numVal(r.share||"100");const bits=[];if(numVal(r.valuePerHd)>0)bits.push("$"+r.valuePerHd+"/hd");if(sh<100)bits.push(sh+"% share");const tag=bits.length?" ("+bits.join(", ")+")":"";return`<div class="trow"><span class="c1">${r.number||""}</span><span class="c2">${r.kind||""}${tag}</span><span class="c5">${pFmt(_brLs(r))}</span></div>`;}).join("")}
 <div class="sec">Real Estate:</div>
 <div class="trow th"><span class="c1">Acres</span><span class="c2">Type</span><span class="c3">$/Acre</span><span class="c5">Total Value</span></div>
-${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+"/ac":""}</span><span class="c5">${pFmt(numVal(r.acres)*numVal(r.valuePerAcre))}</span></div>`).join("")}
+${blank(d.realEstate.filter(r=>r.reType||r.acres),3).map(r=>{const basis=r.valueBasis||"acre";const unit=basis==="acre"?"/ac":basis==="lot"?"/lot":"";return`<div class="trow"><span class="c1">${r.acres?r.acres+" ac":""}</span><span class="c2">${r.reType||""}</span><span class="c3">${r.valuePerAcre?"$"+r.valuePerAcre+unit:""}</span><span class="c5">${pFmt(_reVal(r))}</span></div>`;}).join("")}
 <div class="row"><span>Titled Vehicles: (see schedule pg. 2)</span><span>${pFmt(vehiclesVal)}</span></div>
 <div class="row"><span>Machinery and Equipment: (see schedule pg. 2)</span><span>${pFmt(machVal)}</span></div>
 ${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).length>0?`<div class="sec">Other Assets:</div>${(d.otherAssets||[]).filter(r=>r.description||numVal(r.amount)).map(r=>`<div class="row"><span>${r.description||""}</span><span>${pFmt(r.amount)}</span></div>`).join("")}`:""}
