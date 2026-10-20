@@ -12914,7 +12914,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         <div className="step-content">
           <SecHdr icon="🐄" title="Market Livestock" subtitle="Livestock intended for sale — enter # head × wt × price, or $/head directly" />
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="livestockMarket" label="livestock" /></div>
-          <div className="fp-header-row" style={{gap:6}}>
+          <div className="fp-header-row" style={{gap:6,padding:'0 12px'}}>
             <span style={{width:20}}></span>
             <span className="fp-col-label" style={{width:70}}># Head</span>
             <span className="fp-col-label" style={{flex:1,minWidth:140}}>Kind</span>
@@ -12935,7 +12935,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             const calc = hintParts.length >= 2 ? hintParts.join(' × ') : '';
             const shareNum = numVal(r.share||'100');
             return (
-              <div key={i} className="fp-row" data-rowkey={`livestockMarket-${i}`} style={{gap:6}}>
+              <div key={i} className="fp-row" data-rowkey={`livestockMarket-${i}`} style={{gap:6,flexWrap:'wrap'}}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
                   <div className="input-wrap">
@@ -13153,7 +13153,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           <SecHdr icon="🐂" title="Breeding Stock" subtitle="Cattle, horses, hogs, sheep kept for breeding — enter # head × $/head" />
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}><CollBulk field="breedingStock" label="breeding stock" /></div>
           <p className="phase-badge">Intermediate and Long-Term Assets</p>
-          <div className="fp-header-row" style={{gap:6}}>
+          <div className="fp-header-row" style={{gap:6,padding:'0 12px'}}>
             <span style={{width:20}}></span>
             <span className="fp-col-label" style={{width:70}}># Head</span>
             <span className="fp-col-label" style={{flex:1,minWidth:160}}>Kind</span>
@@ -13170,7 +13170,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             const calc = hintParts.length >= 2 ? hintParts.join(' × ') : '';
             const shareNum = numVal(r.share||'100');
             return (
-              <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`} style={{gap:6}}>
+              <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`} style={{gap:6,flexWrap:'wrap'}}>
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
                   <div className="input-wrap">
