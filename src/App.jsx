@@ -12922,6 +12922,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             <span className="fp-col-label" style={{width:95}}>Price</span>
             <span className="fp-col-label" style={{width:70}}>Basis</span>
             <span className="fp-col-label" style={{width:60}}>Share%</span>
+            <span className="fp-col-label" style={{width:48,textAlign:'center'}}>Coll</span>
             <span style={{width:32}}></span>
           </div>
           {data.livestockMarket.map((r,i) => {
@@ -13158,6 +13159,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             <span className="fp-col-label" style={{flex:1,minWidth:160}}>Kind</span>
             <span className="fp-col-label" style={{width:120}}>Value / Head</span>
             <span className="fp-col-label" style={{width:60}}>Share%</span>
+            <span className="fp-col-label" style={{width:48,textAlign:'center'}}>Coll</span>
             <span style={{width:32}}></span>
           </div>
           {data.breedingStock.map((r,i) => {
