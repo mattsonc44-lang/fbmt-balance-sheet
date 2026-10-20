@@ -12931,12 +12931,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             if (numVal(r.number) > 0) hintParts.push(`${numVal(r.number)} hd`);
             if (basis !== 'head' && numVal(r.weightPerHd) > 0) hintParts.push(`${numVal(r.weightPerHd)} lb`);
             if (numVal(r.pricePerUnit) > 0) hintParts.push(`$${r.pricePerUnit}/${basis === 'head' ? 'hd' : basis}`);
-            // Show hint whenever we have a non-zero row value — covers both
-            // the detailed-inputs case and any legacy lump-sum rows whose
-            // `value` field was saved before the breakout.
-            const hint = rowVal > 0
-              ? (hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' : 'Row total: ') + fmt(rowVal)
-              : '';
+            const calc = hintParts.length >= 2 ? hintParts.join(' × ') : '';
+            const shareNum = numVal(r.share||'100');
             return (
               <div key={i} className="fp-row" data-rowkey={`livestockMarket-${i}`} style={{gap:6}}>
                 <span className="row-num">{i+1}</span>
@@ -12982,9 +12978,19 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 </div>
                 <CollChk field="livestockMarket" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("livestockMarket",i)}>x</button>
-                {hint && (
-                  <div style={{flexBasis:'100%',marginLeft:28,marginTop:-4,fontSize:10,color:'#6b7280'}}>
-                    {hint}{numVal(r.share||'100') < 100 ? ` · share ${numVal(r.share||'100')}% = ${fmt(rowVal * (numVal(r.share||'100')/100))}` : ''}
+                {rowVal > 0 && (
+                  <div style={{flexBasis:'100%',marginLeft:28,marginTop:2,marginBottom:4,display:'flex',alignItems:'baseline',gap:12}}>
+                    <div style={{fontSize:17,fontWeight:700,color:'#15803d',lineHeight:1.1}}>
+                      {fmt(rowVal)}
+                    </div>
+                    {calc && (
+                      <div style={{fontSize:11,color:'#6b7280'}}>= {calc}</div>
+                    )}
+                    {shareNum < 100 && (
+                      <div style={{fontSize:11,color:'#4a0810',fontWeight:600}}>
+                        · share {shareNum}% → {fmt(rowVal * (shareNum/100))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -13159,9 +13165,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             const hintParts = [];
             if (numVal(r.number) > 0) hintParts.push(`${numVal(r.number)} hd`);
             if (numVal(r.valuePerHd) > 0) hintParts.push(`$${r.valuePerHd}/hd`);
-            const hint = rowVal > 0
-              ? (hintParts.length >= 2 ? hintParts.join(' × ') + ' = ' : 'Row total: ') + fmt(rowVal)
-              : '';
+            const calc = hintParts.length >= 2 ? hintParts.join(' × ') : '';
+            const shareNum = numVal(r.share||'100');
             return (
               <div key={i} className="fp-row" data-rowkey={`breedingStock-${i}`} style={{gap:6}}>
                 <span className="row-num">{i+1}</span>
@@ -13192,9 +13197,19 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 </div>
                 <CollChk field="breedingStock" i={i} r={r} />
                 <button className="remove-btn" onClick={()=>removeRow("breedingStock",i)}>x</button>
-                {hint && (
-                  <div style={{flexBasis:'100%',marginLeft:28,marginTop:-4,fontSize:10,color:'#6b7280'}}>
-                    {hint}{numVal(r.share||'100') < 100 ? ` · share ${numVal(r.share||'100')}% = ${fmt(rowVal * (numVal(r.share||'100')/100))}` : ''}
+                {rowVal > 0 && (
+                  <div style={{flexBasis:'100%',marginLeft:28,marginTop:2,marginBottom:4,display:'flex',alignItems:'baseline',gap:12}}>
+                    <div style={{fontSize:17,fontWeight:700,color:'#15803d',lineHeight:1.1}}>
+                      {fmt(rowVal)}
+                    </div>
+                    {calc && (
+                      <div style={{fontSize:11,color:'#6b7280'}}>= {calc}</div>
+                    )}
+                    {shareNum < 100 && (
+                      <div style={{fontSize:11,color:'#4a0810',fontWeight:600}}>
+                        · share {shareNum}% → {fmt(rowVal * (shareNum/100))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
