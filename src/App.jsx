@@ -13674,21 +13674,21 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
       case "re_debt": return (
         <div className="step-content">
           <SecHdr icon="🏠" title="Real Estate Debt"
-            subtitle="One row per mortgage. The annual payment auto-flows to current-portion liabilities; the remaining balance (principal − annual pmt) flows to long-term — printed in the correct sections automatically."
+            subtitle="One row per mortgage. Current portion = accrued interest + principal reduction from the next payment; the remaining principal flows to long-term."
             color="#4a0810" />
           {(data.reDebt||[]).map((r,i) => {
             const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
             const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
-            const currentPortion = n(r.annualPmt);
-            const ltPortion = Math.max(0, n(r.principal) - currentPortion);
-            // Accrued interest = unpaid interest sitting on the loan as of the
-            // as-of date. Next payment splits into principal reduction +
-            // accrued interest, so the lender sees a true picture of where
-            // the next cash check goes. If accruedInterest is blank, we fall
-            // back to a straight-line estimate (principal × rate × ½) just
-            // so the breakdown isn't blank on a fresh row.
+            // Accrued interest = unpaid interest owed as of the as-of date.
+            // Next payment covers interest first, then reduces principal:
+            //   principalPmt = max(0, annualPmt − accruedInt)
+            //   LT balance   = principal − principalPmt
+            //   Current liab = accruedInt + principalPmt  (interest owed +
+            //                  principal coming off in next 12 months)
             const accruedInt = n(r.accruedInterest);
-            const principalPmt = Math.max(0, currentPortion - accruedInt);
+            const principalPmt = Math.max(0, n(r.annualPmt) - accruedInt);
+            const currentPortion = accruedInt + principalPmt;
+            const ltPortion = Math.max(0, n(r.principal) - principalPmt);
             return (
             <div key={i} className="row-entry" data-rowkey={`reDebt-${i}`} style={{alignItems:'flex-end',flexWrap:'wrap'}}>
               <span className="row-num">{i+1}</span>
