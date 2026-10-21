@@ -665,6 +665,10 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
     } else if (e.key === "Escape") {
       e.stopPropagation();
       setOpen(false);
+    } else if (e.key === "Tab") {
+      // Close the suggestions synchronously so the next render doesn't
+      // repaint them under the newly-focused field.
+      setOpen(false);
     }
   };
 
@@ -816,6 +820,8 @@ function ExpenseDropdown({ value, onChange, expenseList, placeholder }) {
       }
     } else if (e.key === "Escape") {
       e.stopPropagation();
+      setOpen(false);
+    } else if (e.key === "Tab") {
       setOpen(false);
     }
   };
