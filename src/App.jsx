@@ -1257,8 +1257,32 @@ function BudgetView({
   budgetTotalExpenses, budgetNetIncome,
   setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
 }) {
+  // Enter inside a budget row → add a fresh row of the same kind and jump
+  // focus to its first field. Matches the balance-sheet wizard's shortcut so
+  // the lender can rip through crop/livestock/misc/expense lines without
+  // reaching for the mouse.
+  const budgetEnterHandler = (e) => {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (!t || t.tagName !== 'INPUT') return;
+    if (['submit','button','checkbox','radio'].includes(t.type)) return;
+    if (t.dataset && t.dataset.noAdvance === 'true') return;
+    const rowEl = t.closest('[data-rowkey]');
+    if (!rowEl) return;
+    const key = (rowEl.getAttribute('data-rowkey') || '').replace(/-\d+$/, '');
+    const defaults = {
+      budgetCrops:{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""},
+      budgetLivestock:{head:"",type:"",lbs:"",price:"",share:"100"},
+      budgetMisc:{description:"",amount:""},
+      budgetExpenses:{description:"",amount:"",prepaid:false},
+      budgetProposedDebt:{description:"",annualPmt:""},
+    };
+    if (!defaults[key]) return;
+    e.preventDefault();
+    addRow(key, defaults[key]);
+  };
   return (
-    <div className="budget-wrap">
+    <div className="budget-wrap" onKeyDown={budgetEnterHandler}>
       <div className="budget-section">
         <div className="budget-section-head income-head">
           <span>INCOME</span>
