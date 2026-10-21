@@ -1246,7 +1246,8 @@ function RunningTotal({ assets, liabilities }) {
 // ─── BudgetView ───────────────────────────────────────────────────────────────
 function BudgetView({
   data, budgetCropTotal, budgetLivestockTotal, budgetMiscTotal,
-  budgetTotalIncome, budgetOperatingExpenses, budgetPrepaidTotal,
+  budgetTotalIncome, budgetOperatingExpenses, budgetOperatingExpensesBase,
+  budgetInterestRate, budgetInterestExpense, budgetPrepaidTotal,
   debtServiceTerms, debtServiceRE,
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
@@ -1255,7 +1256,7 @@ function BudgetView({
   toggleInsurance,
   corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
-  setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
+  set, setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
 }) {
   // Enter inside a budget row → add a fresh row of the same kind and jump
   // focus to its first field. Matches the balance-sheet wizard's shortcut so
@@ -1583,6 +1584,26 @@ function BudgetView({
             onClick={() => addRow("budgetExpenses",{description:"",amount:"",prepaid:false})}>
             + Add Custom Expense
           </button>
+          {/* Auto-calculated interest expense. Rate (%) applied to the base
+              operating expenses only — debt service lines are excluded. */}
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',marginTop:8,
+            background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6}}>
+            <div style={{flex:1,fontSize:13,color:'#78350f',fontWeight:600}}>
+              Interest Expense (operating line)
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:4}}>
+              <input type="text" value={data.budgetInterestRate ?? '7'}
+                onChange={e => set && set('budgetInterestRate', e.target.value.replace(/[^0-9.]/g,''))}
+                style={{width:50,border:'1.5px solid #d97706',borderRadius:5,padding:'4px 6px',fontSize:13,textAlign:'right',fontFamily:'inherit'}} />
+              <span style={{fontSize:12,color:'#78350f',fontWeight:600}}>%</span>
+            </div>
+            <div style={{minWidth:100,textAlign:'right',fontSize:14,fontWeight:700,color:'#78350f'}}>
+              {fmt(budgetInterestExpense)}
+            </div>
+          </div>
+          <div style={{fontSize:11,color:'#92400e',padding:'2px 10px 0',fontStyle:'italic'}}>
+            {budgetInterestRate}% × {fmt(budgetOperatingExpensesBase)} base operating (debt service excluded)
+          </div>
           <div className="budget-subtotal">
             <span>Total Operating Expenses</span>
             <strong>{fmt(budgetOperatingExpenses)}</strong>
@@ -10296,8 +10317,19 @@ Question: ${q}`,
   const budgetTotalIncome = budgetCropTotal + budgetLivestockTotal + budgetMiscTotal;
   // Insurance scenario: crop income replaced by the insurance guarantee total
   const budgetTotalIncomeInsured = budgetInsuranceTotal + budgetLivestockTotal + budgetMiscTotal;
-  const budgetOperatingExpenses = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  // Operating expenses — user-entered rows. Interest expense is derived
+  // separately below (not stored as a row) so a lender rate change doesn't
+  // require editing the budget line.
+  const budgetOperatingExpensesBase = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
+  // Derived interest expense. Rate (%) is stored on the sheet; applied to the
+  // base operating expenses only — debt service is intentionally excluded.
+  // Default to 7% on brand-new sheets where the rate hasn't been set yet.
+  const budgetInterestRate = (data.budgetInterestRate === '' || data.budgetInterestRate == null)
+    ? 7
+    : n(data.budgetInterestRate);
+  const budgetInterestExpense = budgetOperatingExpensesBase * (budgetInterestRate / 100);
+  const budgetOperatingExpenses = budgetOperatingExpensesBase + budgetInterestExpense;
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   // Pull RE debt from BOTH the legacy reCurrent array AND the unified reDebt
   // array. reDebt uses lienHolder instead of creditor; the filter accepts
@@ -16599,6 +16631,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               budgetMiscTotal={budgetMiscTotal}
               budgetTotalIncome={budgetTotalIncome}
               budgetOperatingExpenses={budgetOperatingExpenses}
+              budgetOperatingExpensesBase={budgetOperatingExpensesBase}
+              budgetInterestRate={budgetInterestRate}
+              budgetInterestExpense={budgetInterestExpense}
               budgetPrepaidTotal={budgetPrepaidTotal}
               debtServiceTerms={debtServiceTerms}
               debtServiceRE={debtServiceRE}
@@ -16614,6 +16649,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
+              set={set}
               setArr={setArr}
               removeRow={removeRow}
               addRow={addRow}
