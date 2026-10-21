@@ -696,7 +696,9 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
           border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
           zIndex:999,maxHeight:200,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
           {items.map((item,idx) => (
-            <div key={item.id} onMouseDown={() => select(item)} onMouseEnter={() => setHighlight(idx)}
+            <div key={item.id}
+              ref={el => { if (el && idx === highlight) el.scrollIntoView({block:'nearest'}); }}
+              onMouseDown={() => select(item)} onMouseEnter={() => setHighlight(idx)}
               style={{padding:"7px 12px",cursor:"pointer",fontSize:".85rem",
                 background:idx===highlight?"#f5e8ea":"white",
                 color:idx===highlight?"#6B0E1E":"#1a1a1a",
