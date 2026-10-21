@@ -633,15 +633,39 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
     .filter(p => p.name && (!query || p.name.toLowerCase().includes(query.toLowerCase())))
     .sort((a,b) => a.name.localeCompare(b.name));
 
+  // The typed text is a "custom" entry when it doesn't match any item in the
+  // list even as a substring — i.e. the lender is adding something new.
+  const isCustom = !!query && items.length === 0;
+
   const select = (item) => { onChange(item.name); setQuery(item.name); setOpen(false); setHighlight(0); };
 
   const onKeyDown = (e) => {
-    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) { setOpen(true); setHighlight(0); return; }
+    // Keep key events scoped to this dropdown — the global wizard handler
+    // reacts to Enter and shouldn't open a new row while the dropdown is
+    // being navigated.
+    if (!open && e.key === "ArrowDown" && items.length > 0) {
+      e.preventDefault(); e.stopPropagation();
+      setOpen(true); setHighlight(0);
+      return;
+    }
     if (!open) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); setHighlight(h => Math.min(h+1, items.length-1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight(h => Math.max(h-1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (items[highlight]) select(items[highlight]); }
-    else if (e.key === "Escape") { setOpen(false); }
+    if (e.key === "ArrowDown") {
+      e.preventDefault(); e.stopPropagation();
+      setHighlight(h => Math.min(h+1, items.length-1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault(); e.stopPropagation();
+      setHighlight(h => Math.max(h-1, 0));
+    } else if (e.key === "Enter") {
+      // Only intercept Enter when the highlight is on a real list item —
+      // otherwise let the global Enter handler run (add new row).
+      if (items[highlight]) {
+        e.preventDefault(); e.stopPropagation();
+        select(items[highlight]);
+      }
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      setOpen(false);
+    }
   };
 
   return (
@@ -649,13 +673,25 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
       <input className="text-input" type="text" value={query}
         placeholder={placeholder || "Type or select..."}
         autoComplete="off"
-        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setHighlight(0); }}
-        onFocus={() => { setOpen(true); setHighlight(0); }}
+        onChange={e => {
+          const v = e.target.value;
+          setQuery(v);
+          onChange(v);
+          // Hide the list once the typed text doesn't match anything — the
+          // lender is clearly entering a custom product.
+          const match = commodityPrices.some(p =>
+            (!category || p.category === category) && p.name &&
+            (!v || p.name.toLowerCase().includes(v.toLowerCase()))
+          );
+          setOpen(!!v && match);
+          setHighlight(0);
+        }}
+        onFocus={() => { if (items.length > 0) { setOpen(true); setHighlight(0); } }}
         onKeyDown={onKeyDown}
         style={{width:"100%",paddingRight:22}} />
       <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
         fontSize:9,color:"#aaa",pointerEvents:"none",lineHeight:1}}>▼</span>
-      {open && items.length > 0 && (
+      {open && !isCustom && items.length > 0 && (
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
           border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
           zIndex:999,maxHeight:200,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
