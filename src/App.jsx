@@ -792,15 +792,32 @@ function ExpenseDropdown({ value, onChange, expenseList, placeholder }) {
     .filter(e => e.name && (!query || e.name.toLowerCase().includes(query.toLowerCase())))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const isCustom = !!query && items.length === 0;
+
   const select = (item) => { onChange(item.name); setQuery(item.name); setOpen(false); setHighlight(0); };
 
   const onKeyDown = (e) => {
-    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) { setOpen(true); setHighlight(0); return; }
+    if (!open && e.key === "ArrowDown" && items.length > 0) {
+      e.preventDefault(); e.stopPropagation();
+      setOpen(true); setHighlight(0);
+      return;
+    }
     if (!open) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); setHighlight(h => Math.min(h+1, items.length-1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight(h => Math.max(h-1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (items[highlight]) select(items[highlight]); }
-    else if (e.key === "Escape") { setOpen(false); }
+    if (e.key === "ArrowDown") {
+      e.preventDefault(); e.stopPropagation();
+      setHighlight(h => Math.min(h+1, items.length-1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault(); e.stopPropagation();
+      setHighlight(h => Math.max(h-1, 0));
+    } else if (e.key === "Enter") {
+      if (items[highlight]) {
+        e.preventDefault(); e.stopPropagation();
+        select(items[highlight]);
+      }
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      setOpen(false);
+    }
   };
 
   return (
@@ -808,18 +825,28 @@ function ExpenseDropdown({ value, onChange, expenseList, placeholder }) {
       <input className="text-input" type="text" value={query}
         placeholder={placeholder || "Type or select expense..."}
         autoComplete="off"
-        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setHighlight(0); }}
-        onFocus={() => { setOpen(true); setHighlight(0); }}
+        onChange={e => {
+          const v = e.target.value;
+          setQuery(v); onChange(v);
+          const match = (expenseList || []).some(x => x.name &&
+            (!v || x.name.toLowerCase().includes(v.toLowerCase())));
+          setOpen(!!v && match);
+          setHighlight(0);
+        }}
+        onFocus={() => { if (items.length > 0) { setOpen(true); setHighlight(0); } }}
+        onBlur={() => { setTimeout(() => setOpen(false), 120); }}
         onKeyDown={onKeyDown}
         style={{width:"100%", paddingRight:22}} />
       <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
         fontSize:9,color:"#aaa",pointerEvents:"none",lineHeight:1}}>▼</span>
-      {open && items.length > 0 && (
+      {open && !isCustom && items.length > 0 && (
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",
           border:"1.5px solid #6B0E1E",borderTop:"none",borderRadius:"0 0 6px 6px",
           zIndex:999,maxHeight:220,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.15)"}}>
           {items.map((item, idx) => (
-            <div key={item.id} onMouseDown={() => select(item)} onMouseEnter={() => setHighlight(idx)}
+            <div key={item.id}
+              ref={el => { if (el && idx === highlight) el.scrollIntoView({block:'nearest'}); }}
+              onMouseDown={() => select(item)} onMouseEnter={() => setHighlight(idx)}
               style={{padding:"7px 12px",cursor:"pointer",fontSize:".85rem",
                 background:idx===highlight?"#f5e8ea":"white",
                 color:idx===highlight?"#6B0E1E":"#1a1a1a",
