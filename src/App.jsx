@@ -15862,6 +15862,12 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         body: JSON.stringify({
           sheet_key: caOpenShare.sheet_key,
           sheet_data: data,
+          // Current NW of this sheet. ca-save uses it to refresh any sibling
+          // ca_shares that reference THIS sheet's clientName as a linked
+          // entity, so when the CA edits (say) a corp sheet, the shared
+          // personal sheet's "Investment in Related Entities" updates on the
+          // next open instead of showing stale snapshot numbers.
+          nw_for_links: (totalAssets || 0) - (totalLiabilities || 0),
         }),
       });
       if (!resp.ok) {
