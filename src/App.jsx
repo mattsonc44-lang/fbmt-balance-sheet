@@ -10203,6 +10203,38 @@ Question: ${q}`,
     try { await storage.delete(key); await loadSavedList(); } catch {}
   };
 
+  // Rename a saved sheet in place — no need to open it in the wizard first.
+  // Reads the stored blob, rewrites `clientName`, writes under the new key,
+  // then deletes the old key. Keeps the as-of date so comparison history and
+  // any linked-entity references on OTHER sheets keep working.
+  const renameSheet = async (key, e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const row = savedSheets.find(s => s.key === key);
+    const curName = row ? row.clientName : '';
+    const next = window.prompt('Rename this balance sheet to:', curName);
+    if (next == null) return;
+    const newName = next.trim();
+    if (!newName || newName === curName) return;
+    try {
+      const item = await storage.get(key);
+      if (!item) { alert('Could not load the sheet.'); return; }
+      const sheet = JSON.parse(item.value);
+      sheet.clientName = newName;
+      const newKey = makeKey(newName, sheet.asOfDate || row.asOfDate);
+      if (newKey === key) { alert('Nothing to change.'); return; }
+      // Guard against overwriting an existing sheet at the new key.
+      const existing = savedSheets.find(s => s.key === newKey);
+      if (existing && !window.confirm(
+        `A sheet already exists for ${newName} as of ${existing.asOfDate}. Overwrite it?`
+      )) return;
+      await storage.set(newKey, JSON.stringify(sheet));
+      await storage.delete(key);
+      await loadSavedList();
+    } catch (err) {
+      alert('Rename failed: ' + (err && err.message ? err.message : String(err)));
+    }
+  };
+
   // ── Calculations ───────────────────────────────────────────────────────────
   const n = numVal;
   const cashTotal = n(data.cashGlacier) + data.cashOther.reduce((s,r)=>s+n(r.amount),0);
@@ -15794,6 +15826,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                         <div style={{textAlign:'right',display:'flex',justifyContent:'flex-end',gap:4,whiteSpace:'nowrap'}} onClick={e=>e.stopPropagation()}>
                           <button onClick={e=>{e.stopPropagation();loadSheet(s.key);}}
                             style={{background:'transparent',border:'none',color:'#6B0E1E',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Open</button>
+                          <button onClick={e=>{e.stopPropagation();renameSheet(s.key,e);}}
+                            title="Rename client without opening the sheet"
+                            style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Rename</button>
                           <button onClick={e=>{e.stopPropagation();setShowMoveModal(s.key);}}
                             style={{background:'transparent',border:'none',color:'#6b7280',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>Move</button>
                           <button onClick={e=>{e.stopPropagation();loadCAUsers();setShowShareCA(s.key);setSelectedCAUser('');}}
