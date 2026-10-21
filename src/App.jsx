@@ -1584,12 +1584,25 @@ function BudgetView({
             onClick={() => addRow("budgetExpenses",{description:"",amount:"",prepaid:false})}>
             + Add Custom Expense
           </button>
-          {/* Auto-calculated interest expense. Rate (%) applied to the base
-              operating expenses only — debt service lines are excluded. */}
-          <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',marginTop:8,
+          <div className="budget-subtotal">
+            <span>Total Operating Expenses</span>
+            <strong>{fmt(budgetOperatingExpenses)}</strong>
+          </div>
+          {budgetPrepaidTotal > 0 && (
+            <div style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",fontSize:".78rem",color:"#15803d",fontStyle:"italic"}}>
+              <span>Pre-paid (excluded from total): {fmt(budgetPrepaidTotal)}</span>
+            </div>
+          )}
+        </div>
+        {/* Interest Expense — stands alone between Operating and Debt Service.
+            Rate (%) × base operating expenses. Not part of the operating
+            subtotal, but rolls into Total Expenses and Borrower Margin. */}
+        <div className="budget-subsection">
+          <div className="budget-sub-label">Interest Expense</div>
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',
             background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6}}>
             <div style={{flex:1,fontSize:13,color:'#78350f',fontWeight:600}}>
-              Interest Expense (operating line)
+              Operating line interest
             </div>
             <div style={{display:'flex',alignItems:'center',gap:4}}>
               <input type="text" value={data.budgetInterestRate ?? '7'}
@@ -1605,14 +1618,9 @@ function BudgetView({
             {budgetInterestRate}% × {fmt(budgetOperatingExpensesBase)} base operating (debt service excluded)
           </div>
           <div className="budget-subtotal">
-            <span>Total Operating Expenses</span>
-            <strong>{fmt(budgetOperatingExpenses)}</strong>
+            <span>Total Interest</span>
+            <strong>{fmt(budgetInterestExpense)}</strong>
           </div>
-          {budgetPrepaidTotal > 0 && (
-            <div style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",fontSize:".78rem",color:"#15803d",fontStyle:"italic"}}>
-              <span>Pre-paid (excluded from total): {fmt(budgetPrepaidTotal)}</span>
-            </div>
-          )}
         </div>
         <div className="budget-subsection">
           <div className="budget-sub-label">
@@ -10329,7 +10337,11 @@ Question: ${q}`,
     ? 7
     : n(data.budgetInterestRate);
   const budgetInterestExpense = budgetOperatingExpensesBase * (budgetInterestRate / 100);
-  const budgetOperatingExpenses = budgetOperatingExpensesBase + budgetInterestExpense;
+  // Operating expenses now exclude the derived interest line — interest is a
+  // separate top-level expense category that still flows into Total Expenses
+  // and Borrower Margin, but doesn't inflate the operating total used for
+  // crop-level cost analysis.
+  const budgetOperatingExpenses = budgetOperatingExpensesBase;
   const debtServiceTerms = data.intermediatDebt.filter(r=>r.creditor && n(r.annualPmt)>0);
   // Pull RE debt from BOTH the legacy reCurrent array AND the unified reDebt
   // array. reDebt uses lienHolder instead of creditor; the filter accepts
@@ -10353,7 +10365,7 @@ Question: ${q}`,
   const budgetTotalDebtService = budgetTermDebtTotal + budgetREDebtTotal + budgetProposedDebtTotal;
   const budgetCorpDebtTotal = [...debtServiceTermsCorp,...debtServiceRECorp].reduce((s,r)=>s+n(r.annualPmt),0);
   const budgetPersonalDebtTotal = budgetTotalDebtService;
-  const budgetTotalExpenses = budgetOperatingExpenses + budgetTotalDebtService;
+  const budgetTotalExpenses = budgetOperatingExpenses + budgetInterestExpense + budgetTotalDebtService;
   const budgetNetIncome = budgetTotalIncome - budgetTotalExpenses;
   const budgetNetIncomeInsured = budgetTotalIncomeInsured - budgetTotalExpenses;
 
