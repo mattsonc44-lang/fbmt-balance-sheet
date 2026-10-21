@@ -687,6 +687,7 @@ function CommodityDropdown({ value, onChange, commodityPrices, category, placeho
           setHighlight(0);
         }}
         onFocus={() => { if (items.length > 0) { setOpen(true); setHighlight(0); } }}
+        onBlur={() => { setTimeout(() => setOpen(false), 120); }}
         onKeyDown={onKeyDown}
         style={{width:"100%",paddingRight:22}} />
       <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
