@@ -16304,16 +16304,117 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <div className="card-body">
                 <div className="card-content" ref={cardContentRef}
                   onKeyDown={e => {
-                    // Enter on any text-like input advances to the next step. Skip textareas
-                    // (Enter is a newline there), buttons/selects (Enter has native meaning),
-                    // and any element that explicitly opted out via data-no-advance.
-                    if (e.key !== 'Enter') return;
                     const t = e.target;
-                    if (!t || t.tagName !== 'INPUT') return;
-                    if (['submit','button','checkbox','radio'].includes(t.type)) return;
-                    if (t.dataset && t.dataset.noAdvance === 'true') return;
-                    e.preventDefault();
-                    if (step < STEPS.length - 1) next();
+                    // Ctrl/Cmd+S → save the whole sheet.
+                    if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      saveSheet();
+                      return;
+                    }
+                    // ─────────────────────────────────────────────────────────
+                    // Enter on a row input → "save the line": if the focus is
+                    // inside a repeating row (any element carrying
+                    // data-rowkey="field-i"), add a fresh blank row of that
+                    // kind so the user can keep typing without reaching for the
+                    // mouse. Focus moves to the first input of the new row
+                    // (handled by addRow's own focus timer). On non-row inputs
+                    // (client name, cashGlacier, etc.) Enter just blurs the
+                    // field as a soft commit — it no longer advances the step.
+                    // Textareas, selects, buttons, and anything that opted out
+                    // via data-no-advance keep native Enter behavior.
+                    // ─────────────────────────────────────────────────────────
+                    if (e.key === 'Enter') {
+                      if (!t || t.tagName !== 'INPUT') return;
+                      if (['submit','button','checkbox','radio'].includes(t.type)) return;
+                      if (t.dataset && t.dataset.noAdvance === 'true') return;
+                      e.preventDefault();
+                      const rowEl = t.closest('[data-rowkey]');
+                      if (rowEl) {
+                        const key = (rowEl.getAttribute('data-rowkey') || '').replace(/-\d+$/, '');
+                        const defaults = {
+                          accountsDue:{creditor:"",amount:""},
+                          breedingStock:{number:"",kind:"",valuePerHd:"",value:"",share:"100"},
+                          budgetCrops:{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""},
+                          budgetExpenses:{description:"",amount:"",prepaid:false},
+                          budgetLivestock:{head:"",type:"",lbs:"",price:"",share:"100"},
+                          budgetMisc:{description:"",amount:""},
+                          budgetProposedDebt:{description:"",annualPmt:""},
+                          cashOther:{institution:"",amount:""},
+                          cropInvestment:{cropType:"",acres:"",valuePerAcre:""},
+                          farmProducts:{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100",contracted:false},
+                          federalPayments:{program:"",amount:""},
+                          intermediatDebt:{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false},
+                          livestockMarket:{number:"",kind:"",weightPerHd:"",pricePerUnit:"",priceBasis:"cwt",value:"",share:"100"},
+                          machinery:{year:"",make:"",size:"",serial:"",condition:"",value:""},
+                          operatingNotes:{creditor:"",dueDate:"",pmt:"",balance:"",security:""},
+                          otherAssets:{description:"",amount:""},
+                          otherCurrent:{description:"",amount:""},
+                          otherCurrentLiab:{description:"",amount:""},
+                          otherLiabilities:{description:"",balance:""},
+                          reContracts:{description:"",amount:""},
+                          reDebt:{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false},
+                          reMortgages:{lienHolder:"",terms:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false},
+                          realEstate:{acres:"",reType:"",description:"",valuePerAcre:""},
+                          receivables:{description:"",amount:""},
+                          supplies:{description:"",value:""},
+                          vehicles:{year:"",make:"",vin:"",mileage:"",condition:"",value:"",depreciation:""},
+                        };
+                        if (defaults[key]) {
+                          addRow(key, defaults[key]);
+                          return;
+                        }
+                      }
+                      // Non-row input — just blur, so the value commits and the
+                      // user can press Enter again later without jumping steps.
+                      t.blur();
+                      return;
+                    }
+                    // ─────────────────────────────────────────────────────────
+                    // Tab trap. Keep focus inside the wizard card; when it would
+                    // leave the end of the step, advance to the next step and
+                    // focus its first interactive element. Shift+Tab at the top
+                    // walks back to the previous step. Never let Tab reach the
+                    // browser chrome / address bar.
+                    // ─────────────────────────────────────────────────────────
+                    if (e.key === 'Tab') {
+                      const root = cardContentRef.current;
+                      if (!root) return;
+                      const sel = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])';
+                      const focusables = Array.from(root.querySelectorAll(sel))
+                        .filter(el => el.offsetParent !== null && el.tabIndex !== -1);
+                      if (!focusables.length) return;
+                      const first = focusables[0];
+                      const last  = focusables[focusables.length - 1];
+                      if (!e.shiftKey && t === last) {
+                        e.preventDefault();
+                        if (step < STEPS.length - 1) {
+                          next();
+                          setTimeout(() => {
+                            const r = cardContentRef.current;
+                            if (!r) return;
+                            const fs = Array.from(r.querySelectorAll(sel))
+                              .filter(el => el.offsetParent !== null && el.tabIndex !== -1);
+                            fs[0] && fs[0].focus();
+                          }, 50);
+                        } else {
+                          first.focus(); // wrap on last step
+                        }
+                      } else if (e.shiftKey && t === first) {
+                        e.preventDefault();
+                        if (step > 0) {
+                          prev();
+                          setTimeout(() => {
+                            const r = cardContentRef.current;
+                            if (!r) return;
+                            const fs = Array.from(r.querySelectorAll(sel))
+                              .filter(el => el.offsetParent !== null && el.tabIndex !== -1);
+                            fs[fs.length - 1] && fs[fs.length - 1].focus();
+                          }, 50);
+                        } else {
+                          last.focus();
+                        }
+                      }
+                    }
                   }}>{renderStep()}</div>
                 <div className="card-nav">
                   <button className="btn btn-secondary" onClick={prev} disabled={step === 0} tabIndex={0}>Back</button>
