@@ -43,7 +43,7 @@ export const handler = async (event) => {
   let payload;
   try { payload = JSON.parse(event.body || '{}'); }
   catch { return err(400, 'Invalid JSON body'); }
-  const { sheet_key, sheet_data } = payload;
+  const { sheet_key, sheet_data, nw_for_links } = payload;
   if (!sheet_key || !sheet_data || typeof sheet_data !== 'object') return err(400, 'sheet_key and sheet_data are required');
 
   try {
@@ -170,6 +170,70 @@ export const handler = async (event) => {
         }
       );
     } catch { /* best-effort — write already succeeded */ }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Propagate linked-entity NW to sibling shares.
+    //
+    // The lender bakes a linkedEntityNWSnapshot into every share at share
+    // time so the CA sees "Investment in Related Entities" without needing
+    // read access to the lender's other clients' sheets. If the CA then
+    // edits one of those linked sheets (say the Corp), the sibling share for
+    // the Personal sheet still carries the pre-edit NW. Here we walk every
+    // active ca_share for this CA + this lender and, for each one whose
+    // sheet_data.linkedEntities references THIS sheet's client, update its
+    // linkedEntityNWSnapshot[name] to the fresh NW the client just sent.
+    // Best-effort — the primary write already succeeded.
+    // ──────────────────────────────────────────────────────────────────────
+    if (typeof nw_for_links === 'number' && isFinite(nw_for_links)) {
+      try {
+        const siblingResp = await fetch(
+          SUPABASE_URL + '/rest/v1/ca_shares'
+            + '?ca_user_id=eq.' + encodeURIComponent(caUserId)
+            + '&lender_user_id=eq.' + encodeURIComponent(lenderUserId)
+            + '&select=id,sheet_key,sheet_data',
+          { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }
+        );
+        if (siblingResp.ok) {
+          const siblings = await siblingResp.json();
+          const editedNameLower = newClientName.toLowerCase();
+          for (const sib of (siblings || [])) {
+            if (sib.sheet_key === sheet_key) continue; // skip the one we just saved
+            const sd = sib.sheet_data || {};
+            const linked = Array.isArray(sd.linkedEntities) ? sd.linkedEntities : [];
+            // linkedEntities entries can be strings or {name,...} — normalize.
+            const refs = linked.map(e => typeof e === 'string' ? e : (e && e.name) || '')
+                               .map(s => (s || '').trim());
+            const match = refs.find(n => n.toLowerCase() === editedNameLower);
+            if (!match) continue;
+            const nextSnap = { ...(sd.linkedEntityNWSnapshot || {}), [match]: nw_for_links };
+            // Also refresh the entity's full-sheet snapshot so a future diff
+            // or dashboard tile reads fresh numbers.
+            const nextSheetSnap = { ...(sd.linkedEntitySnapshots || {}) };
+            nextSheetSnap[match] = { data: savePayload, asOfDate: savePayload.asOfDate };
+            await fetch(
+              SUPABASE_URL + '/rest/v1/ca_shares?id=eq.' + encodeURIComponent(sib.id),
+              {
+                method: 'PATCH',
+                headers: {
+                  ...jsonHeaders,
+                  'apikey': SERVICE_ROLE,
+                  'Authorization': 'Bearer ' + SERVICE_ROLE,
+                  'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({
+                  sheet_data: {
+                    ...sd,
+                    linkedEntityNWSnapshot: nextSnap,
+                    linkedEntitySnapshots:  nextSheetSnap,
+                    _lastLinkedRefresh: nowIso,
+                  },
+                }),
+              }
+            );
+          }
+        }
+      } catch { /* best-effort */ }
+    }
 
     return ok({ ok: true, mode: existing.length ? 'update' : 'insert' });
   } catch (e) {
