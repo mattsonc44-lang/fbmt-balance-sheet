@@ -7325,7 +7325,7 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
                     <div style={{flex:1}}>
                       <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a'}}>{share.client_name}</div>
                       <div style={{fontSize:12,color:'#888',marginTop:2}}>
-                        Shared {new Date(share.shared_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                        Shared {new Date(share.shared_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}
                         {caEdits[share.id] && <span style={{marginLeft:8,background:'#fef3c7',color:'#92400e',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>Changes Pending Review</span>}
                         {lenderUpdates[share.id] && lenderUpdates[share.id].length > 0 && (
                           <span style={{marginLeft:8,background:'#dbeafe',color:'#1e40af',borderRadius:999,padding:'1px 8px',fontSize:11,fontWeight:700}}>
@@ -14459,6 +14459,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 {intermedCurrentPortion > 0 && <div className="ss-row"><span>Intermediate Debt (current portion)</span><span>{fmt(intermedCurrentPortion)}</span></div>}
                 {reCurrentTotal > 0 && <div className="ss-row"><span>RE Mortgage Current</span><span>{fmt(reCurrentTotal)}</span></div>}
                 {taxesDueVal > 0 && <div className="ss-row"><span>Income Taxes Due</span><span>{fmt(taxesDueVal)}</span></div>}
+                {otherCLTotal > 0 && <div className="ss-row"><span>Other Current Liabilities</span><span>{fmt(otherCLTotal)}</span></div>}
                 <div className="ss-subtotal"><span>Total Current Liabilities</span><span>{fmt(totalCurrentLiab)}</span></div>
               </div>
               <div className="summary-section">
@@ -14466,7 +14467,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 {intermedLTPortion > 0 && <div className="ss-row"><span>Intermediate Debt (LT portion)</span><span>{fmt(intermedLTPortion)}</span></div>}
                 {reMortTotal > 0 && <div className="ss-row"><span>RE Mortgages (LT)</span><span>{fmt(reMortTotal)}</span></div>}
                 {otherLiabTotal > 0 && <div className="ss-row"><span>Other Liabilities</span><span>{fmt(otherLiabTotal)}</span></div>}
-                <div className="ss-subtotal"><span>Total Long-Term</span><span>{fmt(reMortTotal+otherLiabTotal)}</span></div>
+                <div className="ss-subtotal"><span>Total Long-Term</span><span>{fmt(intermedLTPortion + reMortTotal + otherLiabTotal)}</span></div>
               </div>
               <div className="ss-total red-total"><span>TOTAL LIABILITIES</span><span>{fmt(totalLiabilities)}</span></div>
               <div className="net-section">
@@ -16042,7 +16043,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
     <div className="app">
       {caOpenShare && (
         <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13,gap:12,flexWrap:'wrap'}}>
-          <span>📝 <strong>CA Full-Edit Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}) — Edit any field. Click <strong>Save</strong> and the lender is notified of your changes.</span>
+          <span>📝 <strong>CA Full-Edit Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}{caOpenShare.shared_at ? ` on ${new Date(caOpenShare.shared_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}` : ''}) — Edit any field. Click <strong>Save</strong> and the lender is notified of your changes.</span>
           <div style={{display:'flex',gap:8}}>
             <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}
               style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
