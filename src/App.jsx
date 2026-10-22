@@ -10429,21 +10429,46 @@ Question: ${q}`,
   function sheetTotals(d) {
     if (!d) return {};
     const m = numVal;
+    // Row-level helpers — must match the wizard math exactly so a linked
+    // entity's NW here equals the NW shown on that entity's own sheet.
+    const _mktLs = r => {
+      const head = m(r.number), wt = m(r.weightPerHd), price = m(r.pricePerUnit);
+      const basis = r.priceBasis || (wt > 0 ? 'cwt' : 'head');
+      let c = 0;
+      if (head > 0 && price > 0) {
+        if (basis === 'head') c = head * price;
+        else if (basis === 'lb') c = head * wt * price;
+        else if (basis === 'cwt') c = head * (wt / 100) * price;
+      }
+      return (c > 0 ? c : m(r.value)) * (m(r.share || '100') / 100);
+    };
+    const _brLs = r => {
+      const head = m(r.number), vph = m(r.valuePerHd);
+      const c = head * vph;
+      return (c > 0 ? c : m(r.value)) * (m(r.share || '100') / 100);
+    };
+    const _reVal = r => {
+      const basis = r.valueBasis || 'acre';
+      const vpu = m(r.valuePerAcre);
+      return basis === 'acre' ? m(r.acres) * vpu : vpu;
+    };
+    const _depVal = r => m(r.value) * (1 - Math.max(0, Math.min(100, m(r.depreciation))) / 100);
+
     const cash = m(d.cashGlacier) + (d.cashOther||[]).reduce((s,r)=>s+m(r.amount),0);
     const rec = (d.receivables||[]).reduce((s,r)=>s+m(r.amount),0);
     const fp = (d.farmProducts||[]).reduce((s,r)=>s+m(r.quantity)*m(r.pricePerUnit)*(m(r.share||"100")/100),0);
     const ci = (d.cropInvestment||[]).reduce((s,r)=>s+m(r.acres)*m(r.valuePerAcre),0);
-    const ls = (d.livestockMarket||[]).reduce((s,r)=>s+m(r.value),0);
+    const ls = (d.livestockMarket||[]).reduce((s,r)=>s+_mktLs(r),0);
     const sup = (d.supplies||[]).reduce((s,r)=>s+m(r.value),0);
     const oc = (d.otherCurrent||[]).reduce((s,r)=>s+m(r.amount),0);
     const fedP = Array.isArray(d.federalPayments)
       ? (d.federalPayments||[]).reduce((s,r)=>s+m(r.amount),0)
       : m(d.federalPayments||"");
     const tc = cash+rec+fedP+ls+fp+ci+sup+oc;
-    const bs = (d.breedingStock||[]).reduce((s,r)=>s+m(r.value),0);
-    const re = (d.realEstate||[]).reduce((s,r)=>s+m(r.acres)*m(r.valuePerAcre),0);
-    const veh = (d.vehicles||[]).reduce((s,r)=>s+m(r.value),0);
-    const mach = (d.machinery||[]).reduce((s,r)=>s+m(r.value),0);
+    const bs = (d.breedingStock||[]).reduce((s,r)=>s+_brLs(r),0);
+    const re = (d.realEstate||[]).reduce((s,r)=>s+_reVal(r),0);
+    const veh = (d.vehicles||[]).reduce((s,r)=>s+_depVal(r),0);
+    const mach = (d.machinery||[]).reduce((s,r)=>s+_depVal(r),0);
     const oa = (d.otherAssets||[]).reduce((s,r)=>s+m(r.amount),0);
     const tlt = bs+re+(d.reContracts||[]).reduce((s,r)=>s+m(r.amount),0)+veh+mach+oa;
     const ta = tc+tlt;
@@ -10451,10 +10476,16 @@ Question: ${q}`,
     const ad = (d.accountsDue||[]).reduce((s,r)=>s+m(r.amount),0);
     const id = (d.intermediatDebt||[]).reduce((s,r)=>s+m(r.annualPmt),0);
     const idLT = (d.intermediatDebt||[]).reduce((s,r)=>s+Math.max(0,m(r.principal)-m(r.annualPmt)),0);
-    const rc = (d.reCurrent||[]).reduce((s,r)=>s+m(r.annualPmt),0);
+    // RE debt (unified reDebt array) splits the next payment into interest +
+    // principal reduction. Accrued interest + principal reduction flow to
+    // current liabilities; the remaining principal flows to LT.
+    const reDebtPrinCur = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, m(r.annualPmt)-m(r.accruedInterest)), 0);
+    const reDebtAccrued = (d.reDebt||[]).reduce((s,r)=>s+m(r.accruedInterest), 0);
+    const reDebtLT      = (d.reDebt||[]).reduce((s,r)=>s+Math.max(0, m(r.principal) - Math.max(0, m(r.annualPmt)-m(r.accruedInterest))), 0);
+    const rc = (d.reCurrent||[]).reduce((s,r)=>s+m(r.annualPmt),0) + reDebtPrinCur + reDebtAccrued;
     const ocl = (d.otherCurrentLiab||[]).reduce((s,r)=>s+m(r.amount),0);
     const tcl = on+ad+id+rc+m(d.taxesDue)+ocl;
-    const rm = (d.reMortgages||[]).reduce((s,r)=>s+m(r.principal),0);
+    const rm = (d.reMortgages||[]).reduce((s,r)=>s+m(r.principal),0) + reDebtLT;
     const ol = (d.otherLiabilities||[]).reduce((s,r)=>s+m(r.balance),0);
     const tl = tcl+idLT+rm+ol;
     return {
