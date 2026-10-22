@@ -14396,12 +14396,25 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 {reTotal > 0 && <div className="ss-row"><span>Real Estate</span><span>{fmt(reTotal)}</span></div>}
                 {vehiclesVal > 0 && <div className="ss-row"><span>Titled Vehicles</span><span>{fmt(vehiclesVal)}</span></div>}
                 {machVal > 0 && <div className="ss-row"><span>Machinery and Equipment</span><span>{fmt(machVal)}</span></div>}
-                {Object.entries(linkedEntityNWMap).map(([name, nw]) => (
-                  <div key={name} className="ss-row" style={{color:"#2d5a8e",fontStyle:"italic"}}>
-                    <span>Investment in {name}</span>
-                    <span>{fmt(nw)}</span>
-                  </div>
-                ))}
+                {normalizeLinked(data.linkedEntities).map((entry) => {
+                  const nw = linkedEntityNWMap[entry.name];
+                  if (nw == null) return null;
+                  const pct = numVal(entry.ownership || '100') || 100;
+                  const owned = (Number(nw) || 0) * (pct / 100);
+                  return (
+                    <div key={entry.name} className="ss-row" style={{color:"#2d5a8e",fontStyle:"italic"}}>
+                      <span>
+                        Investment in {entry.name}
+                        {pct < 100 && (
+                          <span style={{fontSize:'.72rem',color:'#6b7280',marginLeft:6}}>
+                            ({pct}% of {fmt(nw)})
+                          </span>
+                        )}
+                      </span>
+                      <span>{fmt(owned)}</span>
+                    </div>
+                  );
+                })}
                 <div className="ss-subtotal"><span>Total Long-Term Assets</span><span>{fmt(totalLTAssets + linkedEntityVal)}</span></div>
               </div>
               <div className="ss-total green-total"><span>TOTAL ASSETS</span><span>{fmt(totalAssets)}</span></div>
