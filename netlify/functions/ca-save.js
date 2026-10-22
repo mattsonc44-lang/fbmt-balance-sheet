@@ -32,6 +32,88 @@ function parseKey(key) {
   return { name, date };
 }
 
+// Normalize the legacy string entries + the new object entries into one
+// shape. Mirrors the client-side normalizeLinked helper.
+function normalizeLinked(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(e => typeof e === 'string'
+    ? { name: e, date: null, ownership: '100' }
+    : { name: (e && e.name) || '', date: (e && e.date) || null, ownership: (e && e.ownership) || '100' }
+  ).filter(x => x.name);
+}
+
+// Server-side NW calculation. Mirrors the client-side formula so we can
+// synthesize an entity's net worth without the client having to send it.
+// Only called when the CA adds a brand-new linked entity the lender hadn't
+// already baked a snapshot for.
+function num(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[^0-9.-]/g, ''));
+  return isFinite(n) ? n : 0;
+}
+function computeNetWorth(d) {
+  if (!d || typeof d !== 'object') return 0;
+  const n = num;
+  const cash = n(d.cashGlacier) + (d.cashOther || []).reduce((s, r) => s + n(r.amount), 0);
+  const rec  = (d.receivables || []).reduce((s, r) => s + n(r.amount), 0);
+  const fed  = Array.isArray(d.federalPayments)
+    ? d.federalPayments.reduce((s, r) => s + n(r.amount), 0)
+    : n(d.federalPayments);
+  const mkt = (d.livestockMarket || []).reduce((s, r) => {
+    const head = n(r.number), wt = n(r.weightPerHd), price = n(r.pricePerUnit);
+    const basis = r.priceBasis || (wt > 0 ? 'cwt' : 'head');
+    let c = 0;
+    if (head > 0 && price > 0) {
+      if (basis === 'head') c = head * price;
+      else if (basis === 'lb') c = head * wt * price;
+      else if (basis === 'cwt') c = head * (wt / 100) * price;
+    }
+    return s + (c > 0 ? c : n(r.value)) * (n(r.share || '100') / 100);
+  }, 0);
+  const fp  = (d.farmProducts || []).reduce((s, r) => s + n(r.quantity) * n(r.pricePerUnit) * (n(r.share || '100') / 100), 0);
+  const ci  = (d.cropInvestment || []).reduce((s, r) => s + n(r.acres) * n(r.valuePerAcre), 0);
+  const sup = (d.supplies || []).reduce((s, r) => s + n(r.value), 0);
+  const oc  = (d.otherCurrent || []).reduce((s, r) => s + n(r.amount), 0);
+  const totalCurrentAssets = cash + rec + fed + mkt + fp + ci + sup + oc;
+
+  const breed = (d.breedingStock || []).reduce((s, r) => {
+    const head = n(r.number), vph = n(r.valuePerHd);
+    const c = head * vph;
+    return s + (c > 0 ? c : n(r.value)) * (n(r.share || '100') / 100);
+  }, 0);
+  const re = (d.realEstate || []).reduce((s, r) => {
+    const basis = r.valueBasis || 'acre';
+    const vpu = n(r.valuePerAcre);
+    return s + (basis === 'acre' ? n(r.acres) * vpu : vpu);
+  }, 0);
+  const depVal = r => n(r.value) * (1 - Math.max(0, Math.min(100, n(r.depreciation))) / 100);
+  const veh  = (d.vehicles || []).reduce((s, r) => s + depVal(r), 0);
+  const mach = (d.machinery || []).reduce((s, r) => s + depVal(r), 0);
+  const oa   = (d.otherAssets || []).reduce((s, r) => s + n(r.amount), 0);
+  const totalLTAssets = breed + re + veh + mach + oa;
+  // Deliberately NOT including this entity's OWN linkedEntityVal — the server
+  // can't resolve those recursively and we don't want to double-count.
+
+  const opN = (d.operatingNotes || []).reduce((s, r) => s + n(r.balance), 0)
+            + (d.accountsDue || []).reduce((s, r) => s + n(r.amount), 0);
+  const idCur = (d.intermediatDebt || []).reduce((s, r) => s + n(r.annualPmt), 0);
+  const rePrinCur = (d.reDebt || []).reduce((s, r) => s + Math.max(0, n(r.annualPmt) - n(r.accruedInterest)), 0);
+  const reAcc     = (d.reDebt || []).reduce((s, r) => s + n(r.accruedInterest), 0);
+  const reCur = (d.reCurrent || []).reduce((s, r) => s + n(r.annualPmt), 0) + rePrinCur + reAcc;
+  const tax = n(d.taxesDue);
+  const ocl = (d.otherCurrentLiab || []).reduce((s, r) => s + n(r.amount), 0);
+  const totalCurrentLiab = opN + idCur + reCur + tax + ocl;
+
+  const idLT = Math.max(0, (d.intermediatDebt || []).reduce((s, r) => s + n(r.principal), 0) - idCur);
+  const reMort = (d.reMortgages || []).reduce((s, r) => s + n(r.principal), 0);
+  const reDebtLT = (d.reDebt || []).reduce((s, r) =>
+    s + Math.max(0, n(r.principal) - Math.max(0, n(r.annualPmt) - n(r.accruedInterest))), 0);
+  const otherL = (d.otherLiabilities || []).reduce((s, r) => s + n(r.balance), 0);
+  const totalLTLiab = idLT + reMort + reDebtLT + otherL;
+
+  return (totalCurrentAssets + totalLTAssets) - (totalCurrentLiab + totalLTLiab);
+}
+
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: cors, body: '' };
   if (event.httpMethod !== 'POST')    return err(405, 'Method not allowed');
@@ -95,6 +177,53 @@ export const handler = async (event) => {
       _lastCAEdit: nowIso,
       _lastCAEditor: caUserId,
     };
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Hydrate linked-entity snapshots on NEWLY-added linked entities.
+    //
+    // The CA session can't see the lender's other sheets directly, so when
+    // the CA adds a brand-new linked entity on their edit, we need to look
+    // up that entity on the lender's side and bake a fresh NW snapshot into
+    // the save payload. Any entries already carrying a snapshot are left
+    // alone. Service role bypasses RLS so we can read across the lender's
+    // balance_sheets rows. Best-effort — if a lookup fails we leave the
+    // snapshot blank and the CA sees $0 for that entry (same as before).
+    // ──────────────────────────────────────────────────────────────────────
+    try {
+      const entities = normalizeLinked(savePayload.linkedEntities);
+      if (entities.length) {
+        const nwSnap   = { ...(savePayload.linkedEntityNWSnapshot || {}) };
+        const dataSnap = { ...(savePayload.linkedEntitySnapshots  || {}) };
+        const needed = entities.filter(e => !(e.name in nwSnap));
+        for (const ent of needed) {
+          try {
+            const nameEnc = encodeURIComponent(ent.name);
+            // Pick the lender's row for this entity closest at-or-before the
+            // CA's as-of date; fall back to most recent.
+            const anchor = ent.date || newAsOfDate;
+            const listUrl = SUPABASE_URL + '/rest/v1/balance_sheets'
+              + '?user_id=eq.' + encodeURIComponent(lenderUserId)
+              + '&client_name=eq.' + nameEnc
+              + '&select=as_of_date,data&order=as_of_date.desc';
+            const lr = await fetch(listUrl, {
+              headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE },
+            });
+            if (!lr.ok) continue;
+            const rows = await lr.json();
+            if (!Array.isArray(rows) || !rows.length) continue;
+            let pick = anchor && rows.find(r => r.as_of_date === anchor);
+            if (!pick && anchor) pick = rows.find(r => (r.as_of_date || '') <= anchor);
+            if (!pick) pick = rows[0];
+            if (!pick || !pick.data) continue;
+            const nw = computeNetWorth(pick.data);
+            nwSnap[ent.name] = nw;
+            dataSnap[ent.name] = { data: pick.data, asOfDate: pick.as_of_date };
+          } catch { /* skip this entity */ }
+        }
+        savePayload.linkedEntityNWSnapshot = nwSnap;
+        savePayload.linkedEntitySnapshots  = dataSnap;
+      }
+    } catch { /* best-effort */ }
 
     // 4. Look up the existing row by (lender_user_id, orig.name, orig.date).
     //    This matches how the lender's storage.set finds the row on their side.
