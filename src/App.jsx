@@ -1247,7 +1247,7 @@ function RunningTotal({ assets, liabilities }) {
 function BudgetView({
   data, budgetCropTotal, budgetLivestockTotal, budgetMiscTotal,
   budgetTotalIncome, budgetOperatingExpenses, budgetOperatingExpensesBase,
-  budgetInterestRate, budgetInterestExpense, budgetPrepaidTotal,
+  budgetInterestRate, budgetInterestUsage, budgetInterestExpense, budgetPrepaidTotal,
   debtServiceTerms, debtServiceRE,
   debtServiceTermsPersonal, debtServiceTermsCorp,
   debtServiceREPersonal, debtServiceRECorp,
@@ -1600,13 +1600,21 @@ function BudgetView({
         <div className="budget-subsection">
           <div className="budget-sub-label">Interest Expense</div>
           <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',
-            background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6}}>
-            <div style={{flex:1,fontSize:13,color:'#78350f',fontWeight:600}}>
+            background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:160,fontSize:13,color:'#78350f',fontWeight:600}}>
               Operating line interest
             </div>
             <div style={{display:'flex',alignItems:'center',gap:4}}>
+              <span style={{fontSize:11,color:'#78350f',fontWeight:600,textTransform:'uppercase',letterSpacing:.4}}>Rate</span>
               <input type="text" value={data.budgetInterestRate ?? '7'}
                 onChange={e => set && set('budgetInterestRate', e.target.value.replace(/[^0-9.]/g,''))}
+                style={{width:50,border:'1.5px solid #d97706',borderRadius:5,padding:'4px 6px',fontSize:13,textAlign:'right',fontFamily:'inherit'}} />
+              <span style={{fontSize:12,color:'#78350f',fontWeight:600}}>%</span>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:4}}>
+              <span style={{fontSize:11,color:'#78350f',fontWeight:600,textTransform:'uppercase',letterSpacing:.4}}>Usage</span>
+              <input type="text" value={data.budgetInterestUsage ?? '50'}
+                onChange={e => set && set('budgetInterestUsage', e.target.value.replace(/[^0-9.]/g,''))}
                 style={{width:50,border:'1.5px solid #d97706',borderRadius:5,padding:'4px 6px',fontSize:13,textAlign:'right',fontFamily:'inherit'}} />
               <span style={{fontSize:12,color:'#78350f',fontWeight:600}}>%</span>
             </div>
@@ -1615,7 +1623,7 @@ function BudgetView({
             </div>
           </div>
           <div style={{fontSize:11,color:'#92400e',padding:'2px 10px 0',fontStyle:'italic'}}>
-            {budgetInterestRate}% × {fmt(budgetOperatingExpensesBase)} base operating (debt service excluded)
+            {fmt(budgetOperatingExpensesBase)} op × {budgetInterestUsage}% usage × {budgetInterestRate}% rate (debt service excluded)
           </div>
           <div className="budget-subtotal">
             <span>Total Interest</span>
@@ -10362,13 +10370,19 @@ Question: ${q}`,
   // require editing the budget line.
   const budgetOperatingExpensesBase = data.budgetExpenses.filter(r=>!r.prepaid).reduce((s,r)=>s+n(r.amount),0);
   const budgetPrepaidTotal = data.budgetExpenses.filter(r=>r.prepaid).reduce((s,r)=>s+n(r.amount),0);
-  // Derived interest expense. Rate (%) is stored on the sheet; applied to the
-  // base operating expenses only — debt service is intentionally excluded.
-  // Default to 7% on brand-new sheets where the rate hasn't been set yet.
+  // Derived interest expense. Two inputs stored on the sheet:
+  //   budgetInterestRate   — note rate on the operating line (e.g. 7.5%)
+  //   budgetInterestUsage  — average % of operating expenses actually drawn
+  //                          over the year (e.g. 50% ≈ half-year average)
+  // Formula: op × usage% × rate% — debt service lines are excluded from `op`.
+  // Defaults: 7% rate, 50% utilization on new sheets.
   const budgetInterestRate = (data.budgetInterestRate === '' || data.budgetInterestRate == null)
     ? 7
     : n(data.budgetInterestRate);
-  const budgetInterestExpense = budgetOperatingExpensesBase * (budgetInterestRate / 100);
+  const budgetInterestUsage = (data.budgetInterestUsage === '' || data.budgetInterestUsage == null)
+    ? 50
+    : n(data.budgetInterestUsage);
+  const budgetInterestExpense = budgetOperatingExpensesBase * (budgetInterestUsage / 100) * (budgetInterestRate / 100);
   // Operating expenses now exclude the derived interest line — interest is a
   // separate top-level expense category that still flows into Total Expenses
   // and Borrower Margin, but doesn't inflate the operating total used for
@@ -16680,6 +16694,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               budgetOperatingExpenses={budgetOperatingExpenses}
               budgetOperatingExpensesBase={budgetOperatingExpensesBase}
               budgetInterestRate={budgetInterestRate}
+              budgetInterestUsage={budgetInterestUsage}
               budgetInterestExpense={budgetInterestExpense}
               budgetPrepaidTotal={budgetPrepaidTotal}
               debtServiceTerms={debtServiceTerms}
