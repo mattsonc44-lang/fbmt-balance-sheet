@@ -125,7 +125,7 @@ export const handler = async (event) => {
   let payload;
   try { payload = JSON.parse(event.body || '{}'); }
   catch { return err(400, 'Invalid JSON body'); }
-  const { sheet_key, sheet_data, nw_for_links } = payload;
+  const { sheet_key, sheet_data, nw_for_links, new_import_lender_id } = payload;
   if (!sheet_key || !sheet_data || typeof sheet_data !== 'object') return err(400, 'sheet_key and sheet_data are required');
 
   try {
@@ -141,25 +141,50 @@ export const handler = async (event) => {
     const caUserId = me?.id;
     if (!caUserId) return err(401, 'No user id on session');
 
-    // 2. Verify this CA has an active share for the sheet_key. Service role
-    //    bypasses RLS so we can read across users.
-    const shareResp = await fetch(
-      SUPABASE_URL + '/rest/v1/ca_shares?ca_user_id=eq.' + encodeURIComponent(caUserId)
-        + '&sheet_key=eq.' + encodeURIComponent(sheet_key)
-        + '&select=lender_user_id,client_name',
-      { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }
-    );
-    if (!shareResp.ok) {
-      const t = await shareResp.text().catch(()=>'');
-      return err(shareResp.status, `Share lookup failed: ${t.slice(0,200)}`);
+    // 2. Verify this CA is allowed to write to the target lender's row.
+    //
+    // Two paths:
+    //   (a) EDIT of an existing shared sheet — look up ca_shares by sheet_key.
+    //   (b) NEW IMPORT ("import for a lender" from the CA portal) — body
+    //       includes new_import_lender_id. The CA must already have at least
+    //       one active share with that lender; otherwise this is a stranger
+    //       trying to drop sheets into someone else's book.
+    let lenderUserId = null;
+    if (new_import_lender_id) {
+      const trustResp = await fetch(
+        SUPABASE_URL + '/rest/v1/ca_shares'
+          + '?ca_user_id=eq.' + encodeURIComponent(caUserId)
+          + '&lender_user_id=eq.' + encodeURIComponent(new_import_lender_id)
+          + '&select=id&limit=1',
+        { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }
+      );
+      if (!trustResp.ok) {
+        const t = await trustResp.text().catch(()=>'');
+        return err(trustResp.status, `Trust lookup failed: ${t.slice(0,200)}`);
+      }
+      const trust = await trustResp.json();
+      if (!Array.isArray(trust) || !trust.length) {
+        return err(403, 'CA has no active share with that lender — ask the lender to share a sheet first.');
+      }
+      lenderUserId = new_import_lender_id;
+    } else {
+      const shareResp = await fetch(
+        SUPABASE_URL + '/rest/v1/ca_shares?ca_user_id=eq.' + encodeURIComponent(caUserId)
+          + '&sheet_key=eq.' + encodeURIComponent(sheet_key)
+          + '&select=lender_user_id,client_name',
+        { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }
+      );
+      if (!shareResp.ok) {
+        const t = await shareResp.text().catch(()=>'');
+        return err(shareResp.status, `Share lookup failed: ${t.slice(0,200)}`);
+      }
+      const shares = await shareResp.json();
+      if (!Array.isArray(shares) || !shares.length) {
+        return err(403, 'No active share for this CA + sheet_key. Ask the lender to re-share.');
+      }
+      lenderUserId = shares[0].lender_user_id;
     }
-    const shares = await shareResp.json();
-    if (!Array.isArray(shares) || !shares.length) {
-      return err(403, 'No active share for this CA + sheet_key. Ask the lender to re-share.');
-    }
-    const share = shares[0];
-    const lenderUserId = share.lender_user_id;
-    if (!lenderUserId) return err(500, 'Share row is missing lender_user_id');
+    if (!lenderUserId) return err(500, 'Could not resolve lender_user_id');
 
     // 3. Resolve which row we're targeting. The sheet_key encodes the ORIGINAL
     //    client_name + as_of_date at share time — always update THAT row so a
