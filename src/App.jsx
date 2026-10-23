@@ -6720,7 +6720,7 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
   const [editUser, setEditUser] = React.useState(null);
   const [resetUser, setResetUser] = React.useState(null);
   const [newPwd, setNewPwd] = React.useState('');
-  const [form, setForm] = React.useState({ fullName:'', email:'', role:'user', password:'' });
+  const [form, setForm] = React.useState({ fullName:'', email:'', role:'lender', password:'' });
   const [formError, setFormError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [msg, setMsg] = React.useState('');
@@ -6821,7 +6821,7 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
       } catch { /* best-effort; the row may already exist from the trigger */ }
     }
 
-    setMsg('User created successfully'); setShowAdd(false); setForm({fullName:'',email:'',role:'user',password:''});
+    setMsg('User created successfully'); setShowAdd(false); setForm({fullName:'',email:'',role:'lender',password:''});
     // Reload immediately, then once more after a short delay in case the
     // server-side trigger is still catching up.
     await loadUsers();
@@ -7015,7 +7015,7 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
               <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
               <select value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}
                 style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
-                <option value="user">Lender / User</option>
+                <option value="lender">Lender</option>
                 <option value="ca">Credit Analyst (CA)</option>
                 <option value="admin">Admin</option>
               </select>
@@ -7045,9 +7045,9 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
             {inp(editUser.email,v=>setEditUser(u=>({...u,email:v})),'Email')}
             <div style={{marginBottom:12}}>
               <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>ROLE</label>
-              <select value={editUser.role||'user'} onChange={e=>setEditUser(u=>({...u,role:e.target.value}))}
+              <select value={editUser.role||'lender'} onChange={e=>setEditUser(u=>({...u,role:e.target.value}))}
                 style={{width:'100%',border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}}>
-                <option value="user">Lender / User</option>
+                <option value="lender">Lender</option>
                 <option value="ca">Credit Analyst (CA)</option>
                 <option value="admin">Admin</option>
               </select>
