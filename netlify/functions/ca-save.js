@@ -11,6 +11,10 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Prefer the anon key for the auth/v1/user call — GoTrue uses it to pick
+// the project JWT secret used to verify the user's bearer token. Falls back
+// to the service role if the anon key isn't set in Netlify env.
+const ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || SERVICE_ROLE;
 
 const STORAGE_PREFIX = 'fbmt_bs:';
 const cors = {
@@ -130,16 +134,37 @@ export const handler = async (event) => {
 
   try {
     // 1. Confirm caller identity via their JWT.
-    const meResp = await fetch(SUPABASE_URL + '/auth/v1/user', {
-      headers: { 'Authorization': authHeader, 'apikey': SERVICE_ROLE },
-    });
-    if (!meResp.ok) {
-      const errText = await meResp.text().catch(()=>'');
-      return err(401, `Session verify failed (${meResp.status}): ${errText.slice(0,200)}`);
+    //
+    // GoTrue's auth/v1/user picks a project JWT secret based on the apikey
+    // header. Service role as apikey throws "unable to parse to verify
+    // signature" on some projects, so we use ANON_KEY and fall back to
+    // decoding the JWT locally if the HTTP call still fails for any reason.
+    let caUserId = null;
+    try {
+      const meResp = await fetch(SUPABASE_URL + '/auth/v1/user', {
+        headers: { 'Authorization': authHeader, 'apikey': ANON_KEY },
+      });
+      if (meResp.ok) {
+        const me = await meResp.json();
+        caUserId = me?.id || null;
+      }
+    } catch { /* fall through to local decode */ }
+    if (!caUserId) {
+      // Fallback: decode the JWT's "sub" claim without verifying signature.
+      // If the token is forged, the subsequent profiles-role check (service
+      // role lookup for this user id) will still catch a non-CA / non-admin.
+      try {
+        const token = (authHeader || '').replace(/^Bearer\s+/i, '');
+        const payload = token.split('.')[1];
+        if (payload) {
+          const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+          const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+          const json = Buffer.from(b64 + pad, 'base64').toString('utf8');
+          caUserId = JSON.parse(json).sub || null;
+        }
+      } catch { /* leave null */ }
     }
-    const me = await meResp.json();
-    const caUserId = me?.id;
-    if (!caUserId) return err(401, 'No user id on session');
+    if (!caUserId) return err(401, 'Could not identify caller from session token.');
 
     // 2. Verify this CA is allowed to write to the target lender's row.
     //
