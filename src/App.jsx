@@ -7232,7 +7232,7 @@ function summarizeSheetChanges(baseline, next) {
   return bullets;
 }
 
-function CAPortal({ session, profile, onSignOut, onOpen }) {
+function CAPortal({ session, profile, onSignOut, onOpen, onImportForLender }) {
   const [shares, setShares] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [openSheet, setOpenSheet] = React.useState(null); // {share, data}
@@ -7408,8 +7408,25 @@ function CAPortal({ session, profile, onSignOut, onOpen }) {
         ) : (
           Object.entries(byLender).map(([lender, lenderShares]) => (
             <div key={lender} style={{marginBottom:28}}>
-              <div style={{fontWeight:700,fontSize:15,color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',paddingBottom:6,marginBottom:12}}>
-                🏦 {lender}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'2px solid #6B0E1E',paddingBottom:6,marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:15,color:'#6B0E1E'}}>🏦 {lender}</div>
+                {onImportForLender && (
+                  <button
+                    onClick={() => {
+                      // Use any share's lender_user_id as the owner for the
+                      // imported sheet. They all share the same lender for
+                      // this group so the first one is fine.
+                      const first = lenderShares[0] || {};
+                      onImportForLender({
+                        lender_user_id: first.lender_user_id,
+                        lender_name:    lender,
+                      });
+                    }}
+                    title={`Upload an Excel or PDF statement and save it on ${lender}'s side`}
+                    style={{background:'#1B4332',color:'white',border:'none',borderRadius:6,padding:'4px 12px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                    📥 Import for {lender}
+                  </button>
+                )}
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
                 {lenderShares.map(share => (
@@ -14819,6 +14836,28 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
 
   if (profile?.role === 'ca') {
     if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
+      onImportForLender={({ lender_user_id, lender_name }) => {
+        // Virtual share — tells the main wizard it's running in "CA new
+        // import" mode. caDirectSave reads _isNewImport + _newImportLenderId
+        // and asks ca-save to insert a fresh balance_sheets row owned by
+        // the chosen lender.
+        setCaOpenShare({
+          id: null,
+          sheet_key: null,
+          lender_user_id,
+          lender_name,
+          client_name: '',
+          sheet_data: {},
+          _isNewImport: true,
+          _newImportLenderId: lender_user_id,
+        });
+        setData(emptyData());
+        setStep(0);
+        setScreen('wizard');
+        setImportData(null);
+        setImportError('');
+        setShowImport(true);
+      }}
       onOpen={(share) => {
         const sheetData = share.sheet_data || {};
         setData({...emptyData(), ...sheetData});
@@ -16091,13 +16130,18 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           'Authorization': 'Bearer ' + (session?.access_token || ''),
         },
         body: JSON.stringify({
-          sheet_key: caOpenShare.sheet_key,
+          // When this is a "CA imports a brand-new sheet for a lender" flow,
+          // the sheet_key doesn't exist yet — compute one from the client
+          // name + as-of date and tell ca-save to insert instead of update.
+          sheet_key: caOpenShare.sheet_key
+            || ('fbmt_bs:' + (data.clientName || '').replace(/\s+/g, '_') + ':' + (data.asOfDate || '')),
           sheet_data: data,
-          // Current NW of this sheet. ca-save uses it to refresh any sibling
-          // ca_shares that reference THIS sheet's clientName as a linked
-          // entity, so when the CA edits (say) a corp sheet, the shared
-          // personal sheet's "Investment in Related Entities" updates on the
-          // next open instead of showing stale snapshot numbers.
+          // Flag + lender id so ca-save knows which lender's balance_sheets
+          // row to insert into. ca-save still verifies the CA has at least
+          // one active share with that lender before accepting the write.
+          new_import_lender_id: caOpenShare._isNewImport ? caOpenShare._newImportLenderId : undefined,
+          // Current NW of this sheet (same purpose as before — refreshes
+          // sibling shares that link back to this clientName).
           nw_for_links: (totalAssets || 0) - (totalLiabilities || 0),
         }),
       });
@@ -16136,7 +16180,15 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
     <div className="app">
       {caOpenShare && (
         <div style={{background:'#1d4ed8',color:'white',padding:'8px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:13,gap:12,flexWrap:'wrap'}}>
-          <span>📝 <strong>CA Full-Edit Mode</strong> — {caOpenShare.client_name} (shared by {caOpenShare.lender_name}{caOpenShare.shared_at ? ` on ${new Date(caOpenShare.shared_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}` : ''}) — Edit any field. Click <strong>Save</strong> and the lender is notified of your changes.</span>
+          <span>
+            {caOpenShare._isNewImport ? '📥 ' : '📝 '}
+            <strong>{caOpenShare._isNewImport ? 'CA Import Mode' : 'CA Full-Edit Mode'}</strong>
+            {' — '}
+            {caOpenShare._isNewImport
+              ? <>Importing a new sheet for <strong>{caOpenShare.lender_name}</strong>. Click <strong>Save</strong> to file it on their side.</>
+              : <>{caOpenShare.client_name} (shared by {caOpenShare.lender_name}{caOpenShare.shared_at ? ` on ${new Date(caOpenShare.shared_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}` : ''}) — Edit any field. Click <strong>Save</strong> and the lender is notified of your changes.</>
+            }
+          </span>
           <div style={{display:'flex',gap:8}}>
             <button onClick={()=>{setCaOpenShare(null);setData(emptyData());setScreen("home");}}
               style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'white',borderRadius:5,padding:'4px 12px',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
