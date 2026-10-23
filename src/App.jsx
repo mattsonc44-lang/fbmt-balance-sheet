@@ -7393,7 +7393,39 @@ function CAPortal({ session, profile, onSignOut, onOpen, onImportForLender }) {
           <div style={{fontWeight:800,fontSize:18}}>First Bank of Montana</div>
           <div style={{fontSize:12,opacity:.8}}>Credit Analyst Portal — {profile?.full_name}</div>
         </div>
-        <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          {onImportForLender && (
+            <button
+              onClick={() => {
+                // Build a unique lender list from every share this CA has.
+                const lenders = [];
+                const seen = new Set();
+                (shares || []).forEach(s => {
+                  if (!s.lender_user_id || seen.has(s.lender_user_id)) return;
+                  seen.add(s.lender_user_id);
+                  lenders.push({ id: s.lender_user_id, name: s.lender_name || 'Lender' });
+                });
+                if (!lenders.length) {
+                  alert('No active lender shares yet. Ask a lender to share any sheet with you first — then you can import on their behalf.');
+                  return;
+                }
+                let picked = lenders[0];
+                if (lenders.length > 1) {
+                  const choices = lenders.map((l,i)=>`${i+1}. ${l.name}`).join('\n');
+                  const ans = window.prompt(`Import for which lender?\n\n${choices}\n\nEnter the number:`, '1');
+                  const idx = parseInt(ans, 10) - 1;
+                  if (isNaN(idx) || idx < 0 || idx >= lenders.length) return;
+                  picked = lenders[idx];
+                }
+                onImportForLender({ lender_user_id: picked.id, lender_name: picked.name });
+              }}
+              title="Upload an Excel or PDF statement and save it on a lender's side"
+              style={{background:'#1B4332',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit',fontWeight:600}}>
+              📥 Import
+            </button>
+          )}
+          <button onClick={onSignOut} style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',color:'white',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>Sign Out</button>
+        </div>
       </div>
 
       <div style={{maxWidth:800,margin:'32px auto',padding:'0 24px'}}>
