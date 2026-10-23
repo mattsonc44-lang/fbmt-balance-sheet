@@ -16372,6 +16372,248 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         onClose={()=>{setShowSplitter(false);setSplitSelected({});setSplitName('');}}
         storage={storage} makeKey={makeKey} emptyData={emptyData} loadSavedList={loadSavedList} numVal={numVal}
       />}
+      {/* ── Import Modal (wizard-level mirror) ── */}
+          {showImport && (
+            <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+              <div style={{background:"white",borderRadius:14,padding:32,maxWidth:600,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                  <div style={{fontSize:"1.15rem",fontWeight:700,color:"#1a1a1a"}}>Import Balance Sheet Data</div>
+                  <button onClick={()=>setShowImport(false)}
+                    style={{background:"none",border:"none",fontSize:"1.4rem",cursor:"pointer",color:"#888",lineHeight:1}}>x</button>
+                </div>
+
+                <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:8,padding:14,marginBottom:20,fontSize:".85rem",color:"#2d5a8e"}}>
+                  <strong>Supported formats:</strong>
+                  <ul style={{margin:"6px 0 0 16px",lineHeight:1.8}}>
+                    <li><strong>FBMT Excel format</strong> — the existing First Bank of Montana balance sheet Excel file (.xlsx). Just drag it in as-is.</li>
+                    <li><strong>Import template</strong> — download the template below, fill it in, drag it back.</li>
+                    <li><strong>PDF from any lender</strong> — drop a balance-sheet PDF (any bank's format, text or scanned). AI extracts the numbers into a review screen you can edit before applying.</li>
+                  </ul>
+                </div>
+
+                <button onClick={downloadTemplate}
+                  style={{display:"flex",alignItems:"center",gap:8,background:"#2d5a8e",color:"white",border:"none",borderRadius:8,padding:"10px 20px",fontSize:".9rem",fontWeight:600,cursor:"pointer",marginBottom:20,fontFamily:"inherit"}}>
+                  Download Import Template (.xlsx)
+                </button>
+
+                {/* Drag and Drop Zone */}
+                <div
+                  onDragOver={e=>{e.preventDefault();setImportDragging(true);}}
+                  onDragLeave={()=>setImportDragging(false)}
+                  onDrop={e=>{e.preventDefault();setImportDragging(false);const f=e.dataTransfer.files[0];if(f)handleImportFile(f);}}
+                  style={{
+                    border:"2.5px dashed " + (importDragging ? "#2d5a8e" : "#ccc"),
+                    borderRadius:10,padding:"28px 20px",textAlign:"center",
+                    background:importDragging ? "#f0f6ff" : "#fafafa",
+                    transition:"all .15s",marginBottom:16
+                  }}>
+                  <div style={{fontSize:"2rem",marginBottom:8}}>📂</div>
+                  <div style={{fontWeight:600,color:"#333",marginBottom:12}}>
+                    {importDragging ? "Drop to import" : "Drag and drop your file here"}
+                  </div>
+                  <label style={{
+                    display:"inline-block",background:"#2d5a8e",color:"white",
+                    borderRadius:7,padding:"9px 20px",fontSize:".88rem",fontWeight:600,
+                    cursor:"pointer",fontFamily:"inherit"
+                  }}>
+                    Browse for File
+                    <input type="file" accept=".csv,.xlsx,.xls,.pdf"
+                      style={{display:"none"}}
+                      onChange={e=>{if(e.target.files[0])handleImportFile(e.target.files[0]);}} />
+                  </label>
+                  <div style={{fontSize:".78rem",color:"#aaa",marginTop:10}}>CSV, XLSX, XLS or PDF — PDFs are read by AI</div>
+                </div>
+
+                {importError && (
+                  <div style={{
+                    background: importError.startsWith("Reading PDF") ? "#f0f6ff" : "#fce8e8",
+                    border: "1px solid " + (importError.startsWith("Reading PDF") ? "#bfdbfe" : "#f0c0c0"),
+                    borderRadius:8, padding:12, fontSize:".85rem",
+                    color: importError.startsWith("Reading PDF") ? "#1e40af" : "#7a1a1a",
+                    marginBottom:16, display:"flex", alignItems:"center", gap:8
+                  }}>
+                    {importError.startsWith("Reading PDF") && <span style={{fontSize:"1.2rem"}}>🤖</span>}
+                    {importError}
+                    {importError.startsWith("Reading PDF") && <span style={{marginLeft:4,fontSize:".78rem",color:"#3b82f6"}}>AI is extracting your financial data...</span>}
+                  </div>
+                )}
+
+                {!importData && importBudget && (
+                  <div>
+                    <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:8,padding:14,marginBottom:16}}>
+                      <div style={{fontWeight:700,color:"#15803d",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+                        📊 Budget imported (no balance sheet in this file)
+                      </div>
+                      <div style={{fontSize:".85rem",color:"#166534",display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                        <span>Crop rows: <strong>{importBudget.budgetCrops.filter(r=>r.crop).length}</strong></span>
+                        <span>Livestock rows: <strong>{importBudget.budgetLivestock.filter(r=>r.type).length}</strong></span>
+                        <span>Misc income lines: <strong>{importBudget.budgetMisc.filter(r=>r.description).length}</strong></span>
+                        <span>Expense lines: <strong>{importBudget.budgetExpenses.filter(r=>r.description).length}</strong></span>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:14}}>
+                      <div style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",marginBottom:8}}>
+                        Where should this budget go?
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <label style={{flex:1,minWidth:220,display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",padding:"10px 12px",border:"1.5px solid " + (budgetOnlyMode==='new'?'#6B0E1E':'#ddd'),borderRadius:8,background:budgetOnlyMode==='new'?'#fdf7f7':'white'}}>
+                          <input type="radio" name="budgetOnlyMode" value="new" checked={budgetOnlyMode==='new'} onChange={()=>setBudgetOnlyMode('new')} style={{marginTop:3}}/>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:".9rem",color:"#1a1a1a"}}>Start a new balance sheet</div>
+                            <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>Creates an empty balance sheet with just this budget attached. You fill in assets/liabilities later.</div>
+                          </div>
+                        </label>
+                        <label style={{flex:1,minWidth:220,display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",padding:"10px 12px",border:"1.5px solid " + (budgetOnlyMode==='existing'?'#6B0E1E':'#ddd'),borderRadius:8,background:budgetOnlyMode==='existing'?'#fdf7f7':'white',opacity:savedSheets.length===0?.5:1}}>
+                          <input type="radio" name="budgetOnlyMode" value="existing" checked={budgetOnlyMode==='existing'} onChange={()=>setBudgetOnlyMode('existing')} disabled={savedSheets.length===0} style={{marginTop:3}}/>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:".9rem",color:"#1a1a1a"}}>Add to an existing sheet</div>
+                            <div style={{fontSize:".78rem",color:"#555",marginTop:2}}>
+                              {savedSheets.length===0 ? 'No saved sheets yet — save one first to enable this.' : 'Merges the budget into a saved balance sheet. Overwrites any existing budget on that sheet.'}
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {budgetOnlyMode === 'new' ? (
+                      <div style={{marginBottom:16}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 200px",gap:12}}>
+                          <div>
+                            <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                              Client Name
+                            </label>
+                            <input type="text" value={budgetOnlyClient} onChange={e=>setBudgetOnlyClient(e.target.value)}
+                              placeholder="e.g. Johnson Family Farm"
+                              style={{width:"100%",border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:"1rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+                          </div>
+                          <div>
+                            <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                              As of Date
+                            </label>
+                            <input type="date" value={importDate} onChange={e=>setImportDate(e.target.value)}
+                              style={{width:"100%",border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:"1rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{marginBottom:16}}>
+                        <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                          Pick the sheet to add this budget to
+                        </label>
+                        <select value={budgetOnlyTargetKey} onChange={e=>setBudgetOnlyTargetKey(e.target.value)}
+                          style={{width:"100%",border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:".95rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}>
+                          <option value="">— select a saved sheet —</option>
+                          {(() => {
+                            // Group sheets by client for a cleaner dropdown.
+                            const byClient = {};
+                            savedSheets.forEach(s => {
+                              const c = s.clientName || '(no client name)';
+                              (byClient[c] = byClient[c] || []).push(s);
+                            });
+                            return Object.keys(byClient).sort().map(c => (
+                              <optgroup key={c} label={c}>
+                                {byClient[c]
+                                  .sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate))
+                                  .map(s => (
+                                    <option key={s.key} value={s.key}>
+                                      {s.asOfDate}{s.savedAt ? ' (saved ' + new Date(s.savedAt).toLocaleDateString() + ')' : ''}
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            ));
+                          })()}
+                        </select>
+                        {budgetOnlyTargetKey && (
+                          <div style={{fontSize:".78rem",color:"#92400e",marginTop:6,background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:6,padding:"6px 10px"}}>
+                            ⚠ Any existing budget on that sheet (crops, livestock, expenses) will be replaced.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div style={{display:"flex",gap:12}}>
+                      <button className="btn btn-secondary" onClick={()=>setShowImport(false)}>Cancel</button>
+                      {budgetOnlyMode === 'new' ? (
+                        <button className="btn btn-primary" onClick={applyBudgetOnlyNew}
+                          disabled={!budgetOnlyClient.trim()}
+                          style={{background:"#6B0E1E",opacity:!budgetOnlyClient.trim()?.6:1}}>
+                          Create sheet with this budget →
+                        </button>
+                      ) : (
+                        <button className="btn btn-primary" onClick={applyBudgetOnlyExisting}
+                          disabled={!budgetOnlyTargetKey || budgetOnlyApplying}
+                          style={{background:"#6B0E1E",opacity:(!budgetOnlyTargetKey||budgetOnlyApplying)?.6:1}}>
+                          {budgetOnlyApplying ? 'Adding…' : 'Add budget to sheet →'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {importData && (
+                  <div>
+                    <div style={{background:"#e8f5ea",border:"1px solid #b8dfc0",borderRadius:8,padding:14,marginBottom:16}}>
+                      <div style={{fontWeight:700,color:"#1a5c25",marginBottom:8}}>File parsed successfully</div>
+                      <div style={{fontSize:".85rem",color:"#2a4a2a",display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                        <span>Client: <strong>{importData.clientName || "(none)"}</strong></span>
+                        <span>Cash (Glacier): <strong>{importData.cashGlacier ? "$"+Number(importData.cashGlacier).toLocaleString() : "$0"}</strong></span>
+                        <span>Farm Products: <strong>{importData.farmProducts.filter(r=>r.kind).length} items</strong></span>
+                        <span>Real Estate: <strong>{importData.realEstate.filter(r=>r.acres).length} tracts</strong></span>
+                        <span>Machinery: <strong>{importData.machinery.filter(r=>r.make).length} items</strong></span>
+                        <span>Vehicles: <strong>{importData.vehicles.filter(r=>r.make).length} items</strong></span>
+                        <span>Term Debt: <strong>{importData.intermediatDebt.filter(r=>r.creditor).length} loans</strong></span>
+                        <span>RE Mortgages: <strong>{importData.reMortgages.filter(r=>r.lienHolder).length} mortgages</strong></span>
+                      </div>
+                      <div style={{fontSize:".78rem",color:"#4b6f4d",marginTop:10,paddingTop:10,borderTop:"1px solid #b8dfc0"}}>
+                        You'll land in the wizard where every field is editable — review the extracted numbers there before you save. Nothing is written to the database until you hit Save.
+                      </div>
+                    </div>
+
+                    {importBudget && (
+                      <div style={{background:"#f0fdf4",border:"1.5px solid #22c55e",borderRadius:8,padding:"14px 16px",marginBottom:16}}>
+                        <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                          <input type="checkbox" checked={importBudgetInclude}
+                            onChange={e=>setImportBudgetInclude(e.target.checked)}
+                            style={{marginTop:3,width:16,height:16,accentColor:"#15803d",flexShrink:0}} />
+                          <div>
+                            <div style={{fontWeight:700,fontSize:".9rem",color:"#15803d"}}>
+                              📊 Also import Annual Budget
+                            </div>
+                            <div style={{fontSize:".78rem",color:"#374151",marginTop:3}}>
+                              {importBudget.budgetCrops.filter(r=>r.crop).length} crop rows &nbsp;·&nbsp;
+                              {importBudget.budgetExpenses.filter(r=>r.description).length} expense lines
+                              {importBudget.budgetMisc.filter(r=>r.description).length>0 && ` · ${importBudget.budgetMisc.filter(r=>r.description).length} misc income items`}
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    )}
+
+                    <div style={{marginBottom:20}}>
+                      <label style={{fontSize:".8rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#555",display:"block",marginBottom:6}}>
+                        As of Date
+                      </label>
+                      <input type="date" value={importDate}
+                        onChange={e=>setImportDate(e.target.value)}
+                        style={{border:"1.5px solid #ddd",borderRadius:7,padding:"9px 12px",fontSize:"1rem",fontFamily:"inherit",outline:"none",width:200}} />
+                      <div style={{fontSize:".75rem",color:"#888",marginTop:4}}>
+                        Set the balance sheet date for this import
+                      </div>
+                    </div>
+
+                    <div style={{display:"flex",gap:12}}>
+                      <button className="btn btn-secondary" onClick={()=>setShowImport(false)}>Cancel</button>
+                      <button className="btn btn-primary" onClick={applyImport}
+                        style={{background:"#2d5a8e"}}>
+                        Import and Open Balance Sheet
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
       {/* ── Save Folder Picker Modal ── */}
       {showSaveFolderPicker && (
