@@ -7403,13 +7403,18 @@ function CAPortal({ session, profile, onSignOut, onOpen, onImportForLender }) {
                 // this safe for CAs.
                 let lenders = [];
                 try {
+                  // Include lenders AND admins (admins hold their own book of
+                  // clients too, so the CA needs to be able to file into
+                  // their folders — e.g. Chris Mattson).
                   const r = await fetch(window.SUPABASE_URL +
-                    '/rest/v1/profiles?role=eq.lender&is_active=eq.true&select=id,full_name,email&order=full_name.asc',
+                    '/rest/v1/profiles?role=in.(lender,admin)&is_active=eq.true&select=id,full_name,email,role&order=full_name.asc',
                     { headers: hdr });
                   if (r.ok) {
                     const rows = await r.json();
                     lenders = (rows || []).map(p => ({
-                      id: p.id, name: p.full_name || p.email || 'Lender',
+                      id: p.id,
+                      name: (p.full_name || p.email || 'Lender')
+                        + (p.role === 'admin' ? ' (admin)' : ''),
                     }));
                   }
                 } catch {}
