@@ -6749,20 +6749,34 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
         { headers: { ...hdr, 'Range-Unit': 'items', 'Range': '0-4999', 'Prefer': 'count=exact' } }
       );
       const rows = await r.json();
-      // Supabase returns the server-side row count in Content-Range: "0-10/11"
       const cr = r.headers.get('content-range') || '';
       const serverCount = cr.includes('/') ? parseInt(cr.split('/').pop(), 10) : NaN;
       if (!r.ok) {
         console.error('loadUsers failed', r.status, rows);
         setMsg(`Load users failed (${r.status}). Check console.`);
-      } else {
-        const clientCount = Array.isArray(rows) ? rows.length : 0;
-        console.log('loadUsers:', clientCount, 'rows returned, server-side count =', serverCount, 'content-range =', cr);
-        setUsers(Array.isArray(rows) ? rows : []);
-        if (!isNaN(serverCount) && serverCount > clientCount) {
-          setMsg(`RLS is hiding ${serverCount - clientCount} profile row(s) from this admin session. ` +
-                 `Run the "admin inserts any profile" migration (which also widens SELECT) and refresh.`);
-        }
+        setLoading(false);
+        return;
+      }
+      const raw = Array.isArray(rows) ? rows : [];
+      // Keep EVERYTHING the server returned, even rows missing an id. React
+      // was silently dropping null-key rows before, which is the usual reason
+      // "11 in DB / 8 showing" happens when 3 profiles were inserted by hand
+      // without an id (or with a non-uuid id). We now mint a stable fallback
+      // key from the row's email or array index so every row renders.
+      const normalized = raw.map((u, idx) => ({
+        ...u,
+        _key: u.id || u.email || `row-${idx}`,
+        _hasId: !!u.id,
+      }));
+      console.log('loadUsers:', raw.length, 'rows returned, server-side count =', serverCount);
+      console.table(normalized.map(u => ({ id: u.id || '(none)', email: u.email, name: u.full_name, role: u.role })));
+      setUsers(normalized);
+      const missingId = normalized.filter(u => !u._hasId).length;
+      if (!isNaN(serverCount) && serverCount > raw.length) {
+        setMsg(`RLS is hiding ${serverCount - raw.length} profile row(s) from this admin session — run supabase_admin_profile_write.sql.`);
+      } else if (missingId > 0) {
+        setMsg(`${missingId} profile row(s) have no id — they'll show here but can't be edited until you fix the id column. ` +
+               `Run in SQL editor: UPDATE profiles SET id = (SELECT id FROM auth.users WHERE auth.users.email = profiles.email) WHERE id IS NULL;`);
       }
     } catch (e) {
       console.error('loadUsers error', e);
@@ -6926,7 +6940,7 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
               </thead>
               <tbody>
                 {users.map((u,i)=>(
-                  <tr key={u.id} style={{borderBottom:'1px solid #f0f0f0',background:i%2===0?'white':'#fafafa'}}>
+                  <tr key={u._key || u.id || `row-${i}`} style={{borderBottom:'1px solid #f0f0f0',background:i%2===0?'white':'#fafafa'}}>
                     <td style={{padding:'10px 16px',fontSize:13,fontWeight:600}}>{u.full_name}</td>
                     <td style={{padding:'10px 16px',fontSize:13,color:'#555'}}>{u.email}</td>
                     <td style={{padding:'10px 16px'}}>
