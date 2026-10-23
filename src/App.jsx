@@ -6746,15 +6746,23 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
       // PostgREST's 1000-row default cap when "count=none".
       const r = await fetch(
         window.SUPABASE_URL + '/rest/v1/profiles?select=*&order=created_at.asc.nullslast&limit=5000',
-        { headers: { ...hdr, 'Range-Unit': 'items', 'Range': '0-4999' } }
+        { headers: { ...hdr, 'Range-Unit': 'items', 'Range': '0-4999', 'Prefer': 'count=exact' } }
       );
       const rows = await r.json();
+      // Supabase returns the server-side row count in Content-Range: "0-10/11"
+      const cr = r.headers.get('content-range') || '';
+      const serverCount = cr.includes('/') ? parseInt(cr.split('/').pop(), 10) : NaN;
       if (!r.ok) {
         console.error('loadUsers failed', r.status, rows);
         setMsg(`Load users failed (${r.status}). Check console.`);
       } else {
-        console.log('loadUsers returned', Array.isArray(rows) ? rows.length : 0, 'rows');
+        const clientCount = Array.isArray(rows) ? rows.length : 0;
+        console.log('loadUsers:', clientCount, 'rows returned, server-side count =', serverCount, 'content-range =', cr);
         setUsers(Array.isArray(rows) ? rows : []);
+        if (!isNaN(serverCount) && serverCount > clientCount) {
+          setMsg(`RLS is hiding ${serverCount - clientCount} profile row(s) from this admin session. ` +
+                 `Run the "admin inserts any profile" migration (which also widens SELECT) and refresh.`);
+        }
       }
     } catch (e) {
       console.error('loadUsers error', e);
