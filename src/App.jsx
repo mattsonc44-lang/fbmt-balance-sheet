@@ -6749,10 +6749,50 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
     if (!form.fullName||!form.email||!form.password) { setFormError('All fields required'); return; }
     if (form.password.length < 8) { setFormError('Password must be at least 8 characters'); return; }
     setSaving(true); setFormError('');
-    const res = await adminCall('create_user', { fullName:form.fullName, email:form.email, role:form.role, password:form.password });
+    const createEmail = form.email.trim().toLowerCase();
+    const res = await adminCall('create_user', { fullName:form.fullName, email:createEmail, role:form.role, password:form.password });
     if (res.error) { setFormError(res.error); setSaving(false); return; }
+
+    // Belt-and-suspenders: on some Supabase projects the profiles row is
+    // created by a trigger on auth.users insert. The trigger can lag by a
+    // moment, or (if the trigger isn't installed) it won't fire at all —
+    // which is why "user created" sometimes doesn't show up in the list.
+    // If the server returned a user id we insert the profile row ourselves
+    // (upsert so a trigger-created row isn't duplicated).
+    const newUserId = res?.user?.id || res?.id || null;
+    if (newUserId) {
+      try {
+        await fetch(window.SUPABASE_URL + '/rest/v1/profiles', {
+          method: 'POST',
+          headers: {
+            ...hdr,
+            'Prefer': 'resolution=merge-duplicates,return=minimal',
+          },
+          body: JSON.stringify({
+            id: newUserId,
+            full_name: form.fullName,
+            email: createEmail,
+            role: form.role,
+            is_active: true,
+            force_password_change: true,
+          }),
+        });
+      } catch { /* best-effort; the row may already exist from the trigger */ }
+    }
+
     setMsg('User created successfully'); setShowAdd(false); setForm({fullName:'',email:'',role:'user',password:''});
-    await loadUsers(); setSaving(false);
+    // Reload immediately, then once more after a short delay in case the
+    // server-side trigger is still catching up.
+    await loadUsers();
+    setTimeout(async () => {
+      await loadUsers();
+      const present = (users || []).some(u => (u.email || '').toLowerCase() === createEmail);
+      if (!present) {
+        setMsg(`User created in auth, but no profile row showed up for ${createEmail}. ` +
+               `Check the admin-user function logs or ensure a profiles-insert trigger exists.`);
+      }
+    }, 1500);
+    setSaving(false);
   };
 
   const handleUpdateRole = async (userId, updates) => {
