@@ -151,20 +151,26 @@ export const handler = async (event) => {
     //       trying to drop sheets into someone else's book.
     let lenderUserId = null;
     if (new_import_lender_id) {
-      const trustResp = await fetch(
-        SUPABASE_URL + '/rest/v1/ca_shares'
-          + '?ca_user_id=eq.' + encodeURIComponent(caUserId)
-          + '&lender_user_id=eq.' + encodeURIComponent(new_import_lender_id)
-          + '&select=id&limit=1',
-        { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }
-      );
-      if (!trustResp.ok) {
-        const t = await trustResp.text().catch(()=>'');
-        return err(trustResp.status, `Trust lookup failed: ${t.slice(0,200)}`);
+      // CA-initiated import — any CA may file a sheet into any lender's book.
+      // We verify two things only:
+      //   (a) caller's profiles.role is 'ca' (not a random authenticated user)
+      //   (b) target lender_user_id resolves to a profiles row with role='lender'
+      // These checks run through the service role so RLS doesn't get in the way.
+      const [callerResp, lenderResp] = await Promise.all([
+        fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(caUserId) + '&select=role',
+          { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }),
+        fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(new_import_lender_id) + '&select=role',
+          { headers: { 'apikey': SERVICE_ROLE, 'Authorization': 'Bearer ' + SERVICE_ROLE } }),
+      ]);
+      const caller = callerResp.ok ? await callerResp.json() : [];
+      const target = lenderResp.ok ? await lenderResp.json() : [];
+      const callerRole = Array.isArray(caller) && caller[0] && caller[0].role;
+      const targetRole = Array.isArray(target) && target[0] && target[0].role;
+      if (callerRole !== 'ca' && callerRole !== 'admin') {
+        return err(403, 'Only credit-analyst or admin accounts can import on behalf of a lender.');
       }
-      const trust = await trustResp.json();
-      if (!Array.isArray(trust) || !trust.length) {
-        return err(403, 'CA has no active share with that lender — ask the lender to share a sheet first.');
+      if (targetRole !== 'lender' && targetRole !== 'admin') {
+        return err(403, 'Target user is not a lender account.');
       }
       lenderUserId = new_import_lender_id;
     } else {
