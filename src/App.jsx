@@ -6738,9 +6738,28 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const r = await fetch(window.SUPABASE_URL+'/rest/v1/profiles?select=*&order=created_at.asc', {headers:hdr});
-      setUsers(await r.json());
-    } catch {}
+      // `created_at.asc.nullslast` so a profile row that was back-filled
+      // without a created_at value still appears at the end instead of being
+      // sorted into the void. `limit=5000` well above any realistic lender
+      // headcount — the previous default (1000) was fine, but this makes it
+      // explicit so a growing team never silently clips. Range: 0-4999 avoids
+      // PostgREST's 1000-row default cap when "count=none".
+      const r = await fetch(
+        window.SUPABASE_URL + '/rest/v1/profiles?select=*&order=created_at.asc.nullslast&limit=5000',
+        { headers: { ...hdr, 'Range-Unit': 'items', 'Range': '0-4999' } }
+      );
+      const rows = await r.json();
+      if (!r.ok) {
+        console.error('loadUsers failed', r.status, rows);
+        setMsg(`Load users failed (${r.status}). Check console.`);
+      } else {
+        console.log('loadUsers returned', Array.isArray(rows) ? rows.length : 0, 'rows');
+        setUsers(Array.isArray(rows) ? rows : []);
+      }
+    } catch (e) {
+      console.error('loadUsers error', e);
+      setMsg('Load users error — check console.');
+    }
     setLoading(false);
   };
   React.useEffect(()=>{ loadUsers(); },[]);
@@ -6868,11 +6887,23 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
             previous bank-wide Analysis Features card has been removed. */}
 
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
-          <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
-          <button onClick={()=>{setShowAdd(true);setFormError('');}}
-            style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            + Add User
-          </button>
+          <div style={{display:'flex',alignItems:'baseline',gap:12}}>
+            <div style={{fontWeight:700,fontSize:18,color:'#1a1a1a'}}>System Users</div>
+            <div style={{fontSize:12,color:'#6b7280'}}>
+              {loading ? 'Loading…' : `${users.length} user${users.length===1?'':'s'}`}
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={loadUsers} disabled={loading}
+              title="Reload the user list from the database"
+              style={{background:'white',color:'#6B0E1E',border:'1px solid #6B0E1E',borderRadius:7,padding:'8px 14px',fontWeight:600,fontSize:13,cursor:loading?'not-allowed':'pointer',fontFamily:'inherit'}}>
+              ↻ Refresh
+            </button>
+            <button onClick={()=>{setShowAdd(true);setFormError('');}}
+              style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+              + Add User
+            </button>
+          </div>
         </div>
 
         {loading ? <div style={{textAlign:'center',padding:40,color:'#888'}}>Loading users...</div> : (
