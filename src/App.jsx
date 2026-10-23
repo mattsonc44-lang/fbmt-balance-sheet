@@ -7396,17 +7396,34 @@ function CAPortal({ session, profile, onSignOut, onOpen, onImportForLender }) {
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           {onImportForLender && (
             <button
-              onClick={() => {
-                // Build a unique lender list from every share this CA has.
-                const lenders = [];
-                const seen = new Set();
+              onClick={async () => {
+                // Pull every lender in the bank so the CA can file an
+                // imported sheet into any book — no pre-existing share
+                // required. "authenticated reads all profiles" RLS makes
+                // this safe for CAs.
+                let lenders = [];
+                try {
+                  const r = await fetch(window.SUPABASE_URL +
+                    '/rest/v1/profiles?role=eq.lender&is_active=eq.true&select=id,full_name,email&order=full_name.asc',
+                    { headers: hdr });
+                  if (r.ok) {
+                    const rows = await r.json();
+                    lenders = (rows || []).map(p => ({
+                      id: p.id, name: p.full_name || p.email || 'Lender',
+                    }));
+                  }
+                } catch {}
+                // Fallback — if the profiles query returned nothing, union in
+                // the lenders this CA already has shares with so there's
+                // always SOME list.
+                const seen = new Set(lenders.map(l=>l.id));
                 (shares || []).forEach(s => {
                   if (!s.lender_user_id || seen.has(s.lender_user_id)) return;
                   seen.add(s.lender_user_id);
                   lenders.push({ id: s.lender_user_id, name: s.lender_name || 'Lender' });
                 });
                 if (!lenders.length) {
-                  alert('No active lender shares yet. Ask a lender to share any sheet with you first — then you can import on their behalf.');
+                  alert('No lenders found. Ask an admin to add a lender account.');
                   return;
                 }
                 let picked = lenders[0];
@@ -7419,7 +7436,7 @@ function CAPortal({ session, profile, onSignOut, onOpen, onImportForLender }) {
                 }
                 onImportForLender({ lender_user_id: picked.id, lender_name: picked.name });
               }}
-              title="Upload an Excel or PDF statement and save it on a lender's side"
+              title="Upload an Excel or PDF statement and save it on any lender's side"
               style={{background:'#1B4332',color:'white',border:'1px solid rgba(255,255,255,.3)',borderRadius:5,padding:'5px 12px',cursor:'pointer',fontSize:13,fontFamily:'inherit',fontWeight:600}}>
               📥 Import
             </button>
