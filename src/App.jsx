@@ -8522,7 +8522,7 @@ export default function BalanceSheet() {
 `You are an agricultural equipment appraiser. For each piece of farm equipment below, SEARCH THE WEB for recent (last 12 months) auction results and dealer-listing prices from sources like TractorHouse, MachineryPete, Fastline, IronPlanet, Rouse, Purple Wave, and manufacturer-dealer sites. Build a current-market VALUE range (used, retail) for each piece. Then compare the owner's declared value to that range and flag any that look off.
 
 Return STRICT JSON ONLY as the final text block (no markdown fences, no commentary):
-{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence with the source(s) you used>"}]}
+{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence>","source_url":"<primary comp page URL>","source_name":"<human label e.g. TractorHouse>"}]}
 
 Rules:
 - Use the web_search tool for each distinct piece — one search is fine if the result page has multiple comps.
@@ -8531,7 +8531,9 @@ Rules:
 - status "low":  declared value is >15% below the bottom of your range
 - status "unknown": search returned no useful comps for this exact year/make/model
 - low/high are USD numbers (no commas / no $)
-- note: brief one-sentence rationale naming the source(s) you cited (e.g. "TractorHouse listings on 2018 JD 8320R run $160k–$215k")
+- note: brief one-sentence rationale (e.g. "TractorHouse listings on 2018 JD 8320R run $160k–$215k")
+- source_url: the single most useful comp page you cited — full https:// URL. Omit or set null if you used no live source.
+- source_name: short label for the host (TractorHouse, MachineryPete, Fastline, IronPlanet, Rouse, Purple Wave, etc.).
 
 Equipment list:
 ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'('+r.condition+')':''} — declared $${numVal(r.value).toLocaleString()}`).join('\n')}`;
@@ -8644,7 +8646,7 @@ ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'
 `You are a vehicle appraiser. For each vehicle below, SEARCH THE WEB for current (last 6–12 months) listings and auction results from sources like Kelley Blue Book (kbb.com), NADA / J.D. Power (nadaguides.com), Edmunds, CarGurus, AutoTrader, Cars.com, and regional dealer sites. Build a current used-market VALUE range (private-party / clean-retail where available) for each vehicle, taking mileage and condition into account. Then compare the owner's declared value to that range and flag any that look off.
 
 Return STRICT JSON ONLY as the final text block (no markdown fences, no commentary):
-{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence citing the source(s)>"}]}
+{"items":[{"index":<number>,"status":"ok"|"high"|"low"|"unknown","low":<number>,"high":<number>,"note":"<one short sentence>","source_url":"<primary comp page URL>","source_name":"<human label e.g. KBB>"}]}
 
 Rules:
 - Use the web_search tool for each distinct vehicle — one search per vehicle is fine if the result page has multiple comps.
@@ -8653,7 +8655,9 @@ Rules:
 - status "low":  declared value is >15% below the bottom of your range
 - status "unknown": search returned no useful comps for this year/make/model
 - low/high are USD numbers (no commas / no $)
-- note: brief one-sentence rationale naming the source(s) you cited and whether the VIN-decoded trim narrowed it down (e.g. "KBB private-party on 2020 F-350 Lariat 6.7L diesel 4x4 at 85k mi runs $52k–$61k")
+- note: brief one-sentence rationale and whether the VIN-decoded trim narrowed it down (e.g. "KBB private-party on 2020 F-350 Lariat 6.7L diesel 4x4 at 85k mi runs $52k–$61k")
+- source_url: the single most useful comp page you cited — full https:// URL. Omit or set null if you had no live source.
+- source_name: short label for the host (KBB, NADA / J.D. Power, Edmunds, CarGurus, AutoTrader, Cars.com, dealer name, etc.).
 
 Vehicle list:
 ${items.map((r,k) => describe(r,k)).join('\n')}`;
@@ -13813,6 +13817,12 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   {chk.status === 'low'     && <span style={{color:'#92400e'}}>⚠ Declared value looks LOW — comps run ${chk.low?.toLocaleString()}–${chk.high?.toLocaleString()}.</span>}
                   {chk.status === 'unknown' && <span style={{color:'#6b7280'}}>❓ No reliable comps found.</span>}
                   {chk.note && <span style={{color:'#6b7280',marginLeft:6}}>· {chk.note}</span>}
+                  {chk.source_url && (
+                    <a href={chk.source_url} target="_blank" rel="noopener noreferrer"
+                      style={{color:'#2d5a8e',marginLeft:6,textDecoration:'underline',fontSize:'0.85em'}}>
+                      🔗 {chk.source_name || 'source'}
+                    </a>
+                  )}
                 </div>
               )}
               </React.Fragment>
@@ -13945,6 +13955,12 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                         {' vs est. market range '}
                         <strong>{money(chk.low)}–{money(chk.high)}</strong>
                         {chk.note && <span style={{display:'block',marginTop:4,color:'#6b7280',fontStyle:'italic'}}>“{chk.note}”</span>}
+                        {chk.source_url && (
+                          <a href={chk.source_url} target="_blank" rel="noopener noreferrer"
+                            style={{display:'inline-block',marginTop:4,color:'#2d5a8e',textDecoration:'underline',fontSize:'0.85em'}}>
+                            🔗 View comps on {chk.source_name || 'source site'}
+                          </a>
+                        )}
                       </>}
                 </div>
               )}
