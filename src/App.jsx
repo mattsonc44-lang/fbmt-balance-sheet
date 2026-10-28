@@ -8635,12 +8635,17 @@ ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'
     const describe = (r, k) => {
       const d = decoded[k];
       const base = `${r.year} ${r.make}`;
+      // User-selected fuel wins over the VIN decode (owner knows the actual
+      // trim). We filter the decoded engine string out of vinExtras when the
+      // user picked a fuel, so we don't double-stamp "gas" + "diesel" on
+      // half-ton VINs that NHTSA's VPIC gets wrong.
       const vinExtras = d
-        ? [d.trim, d.body, d.engine, d.drive].filter(Boolean).join(', ')
+        ? [d.trim, d.body, (!r.fuel ? d.engine : null), d.drive].filter(Boolean).join(', ')
         : '';
+      const fuel    = r.fuel ? ` ${r.fuel}` : '';
       const mileage = r.mileage ? ` ${Number(r.mileage).toLocaleString()} mi` : '';
-      const cond = r.condition ? ` (${r.condition})` : '';
-      return `${r._i}. ${base}${vinExtras ? ' — ' + vinExtras : ''}${mileage}${cond} — declared $${numVal(r.value).toLocaleString()}`;
+      const cond    = r.condition ? ` (${r.condition})` : '';
+      return `${r._i}. ${base}${fuel}${vinExtras ? ' — ' + vinExtras : ''}${mileage}${cond} — declared $${numVal(r.value).toLocaleString()}`;
     };
     const prompt =
 `You are a vehicle appraiser. For each vehicle below, SEARCH THE WEB for current (last 6–12 months) listings and auction results from sources like Kelley Blue Book (kbb.com), NADA / J.D. Power (nadaguides.com), Edmunds, CarGurus, AutoTrader, Cars.com, and regional dealer sites. Build a current used-market VALUE range (private-party / clean-retail where available) for each vehicle, taking mileage and condition into account. Then compare the owner's declared value to that range and flag any that look off.
@@ -13752,6 +13757,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <span style={{flex:1}}>Make and Model</span>
               <span style={{width:130}}>VIN</span>
               <span style={{width:85}}>Mileage</span>
+              <span style={{width:70}}>Fuel</span>
               <span style={{width:95}}>Condition</span>
               <span style={{width:110}}>Value</span>
               <span style={{width:70}} title="Lender depreciation % — reduces this row's value on the balance sheet and collateral worksheet">Depr %</span>
@@ -13779,6 +13785,17 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="mach-col" style={{width:85}}>
                   <input className="text-input" type="text" value={r.mileage||''} placeholder="miles"
                     onChange={e=>setArr("vehicles",i,"mileage",e.target.value.replace(/[^0-9]/g,""))} />
+                </div>
+                <div className="mach-col" style={{width:70}}>
+                  <select className="unit-select" value={r.fuel || ''}
+                    title="Powertrain — passed to the appraisal search so diesel comps aren't mixed with gas."
+                    onChange={e=>setArr("vehicles",i,"fuel",e.target.value)}>
+                    <option value="">—</option>
+                    <option value="Gas">Gas</option>
+                    <option value="Diesel">Diesel</option>
+                    <option value="Hybrid">Hybrid</option>
+                    <option value="Electric">Electric</option>
+                  </select>
                 </div>
                 <div className="mach-col" style={{width:95}}>
                   <select className="unit-select" value={r.condition}
@@ -13829,7 +13846,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               );
             })}
           </div>
-          <button className="add-btn" onClick={()=>addRow("vehicles",{year:"",make:"",vin:"",mileage:"",condition:"",value:"",depreciation:""})}>+ Add Vehicle</button>
+          <button className="add-btn" onClick={()=>addRow("vehicles",{year:"",make:"",vin:"",mileage:"",fuel:"",condition:"",value:"",depreciation:""})}>+ Add Vehicle</button>
           <div className="subtotal-row total"><span>Total Titled Vehicles</span><strong>{fmt(vehiclesVal)}</strong></div>
         </div>
       );
