@@ -3653,7 +3653,36 @@ function CustInp({value,onChange,placeholder,type='text',prefix,style={}}) {
   );
 }
 
-// ── Customer Balance Sheet Form ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer Balance Sheet Form
+//
+// ── PARITY RULE ──────────────────────────────────────────────────────────────
+// Every schema change that lands in the LENDER wizard (new field on a row,
+// new column, new section, renamed inputs, new row-value helpers) must be
+// mirrored HERE too, so the customer sees the same form the lender fills in.
+// Shared helpers live in one place: _mktLs / _brLs / _reVal — copy them from
+// the lender side so totals match exactly.
+//
+// The ONLY things that stay lender-only (don't duplicate here):
+//   • Collateral worksheet step (lien analysis, net recoveries)
+//   • Credit-memo / credit-analysis panels
+//   • Depreciation % column on vehicles / machinery
+//   • Price-check buttons and comp-source links
+//   • Linked-entity ownership % (bank-side consolidation)
+//   • CA Share, Save folder picker, admin tools, audit log
+//   • Any field named "...Note", "...Analysis", "lender", "underwriting"
+//
+// When in doubt: if a customer would type the raw number into their own
+// records, it belongs on this form. If it's a bank calculation about them,
+// it stays lender-side.
+//
+// Changelog of schema touches we've mirrored here:
+//   • Market livestock → head/wt/price/basis/share  (Oct 2026)
+//   • Breeding stock   → head/$per-head/share       (Oct 2026)
+//   • Real estate      → valueBasis (acre/lot/total) (Oct 2026)
+//   • reDebt           → lienHolder, annualPmt, accruedInterest, principal
+//                        (Oct 2026 — unified RE Debt rolled into customer form)
+// ─────────────────────────────────────────────────────────────────────────────
 function CustomerBalanceSheetForm({shareId}) {
   const [stage,setStage]=React.useState('pin');
   const [pin,setPin]=React.useState(''); const [pinErr,setPinErr]=React.useState('');
@@ -3669,7 +3698,7 @@ function CustomerBalanceSheetForm({shareId}) {
   const [budgetExpenses,setBudgetExpenses]=React.useState([]);
   const [expenseList]=React.useState(()=>loadExpenseList());
   const [customExpense,setCustomExpense]=React.useState('');
-  const [open,setOpen]=React.useState({cash:true,receivables:false,fedPay:false,farmProducts:true,livestock:true,cropInv:true,supplies:false,otherCur:false,breeding:false,re:true,reContracts:false,vehicles:false,machinery:false,otherA:false,opNotes:true,acctsDue:false,termDebt:true,reCurrent:false,otherCurLiab:false,reMort:false,otherL:false});
+  const [open,setOpen]=React.useState({cash:true,receivables:false,fedPay:false,farmProducts:true,livestock:true,cropInv:true,supplies:false,otherCur:false,breeding:false,re:true,reContracts:false,vehicles:false,machinery:false,otherA:false,opNotes:true,acctsDue:false,termDebt:true,reCurrent:false,otherCurLiab:false,reMort:false,reDebt:false,otherL:false});
   const toggle = k => setOpen(o=>({...o,[k]:!o[k]}));
   const n = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
   const fmt = v => v===''||v===null||v===undefined?'$0':'$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
@@ -3787,10 +3816,35 @@ function CustomerBalanceSheetForm({shareId}) {
   // Totals
   const cashTot = n(data.cashGlacier)+(data.cashOther||[]).reduce((s,r)=>s+n(r.amount),0);
   const farmProdTot = (data.farmProducts||[]).reduce((s,r)=>s+n(r.quantity)*n(r.pricePerUnit)*(n(r.share||100)/100),0);
-  const lsMktTot = (data.livestockMarket||[]).reduce((s,r)=>s+n(r.value),0);
+  // Mirror the lender's row-level helpers so the customer-facing form
+  // computes identical totals when they type head/wt/price into the new
+  // breakdown inputs (and falls back to the legacy single `value` field so
+  // older sheets stay accurate).
+  const _mktLs = r => {
+    const head = n(r.number), wt = n(r.weightPerHd), price = n(r.pricePerUnit);
+    const basis = r.priceBasis || (wt > 0 ? 'cwt' : 'head');
+    let c = 0;
+    if (head > 0 && price > 0) {
+      if (basis === 'head') c = head * price;
+      else if (basis === 'lb') c = head * wt * price;
+      else if (basis === 'cwt') c = head * (wt / 100) * price;
+    }
+    return (c > 0 ? c : n(r.value)) * (n(r.share || '100') / 100);
+  };
+  const _brLs = r => {
+    const head = n(r.number), vph = n(r.valuePerHd);
+    const c = head * vph;
+    return (c > 0 ? c : n(r.value)) * (n(r.share || '100') / 100);
+  };
+  const _reVal = r => {
+    const basis = r.valueBasis || 'acre';
+    const vpu = n(r.valuePerAcre);
+    return basis === 'acre' ? n(r.acres) * vpu : vpu;
+  };
+  const lsMktTot = (data.livestockMarket||[]).reduce((s,r)=>s+_mktLs(r),0);
   const cropInvTot = (data.cropInvestment||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
-  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+n(r.value),0);
-  const reTot = (data.realEstate||[]).reduce((s,r)=>s+n(r.acres)*n(r.valuePerAcre),0);
+  const breedTot = (data.breedingStock||[]).reduce((s,r)=>s+_brLs(r),0);
+  const reTot = (data.realEstate||[]).reduce((s,r)=>s+_reVal(r),0);
   const vehTot = (data.vehicles||[]).reduce((s,r)=>s+n(r.value),0);
   const machTot = (data.machinery||[]).reduce((s,r)=>s+n(r.value),0);
   const otherATot = (data.otherAssets||[]).reduce((s,r)=>s+n(r.amount),0);
@@ -3901,8 +3955,27 @@ function CustomerBalanceSheetForm({shareId}) {
         </CustSec>
 
         <CustSec title="Market Livestock" open={open.livestock} onToggle={()=>toggle('livestock')}>
-          {(data.livestockMarket||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.number} onChange={v=>setArr('livestockMarket',i,'number',v)} placeholder="# head" style={{width:80,flex:'none'}}/><CustInp value={r.kind} onChange={v=>setArr('livestockMarket',i,'kind',v)} placeholder="Kind / weight" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('livestockMarket',i,'value',v)} placeholder="Total value" style={{flex:1}}/>{remBtn('livestockMarket',i)}</div>)}
-          {addBtn('livestockMarket',{number:'',kind:'',value:''},'Add Livestock')}
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Enter # head × avg weight × price (cwt / lb / head). The row total updates automatically.</div>
+          {(data.livestockMarket||[]).map((r,i)=>{
+            const rowVal = _mktLs(r);
+            return (
+              <div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+                <CustInp value={r.number} onChange={v=>setArr('livestockMarket',i,'number',v)} placeholder="# head" style={{flex:'1 1 70px'}}/>
+                <CustInp value={r.kind} onChange={v=>setArr('livestockMarket',i,'kind',v)} placeholder="Kind" style={{flex:'2 1 140px'}}/>
+                <CustInp value={r.weightPerHd||''} onChange={v=>setArr('livestockMarket',i,'weightPerHd',v)} placeholder="lb/head" style={{flex:'1 1 70px'}}/>
+                <CustInp prefix="$" value={r.pricePerUnit||''} onChange={v=>setArr('livestockMarket',i,'pricePerUnit',v)} placeholder="price" style={{flex:'1 1 80px'}}/>
+                <select value={r.priceBasis||'cwt'} onChange={e=>setArr('livestockMarket',i,'priceBasis',e.target.value)}
+                  style={{flex:'0 1 75px',border:'1px solid #ddd',borderRadius:6,padding:'6px 4px',fontSize:12,fontFamily:'inherit'}}>
+                  <option value="head">/head</option>
+                  <option value="cwt">/cwt</option>
+                  <option value="lb">/lb</option>
+                </select>
+                <div style={{fontSize:12,color:'#6B0E1E',fontWeight:600,alignSelf:'center',whiteSpace:'nowrap'}}>{fmt(rowVal)}</div>
+                {remBtn('livestockMarket',i)}
+              </div>
+            );
+          })}
+          {addBtn('livestockMarket',{number:'',kind:'',weightPerHd:'',pricePerUnit:'',priceBasis:'cwt',value:'',share:'100'},'Add Livestock')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(lsMktTot)}</div>
         </CustSec>
 
@@ -3935,20 +4008,47 @@ function CustomerBalanceSheetForm({shareId}) {
         </CustSec>
 
         <CustSec title="Breeding Stock" open={open.breeding} onToggle={()=>toggle('breeding')}>
-          {(data.breedingStock||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.number} onChange={v=>setArr('breedingStock',i,'number',v)} placeholder="# head" style={{width:80,flex:'none'}}/><CustInp value={r.kind} onChange={v=>setArr('breedingStock',i,'kind',v)} placeholder="Kind" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('breedingStock',i,'value',v)} placeholder="Total value" style={{flex:1}}/>{remBtn('breedingStock',i)}</div>)}
-          {addBtn('breedingStock',{number:'',kind:'',value:''},'Add Breeding Stock')}
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Enter # head × $/head. The row total updates automatically.</div>
+          {(data.breedingStock||[]).map((r,i)=>{
+            const rowVal = _brLs(r);
+            return (
+              <div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+                <CustInp value={r.number} onChange={v=>setArr('breedingStock',i,'number',v)} placeholder="# head" style={{flex:'1 1 70px'}}/>
+                <CustInp value={r.kind} onChange={v=>setArr('breedingStock',i,'kind',v)} placeholder="Kind" style={{flex:'2 1 160px'}}/>
+                <CustInp prefix="$" value={r.valuePerHd||''} onChange={v=>setArr('breedingStock',i,'valuePerHd',v)} placeholder="$/head" style={{flex:'1 1 100px'}}/>
+                <div style={{fontSize:12,color:'#6B0E1E',fontWeight:600,alignSelf:'center',whiteSpace:'nowrap'}}>{fmt(rowVal)}</div>
+                {remBtn('breedingStock',i)}
+              </div>
+            );
+          })}
+          {addBtn('breedingStock',{number:'',kind:'',valuePerHd:'',value:'',share:'100'},'Add Breeding Stock')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(breedTot)}</div>
         </CustSec>
 
         <CustSec title="Real Estate" open={open.re} onToggle={()=>toggle('re')}>
-          {(data.realEstate||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
-            <CustInp value={r.acres} onChange={v=>setArr('realEstate',i,'acres',v)} placeholder="Acres" type="number" style={{flex:'1 1 70px'}}/>
-            <CustInp value={r.description||r.reType} onChange={v=>setArr('realEstate',i,'description',v)} placeholder="Description / section" style={{flex:'2 1 140px'}}/>
-            <CustInp prefix="$" value={r.valuePerAcre} onChange={v=>setArr('realEstate',i,'valuePerAcre',v)} placeholder="$/acre" style={{flex:'1 1 80px'}}/>
-            <div style={{fontSize:12,color:'#6B0E1E',fontWeight:600,alignSelf:'center',whiteSpace:'nowrap'}}>{fmt(n(r.acres)*n(r.valuePerAcre))}</div>
-            {remBtn('realEstate',i)}
-          </div>)}
-          {addBtn('realEstate',{acres:'',reType:'',description:'',valuePerAcre:''},'Add Tract')}
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Pick how you want to value each tract — per acre, per lot, or a lump total.</div>
+          {(data.realEstate||[]).map((r,i)=>{
+            const basis = r.valueBasis || 'acre';
+            const rowVal = _reVal(r);
+            return (
+              <div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+                <CustInp value={r.acres} onChange={v=>setArr('realEstate',i,'acres',v)} placeholder="Acres" type="number" style={{flex:'1 1 70px'}}/>
+                <CustInp value={r.description||r.reType} onChange={v=>setArr('realEstate',i,'description',v)} placeholder="Description / section" style={{flex:'2 1 140px'}}/>
+                <select value={basis} onChange={e=>setArr('realEstate',i,'valueBasis',e.target.value)}
+                  style={{flex:'0 1 80px',border:'1px solid #ddd',borderRadius:6,padding:'6px 4px',fontSize:12,fontFamily:'inherit'}}>
+                  <option value="acre">$/acre</option>
+                  <option value="lot">$/lot</option>
+                  <option value="total">Lump</option>
+                </select>
+                <CustInp prefix="$" value={r.valuePerAcre} onChange={v=>setArr('realEstate',i,'valuePerAcre',v)}
+                  placeholder={basis==='acre'?'$/acre':basis==='lot'?'$/lot':'Total $'}
+                  style={{flex:'1 1 80px'}}/>
+                <div style={{fontSize:12,color:'#6B0E1E',fontWeight:600,alignSelf:'center',whiteSpace:'nowrap'}}>{fmt(rowVal)}</div>
+                {remBtn('realEstate',i)}
+              </div>
+            );
+          })}
+          {addBtn('realEstate',{acres:'',reType:'',description:'',valueBasis:'acre',valuePerAcre:''},'Add Tract')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(reTot)}</div>
         </CustSec>
 
@@ -4052,6 +4152,21 @@ function CustomerBalanceSheetForm({shareId}) {
           {(data.reMortgages||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.lienHolder} onChange={v=>setArr('reMortgages',i,'lienHolder',v)} placeholder="Lender" style={{flex:2}}/><CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('reMortgages',i,'principal',v)} placeholder="0" style={{flex:1}}/>{remBtn('reMortgages',i)}</div>)}
           {addBtn('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''},'Add Mortgage')}
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(reMortTot)}</div>
+        </CustSec>
+
+        {/* Real Estate Debt (unified) — mirror of the lender form. Accrued
+            interest + principal + annual payment lets the lender see the real
+            principal-reduction split on each loan. */}
+        <CustSec title="Real Estate Debt (with payment & accrued interest)" open={open.reDebt} onToggle={()=>toggle('reDebt')}>
+          <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Each mortgage: who you owe, the full balance, your annual payment, and any interest that's already accrued since the last payment.</div>
+          {(data.reDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
+            <CustInp value={r.lienHolder} onChange={v=>setArr('reDebt',i,'lienHolder',v)} placeholder="Lender" style={{flex:'2 1 160px'}}/>
+            <CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('reDebt',i,'principal',v)} placeholder="0" style={{flex:'1 1 110px'}}/>
+            <CustInp prefix="Pmt $" value={r.annualPmt} onChange={v=>setArr('reDebt',i,'annualPmt',v)} placeholder="Annual pmt" style={{flex:'1 1 110px'}}/>
+            <CustInp prefix="Int $" value={r.accruedInterest||''} onChange={v=>setArr('reDebt',i,'accruedInterest',v)} placeholder="Accrued int" style={{flex:'1 1 110px'}}/>
+            {remBtn('reDebt',i)}
+          </div>)}
+          {addBtn('reDebt',{lienHolder:'',annualPmt:'',accruedInterest:'',principal:'',rate:'',terms:''},'Add Mortgage')}
         </CustSec>
 
         <CustSec title="Taxes Due & Other Liabilities" open={open.otherL} onToggle={()=>toggle('otherL')}>
