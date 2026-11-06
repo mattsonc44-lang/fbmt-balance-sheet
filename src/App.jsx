@@ -1580,8 +1580,8 @@ function BudgetView({
               <div className="input-group" style={{width:150,flexShrink:0}}>
                 <div className="input-wrap">
                   <span className="prefix">$</span>
-                  <input type="text" value={r.amount} placeholder="0"
-                    onChange={e => setArr("budgetMisc",i,"amount",e.target.value.replace(/[^0-9.]/g,""))} />
+                  <MoneyIn value={r.amount} placeholder="0"
+                    onChange={v => setArr("budgetMisc",i,"amount",v)} />
                 </div>
               </div>
               <button className="remove-btn" onClick={() => removeRow("budgetMisc",i)}>x</button>
@@ -1612,7 +1612,7 @@ function BudgetView({
           <div className="bg-header-row">
             <span style={{width:20}}></span>
             <span className="bg-col-label" style={{flex:1}}>Description</span>
-            <span className="bg-col-label" style={{width:90}}>Amount</span>
+            <span className="bg-col-label" style={{width:140}}>Amount</span>
             <span className="bg-col-label" style={{width:70,textAlign:"center",color:"#15803d"}}>Pre-paid</span>
             <span style={{width:28}}></span>
           </div>
@@ -1628,11 +1628,11 @@ function BudgetView({
                   placeholder="Type or select expense..."
                 />
               </div>
-              <div className="input-group" style={{width:90,flexShrink:0}}>
+              <div className="input-group" style={{width:140,flexShrink:0}}>
                 <div className="input-wrap" style={{opacity:r.prepaid?0.5:1}}>
                   <span className="prefix">$</span>
-                  <input type="text" value={r.amount} placeholder="0"
-                    onChange={e => setArr("budgetExpenses",i,"amount",e.target.value.replace(/[^0-9.]/g,""))} />
+                  <MoneyIn value={r.amount} placeholder="0"
+                    onChange={v => setArr("budgetExpenses",i,"amount",v)} />
                 </div>
               </div>
               <div style={{width:70,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
