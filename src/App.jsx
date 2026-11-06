@@ -1227,8 +1227,7 @@ function Inp({ label, value, onChange, placeholder, prefix }) {
           placeholder={placeholder || "0"}
           onChange={handleChange}
           onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          style={isMoney ? { textAlign: 'right' } : undefined} />
+          onBlur={() => setFocused(false)} />
       </div>
     </div>
   );
@@ -1263,7 +1262,7 @@ function MoneyIn({ value, onChange, placeholder, style }) {
       onChange={handle}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
-      style={{ textAlign: 'right', ...(style || {}) }} />
+      style={style || undefined} />
   );
 }
 
@@ -1612,7 +1611,7 @@ function BudgetView({
           <div className="bg-header-row">
             <span style={{width:20}}></span>
             <span className="bg-col-label" style={{flex:1}}>Description</span>
-            <span className="bg-col-label" style={{width:125,textAlign:"right"}}>Amount</span>
+            <span className="bg-col-label" style={{width:125}}>Amount</span>
             <span className="bg-col-label" style={{width:70,textAlign:"center",color:"#15803d"}}>Pre-paid</span>
             <span style={{width:28}}></span>
           </div>
@@ -3753,7 +3752,7 @@ function CustInp({value,onChange,placeholder,type='text',prefix,style={}}) {
         onChange={handleChange}
         onFocus={()=>setFocused(true)}
         onBlur={()=>setFocused(false)}
-        style={{flex:1,border:'none',padding:'8px 10px',fontSize:14,fontFamily:'inherit',outline:'none',background:'transparent',textAlign:isMoney?'right':'left'}}/>
+        style={{flex:1,border:'none',padding:'8px 10px',fontSize:14,fontFamily:'inherit',outline:'none',background:'transparent'}}/>
     </div>
   );
 }
