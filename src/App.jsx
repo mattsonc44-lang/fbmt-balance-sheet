@@ -1190,17 +1190,83 @@ function emptyData() {
 
 // Tiny reusable components
 function Inp({ label, value, onChange, placeholder, prefix }) {
+  // Any input whose prefix carries a "$" is treated as money — raw digits
+  // still go to state (lender-side math is unchanged), but we display
+  // thousand-separators + right-align when the box isn't focused so the
+  // amounts read like currency ($12,500 not 12500). While the user is
+  // editing we revert to the raw digits so cursor math stays sane.
+  const isMoney = typeof prefix === 'string' && prefix.indexOf('$') !== -1;
+  const [focused, setFocused] = React.useState(false);
+  const fmtMoney = (v) => {
+    if (v === '' || v == null) return '';
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    if (!isFinite(n)) return String(v);
+    const hasDot = String(v).indexOf('.') >= 0;
+    return n.toLocaleString('en-US', hasDot
+      ? { minimumFractionDigits: 0, maximumFractionDigits: 2 }
+      : { maximumFractionDigits: 0 });
+  };
+  const display = isMoney && !focused ? fmtMoney(value) : (value ?? '');
+  const handleChange = (e) => {
+    let raw = e.target.value;
+    if (isMoney) {
+      raw = raw.replace(/[^0-9.\-]/g, '');
+      const firstDot = raw.indexOf('.');
+      if (firstDot >= 0) raw = raw.slice(0, firstDot + 1) + raw.slice(firstDot + 1).replace(/\./g, '');
+    } else {
+      raw = raw.replace(/[^0-9.]/g, '');
+    }
+    onChange(raw);
+  };
   return (
     <div className="input-group">
       {label && <label>{label}</label>}
       <div className="input-wrap">
         {prefix && <span className="prefix">{prefix}</span>}
-        <input type="text" value={value} placeholder={placeholder || "0"}
-          onChange={e => onChange(e.target.value.replace(/[^0-9.]/g, ""))} />
+        <input type="text" inputMode="decimal" value={display}
+          placeholder={placeholder || "0"}
+          onChange={handleChange}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={isMoney ? { textAlign: 'right' } : undefined} />
       </div>
     </div>
   );
 }
+// Lightweight money <input> for inline use inside existing .input-wrap rows.
+// Keeps the row layout (so no column widths shift) but formats the displayed
+// value with thousand separators + right-aligns when not focused. Raw digits
+// (no commas) are what we hand to onChange, so all downstream math and the
+// saved sheet stay unchanged.
+function MoneyIn({ value, onChange, placeholder, style }) {
+  const [focused, setFocused] = React.useState(false);
+  const fmt = (v) => {
+    if (v === '' || v == null) return '';
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    if (!isFinite(n)) return String(v);
+    const hasDot = String(v).indexOf('.') >= 0;
+    return n.toLocaleString('en-US', hasDot
+      ? { minimumFractionDigits: 0, maximumFractionDigits: 2 }
+      : { maximumFractionDigits: 0 });
+  };
+  const display = focused ? (value ?? '') : fmt(value);
+  const handle = (e) => {
+    let raw = e.target.value.replace(/[^0-9.\-]/g, '');
+    const firstDot = raw.indexOf('.');
+    if (firstDot >= 0) raw = raw.slice(0, firstDot + 1) + raw.slice(firstDot + 1).replace(/\./g, '');
+    onChange(raw);
+  };
+  return (
+    <input type="text" inputMode="decimal"
+      value={display}
+      placeholder={placeholder || "0"}
+      onChange={handle}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{ textAlign: 'right', ...(style || {}) }} />
+  );
+}
+
 function TxtInp({ label, value, onChange, placeholder }) {
   return (
     <div className="input-group">
@@ -13629,8 +13695,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="input-group" style={{width:95,flexShrink:0}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.pricePerUnit||''} placeholder="0.00"
-                      onChange={e=>setArr("livestockMarket",i,"pricePerUnit",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.pricePerUnit||''} placeholder="0.00"
+                      onChange={v=>setArr("livestockMarket",i,"pricePerUnit",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
@@ -13714,8 +13780,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="input-group" style={{width:105,flexShrink:0}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.pricePerUnit} placeholder="0.00"
-                      onChange={e=>setArr("farmProducts",i,"pricePerUnit",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.pricePerUnit} placeholder="0.00"
+                      onChange={v=>setArr("farmProducts",i,"pricePerUnit",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:75,flexShrink:0}}>
@@ -13774,8 +13840,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="input-group" style={{width:120,flexShrink:0}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.valuePerAcre} placeholder="0.00"
-                      onChange={e=>setArr("cropInvestment",i,"valuePerAcre",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.valuePerAcre} placeholder="0.00"
+                      onChange={v=>setArr("cropInvestment",i,"valuePerAcre",v)} />
                   </div>
                 </div>
                 <CalcRow value={rv} style={{width:115}} />
@@ -13857,8 +13923,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="input-group" style={{width:120,flexShrink:0}}>
                   <div className="input-wrap" title="Average value per head. Row total shows below the row as # head × this.">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.valuePerHd||''} placeholder="0.00"
-                      onChange={e=>setArr("breedingStock",i,"valuePerHd",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.valuePerHd||''} placeholder="0.00"
+                      onChange={v=>setArr("breedingStock",i,"valuePerHd",v)} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:11}}>/hd</span>
                   </div>
                 </div>
@@ -13944,8 +14010,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="input-group" style={{width:115,flexShrink:0}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.valuePerAcre} placeholder="0"
-                      onChange={e=>setArr("realEstate",i,"valuePerAcre",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.valuePerAcre} placeholder="0"
+                      onChange={v=>setArr("realEstate",i,"valuePerAcre",v)} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:10}}>{valueLabel}</span>
                   </div>
                 </div>
@@ -14051,8 +14117,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="mach-col" style={{width:110}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.value} placeholder="0"
-                      onChange={e=>setArr("vehicles",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.value} placeholder="0"
+                      onChange={v=>setArr("vehicles",i,"value",v)} />
                   </div>
                 </div>
                 <div className="mach-col" style={{width:70}}>
@@ -14177,8 +14243,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <div className="mach-col" style={{width:130}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
-                    <input type="text" value={r.value} placeholder="0"
-                      onChange={e=>setArr("machinery",i,"value",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <MoneyIn value={r.value} placeholder="0"
+                      onChange={v=>setArr("machinery",i,"value",v)} />
                   </div>
                 </div>
                 <div className="mach-col" style={{width:70}}>
