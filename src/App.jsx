@@ -3643,12 +3643,50 @@ function CustSec({title,children,open,onToggle}) {
 }
 
 function CustInp({value,onChange,placeholder,type='text',prefix,style={}}) {
+  // Any input whose prefix carries a "$" is treated as money — the raw digits
+  // are still what gets stored (so the lender-side math stays unchanged),
+  // but we DISPLAY thousand-separators while the user isn't actively editing
+  // the field so the amounts read like real currency ($12,500 not 12500).
+  const isMoney = typeof prefix === 'string' && prefix.indexOf('$') !== -1;
+  const [focused, setFocused] = React.useState(false);
+  const fmtMoney = (v) => {
+    if (v === '' || v == null) return '';
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    if (!isFinite(n)) return String(v);
+    // Keep the user's own decimals if they typed them; otherwise drop cents.
+    const str = String(v);
+    const hasDot = str.indexOf('.') >= 0;
+    return n.toLocaleString('en-US', hasDot ? { minimumFractionDigits: 0, maximumFractionDigits: 2 } : { maximumFractionDigits: 0 });
+  };
+  // Decide what the <input value> looks like right now:
+  //   • money + not focused → formatted with commas
+  //   • money + focused     → raw digits/decimals so the user can edit
+  //   • plain text          → whatever they typed
+  const displayValue = isMoney && !focused ? fmtMoney(value) : (value || '');
+  const handleChange = (e) => {
+    let raw = e.target.value;
+    if (isMoney) {
+      // Strip commas + anything non-numeric except . and leading -
+      raw = raw.replace(/[^0-9.\-]/g, '');
+      // Keep only the first dot
+      const firstDot = raw.indexOf('.');
+      if (firstDot >= 0) raw = raw.slice(0, firstDot + 1) + raw.slice(firstDot + 1).replace(/\./g, '');
+    } else if (type === 'number') {
+      raw = raw.replace(/[^0-9.]/g, '');
+    }
+    onChange(raw);
+  };
   return (
     <div style={{display:'flex',alignItems:'center',border:'1px solid #d1d5db',borderRadius:6,overflow:'hidden',background:'white',...style}}>
       {prefix&&<span style={{padding:'8px 10px',background:'#f9f5f5',borderRight:'1px solid #d1d5db',color:'#666',fontSize:13,whiteSpace:'nowrap'}}>{prefix}</span>}
-      <input type={type} value={value||''} placeholder={placeholder||''}
-        onChange={e=>onChange(type==='number'?e.target.value.replace(/[^0-9.]/g,''):e.target.value)}
-        style={{flex:1,border:'none',padding:'8px 10px',fontSize:14,fontFamily:'inherit',outline:'none',background:'transparent'}}/>
+      <input type="text"
+        inputMode={isMoney || type === 'number' ? 'decimal' : undefined}
+        value={displayValue}
+        placeholder={placeholder || ''}
+        onChange={handleChange}
+        onFocus={()=>setFocused(true)}
+        onBlur={()=>setFocused(false)}
+        style={{flex:1,border:'none',padding:'8px 10px',fontSize:14,fontFamily:'inherit',outline:'none',background:'transparent',textAlign:isMoney?'right':'left'}}/>
     </div>
   );
 }
@@ -4365,7 +4403,13 @@ function CustomerBudgetForm({shareId}) {
   const miscTot=misc.reduce((s,r)=>s+n(r.amount),0);
   const totalIncome=cropTot+lsTot+miscTot;
   const totalExpenses=expenses.reduce((s,r)=>s+n(r.amount),0);
-  const net=totalIncome-totalExpenses;
+  // Scheduled debt service snapshot from the lender (budget-only shares now
+  // carry this so the customer sees the same cashflow the banker does).
+  const debtService = Array.isArray(shareRow?.original_data?.debtService)
+    ? shareRow.original_data.debtService
+    : [];
+  const debtTot = debtService.reduce((s,r)=>s+n(r.annualPmt),0);
+  const net=totalIncome-totalExpenses-debtTot;
 
   const submit=async()=>{
     setSubmitting(true);
@@ -4419,8 +4463,13 @@ function CustomerBudgetForm({shareId}) {
       </div>
       <div style={{maxWidth:700,margin:'0 auto',padding:'20px 16px 80px'}}>
         {/* Running totals */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
-          {[['Total Income',totalIncome,'#1a5c25'],['Total Expenses',totalExpenses,'#7a1a1a'],[net>=0?'Net Income':'Net Loss',Math.abs(net),net>=0?'#1a5c25':'#7a1a1a']].map(([l,v,c])=>(
+        <div style={{display:'grid',gridTemplateColumns: debtTot>0?'repeat(4,1fr)':'repeat(3,1fr)',gap:10,marginBottom:20}}>
+          {[
+            ['Total Income',totalIncome,'#1a5c25'],
+            ['Total Expenses',totalExpenses,'#7a1a1a'],
+            ...(debtTot>0 ? [['Debt Service',debtTot,'#7a1a1a']] : []),
+            [net>=0?'Net Income':'Net Loss',Math.abs(net),net>=0?'#1a5c25':'#7a1a1a'],
+          ].map(([l,v,c])=>(
             <div key={l} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
               <div style={{fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:4}}>{l}</div>
               <div style={{fontSize:18,fontWeight:700,color:c}}>{fmt(v)}</div>
@@ -4499,6 +4548,34 @@ function CustomerBudgetForm({shareId}) {
           ))}
           {expenses.length>0&&<div style={{fontWeight:700,color:'#7a1a1a',fontSize:14,marginTop:12,padding:'8px 0',borderTop:'2px solid #e5e7eb'}}>TOTAL EXPENSES: {fmt(totalExpenses)}</div>}
         </>)}
+
+        {/* Scheduled Debt Service — read-only snapshot the lender attached
+            at share time. Customer can't change these amounts here; they're
+            already on their own loans and feed straight into Net. */}
+        {debtService.length > 0 && (
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:'16px 18px',marginBottom:20}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <div style={{fontWeight:700,fontSize:14,color:'#1a1a1a'}}>Scheduled Debt Service</div>
+              <div style={{fontSize:11,color:'#888',fontStyle:'italic'}}>From your loans on file at FBMT</div>
+            </div>
+            {debtService.map((r, i) => (
+              <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid #f3f4f6',fontSize:13}}>
+                <div>
+                  <span style={{fontWeight:600}}>{r.creditor}</span>
+                  {r.type && <span style={{color:'#888',marginLeft:6,fontSize:11}}>· {r.type}</span>}
+                </div>
+                <div style={{fontWeight:700,color:'#7a1a1a'}}>{fmt(r.annualPmt)}</div>
+              </div>
+            ))}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:8,marginTop:4,borderTop:'2px solid #e5e7eb',fontWeight:700,color:'#7a1a1a',fontSize:14}}>
+              <span>TOTAL DEBT SERVICE</span>
+              <span>{fmt(debtTot)}</span>
+            </div>
+            <div style={{fontSize:11,color:'#6b7280',marginTop:8,fontStyle:'italic'}}>
+              These are your annual payments the bank has on file. Contact your lender if any look wrong.
+            </div>
+          </div>
+        )}
 
         {/* Net */}
         <div style={{background:net>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'14px 18px',borderRadius:8,marginBottom:24,display:'flex',justifyContent:'space-between',fontSize:16}}>
@@ -11755,7 +11832,21 @@ Rules:
         if (!resp.ok) throw new Error(await resp.text());
         setBudgetShareLink(window.location.origin+'/?bs='+shareId); // combined uses ?bs= route
       } else {
-        const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:{}, expires_at:expires };
+        // Budget-only share: include a snapshot of the customer's scheduled
+        // debt service so they see a complete cashflow. Combines personal +
+        // corp-paid term debt and RE debt the lender already has on file —
+        // customer can't edit these amounts, they're just displayed as a
+        // standing obligation that nets against income.
+        const nmt = v => Number(String(v||'').replace(/[^0-9.-]/g,'')) || 0;
+        const debtService = [
+          ...((data.intermediatDebt||[]).filter(r => r.creditor && nmt(r.annualPmt) > 0)
+            .map(r => ({ creditor: r.creditor, annualPmt: nmt(r.annualPmt), type: 'Term debt' }))),
+          ...((data.reCurrent||[]).filter(r => r.creditor && nmt(r.annualPmt) > 0)
+            .map(r => ({ creditor: r.creditor, annualPmt: nmt(r.annualPmt), type: 'RE current' }))),
+          ...((data.reDebt||[]).filter(r => (r.lienHolder || r.creditor) && nmt(r.annualPmt) > 0)
+            .map(r => ({ creditor: r.lienHolder || r.creditor, annualPmt: nmt(r.annualPmt), type: 'RE mortgage' }))),
+        ];
+        const payload = { share_id:shareId, pin, client_name:data.clientName, as_of_date:data.asOfDate, user_id:currentSession?.user?.id||null, lender_email:currentSession?.user?.email||'', original_data:{ debtService }, expires_at:expires };
         const resp = await fetch(SUPABASE_URL+'/rest/v1/budget_shares', { method:'POST', headers:supaHeaders(), body:JSON.stringify(payload) });
         if (!resp.ok) throw new Error(await resp.text());
         setBudgetShareLink(window.location.origin+'/?budget='+shareId);
@@ -12097,18 +12188,36 @@ Rules:
     if (!budgetCompare || !budgetCompareTarget) return;
     setBudgetCompareApplying(true);
     try {
-      const item = await storage.get(budgetCompareTarget);
-      if (!item) throw new Error("Couldn't load that sheet — try refreshing.");
-      const existing = JSON.parse(item.value);
+      // Date the saved sheet by when the customer submitted the budget (not
+      // the share-request date). If a sheet already exists at that date for
+      // this client we update it; otherwise we clone the lender's picked
+      // target sheet (balance-sheet contents) into a new row dated the
+      // submit date, then layer the customer's budget on top. That way the
+      // original "source" sheet is left alone and we end up with a dated
+      // snapshot for every round-trip.
       const draft = budgetCompare.draft || {};
+      const submitDate = budgetCompare.submitted_at
+        ? new Date(budgetCompare.submitted_at).toISOString().slice(0,10)
+        : (budgetCompare.as_of_date || new Date().toISOString().slice(0,10));
+      const clientName = budgetCompare.client_name || '';
+      const newKey = makeKey(clientName, submitDate);
+
+      // Prefer a sheet that already exists at (client + submit date).
+      // Fall back to the picked target sheet as the base for a new row.
+      let baseItem = await storage.get(newKey);
+      if (!baseItem) baseItem = await storage.get(budgetCompareTarget);
+      if (!baseItem) throw new Error("Couldn't load a base sheet to attach this budget to.");
+      const existing = JSON.parse(baseItem.value);
       const merged = {
         ...existing,
+        clientName,
+        asOfDate: submitDate,
         budgetCrops:     draft.budgetCrops     ?? existing.budgetCrops,
         budgetLivestock: draft.budgetLivestock ?? existing.budgetLivestock,
         budgetMisc:      draft.budgetMisc      ?? existing.budgetMisc,
         budgetExpenses:  draft.budgetExpenses  ?? existing.budgetExpenses,
       };
-      await storage.set(budgetCompareTarget, JSON.stringify(merged));
+      await storage.set(newKey, JSON.stringify(merged));
       await markReviewed(budgetCompare.share_id, 'budget');
       setData(merged);
       setActiveTab('budget');
@@ -12128,7 +12237,12 @@ Rules:
       // Merge: emptyData defaults → banker original → customer draft (draft wins)
       const d = {...emptyData(), ...orig, ...draft};
       d.clientName = orig.clientName || draft.clientName || review.client_name || '';
-      d.asOfDate   = reviewSaveDate[review.share_id] || review.as_of_date || orig.asOfDate || new Date().toISOString().slice(0,10);
+      // Default the saved as-of date to the date the customer actually
+      // submitted the form (not the date on the share request). The lender
+      // can still override via the date picker on the pending-review card
+      // (which writes to reviewSaveDate).
+      const submitDate = review.submitted_at ? new Date(review.submitted_at).toISOString().slice(0,10) : '';
+      d.asOfDate   = reviewSaveDate[review.share_id] || submitDate || review.as_of_date || orig.asOfDate || new Date().toISOString().slice(0,10);
       const key = makeKey(d.clientName, d.asOfDate);
       // Preserve the lender's existing collateral analysis across a customer
       // round-trip. The customer's share payload was stripped of `collateral`
@@ -12141,6 +12255,20 @@ Rules:
           if (prior && prior.collateral) d.collateral = prior.collateral;
         }
       } catch {}
+      // If the customer was shown a combined balance-sheet + budget page,
+      // draft.budgetData carries the four budget arrays. Fold them straight
+      // onto the saved sheet so the budget tab updates in the same click as
+      // the balance sheet — no separate "attach budget" step required.
+      const bd = draft && draft.budgetData;
+      if (bd && typeof bd === 'object') {
+        if (Array.isArray(bd.budgetCrops))     d.budgetCrops     = bd.budgetCrops;
+        if (Array.isArray(bd.budgetLivestock)) d.budgetLivestock = bd.budgetLivestock;
+        if (Array.isArray(bd.budgetMisc))      d.budgetMisc      = bd.budgetMisc;
+        if (Array.isArray(bd.budgetExpenses))  d.budgetExpenses  = bd.budgetExpenses;
+        // budgetData itself was only a transport wrapper — drop it so it
+        // doesn't linger on the saved sheet.
+        delete d.budgetData;
+      }
       await storage.set(key, JSON.stringify(d));
       await markReviewed(review.share_id, review.type);
       setData(d);
@@ -15669,14 +15797,31 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                       <input type="date"
-                        value={reviewSaveDate[review.share_id]||review.as_of_date||new Date().toISOString().slice(0,10)}
+                        title="Date the saved sheet will be filed under. Defaults to when the customer submitted — change it if you want to file as of a different date."
+                        value={reviewSaveDate[review.share_id]
+                          || (review.submitted_at ? new Date(review.submitted_at).toISOString().slice(0,10) : '')
+                          || review.as_of_date
+                          || new Date().toISOString().slice(0,10)}
                         onChange={e=>setReviewSaveDate(d=>({...d,[review.share_id]:e.target.value}))}
                         style={{border:"1px solid #d1d5db",borderRadius:6,padding:"5px 8px",fontSize:".82rem",fontFamily:"inherit",outline:"none"}}/>
                       <button
                         onClick={()=> {
                           if (review.type === 'budget') {
                             setBudgetCompare({...review, draft: review.customer_draft||{}});
-                            setBudgetCompareTarget('');
+                            // Default the target sheet: pick the one that
+                            // matches this client + the as-of date on the
+                            // share. If no exact as-of match, fall back to
+                            // the most recent sheet for that client. Lender
+                            // can still override in the dropdown.
+                            const matches = savedSheets
+                              .filter(s => (s.clientName||'').trim().toLowerCase()
+                                === (review.client_name||'').trim().toLowerCase())
+                              .sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+                            const exact = review.as_of_date
+                              ? matches.find(s => s.asOfDate === review.as_of_date)
+                              : null;
+                            const pick = exact || matches[0];
+                            setBudgetCompareTarget(pick ? pick.key : '');
                           } else {
                             setBsCompare({review, orig:review.original_data||{}, draft:review.customer_draft||{}});
                           }
