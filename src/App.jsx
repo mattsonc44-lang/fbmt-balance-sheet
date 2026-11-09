@@ -14063,14 +14063,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           <div className="mach-table">
             <div className="mach-header">
               <span style={{width:62}}>Year</span>
-              <span style={{flex:1}}>Make and Model</span>
-              <span style={{width:130}}>VIN</span>
-              <span style={{width:85}}>Mileage</span>
-              <span style={{width:70}}>Fuel</span>
-              <span style={{width:95}}>Condition</span>
-              <span style={{width:110}}>Value</span>
-              <span style={{width:70}} title="Lender depreciation % — reduces this row's value on the balance sheet and collateral worksheet">Depr %</span>
-              <span style={{width:110}}>Net</span>
+              <span style={{flex:2,minWidth:220}}>Make and Model</span>
+              <span style={{width:120}}>VIN</span>
+              <span style={{width:70}}>Mileage</span>
+              <span style={{width:65}}>Fuel</span>
+              <span style={{width:85}}>Condition</span>
+              <span style={{width:95}}>Value</span>
+              <span style={{width:60}} title="Lender depreciation % — reduces this row's value on the balance sheet and collateral worksheet">Depr %</span>
+              <span style={{width:95}}>Net</span>
               <span style={{width:32}}></span>
             </div>
             {data.vehicles.map((r,i) => {
@@ -14083,19 +14083,19 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   <input className="text-input" type="text" value={r.year} placeholder="2020" maxLength={4}
                     onChange={e=>setArr("vehicles",i,"year",e.target.value.replace(/[^0-9]/g,""))} />
                 </div>
-                <div className="mach-col" style={{flex:1}}>
+                <div className="mach-col" style={{flex:2,minWidth:220}}>
                   <input className="text-input" type="text" value={r.make} placeholder="e.g., Ford F-350"
                     onChange={e=>setArr("vehicles",i,"make",e.target.value)} />
                 </div>
-                <div className="mach-col" style={{width:130}}>
+                <div className="mach-col" style={{width:120}}>
                   <input className="text-input" type="text" value={r.vin} placeholder="VIN"
                     onChange={e=>setArr("vehicles",i,"vin",e.target.value)} />
                 </div>
-                <div className="mach-col" style={{width:85}}>
+                <div className="mach-col" style={{width:70}}>
                   <input className="text-input" type="text" value={r.mileage||''} placeholder="miles"
                     onChange={e=>setArr("vehicles",i,"mileage",e.target.value.replace(/[^0-9]/g,""))} />
                 </div>
-                <div className="mach-col" style={{width:70}}>
+                <div className="mach-col" style={{width:65}}>
                   <select className="unit-select" value={r.fuel || ''}
                     title="Powertrain — passed to the appraisal search so diesel comps aren't mixed with gas."
                     onChange={e=>setArr("vehicles",i,"fuel",e.target.value)}>
@@ -14106,7 +14106,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     <option value="Electric">Electric</option>
                   </select>
                 </div>
-                <div className="mach-col" style={{width:95}}>
+                <div className="mach-col" style={{width:85}}>
                   <select className="unit-select" value={r.condition}
                     onChange={e=>setArr("vehicles",i,"condition",e.target.value)}>
                     <option value="">—</option>
@@ -14114,21 +14114,21 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     <option>Fair</option><option>Poor</option>
                   </select>
                 </div>
-                <div className="mach-col" style={{width:110}}>
+                <div className="mach-col" style={{width:95}}>
                   <div className="input-wrap">
                     <span className="prefix">$</span>
                     <MoneyIn value={r.value} placeholder="0"
                       onChange={v=>setArr("vehicles",i,"value",v)} />
                   </div>
                 </div>
-                <div className="mach-col" style={{width:70}}>
+                <div className="mach-col" style={{width:60}}>
                   <div className="input-wrap" title="Lender depreciation % — subtracts from the stated value">
                     <input type="text" value={r.depreciation||''} placeholder="0"
                       onChange={e=>setArr("vehicles",i,"depreciation",e.target.value.replace(/[^0-9.]/g,""))} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none"}}>%</span>
                   </div>
                 </div>
-                <div className="mach-col" style={{width:110,textAlign:'right',fontWeight:600,color:'#1a5c25'}}
+                <div className="mach-col" style={{width:95,textAlign:'right',fontWeight:600,color:'#1a5c25'}}
                   title="Depreciated value = Value × (1 − Depr %)">
                   {'$' + Math.round(_net).toLocaleString()}
                 </div>
