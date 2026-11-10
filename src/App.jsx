@@ -1266,6 +1266,39 @@ function MoneyIn({ value, onChange, placeholder, style }) {
   );
 }
 
+// Quantity <input> — same idea as MoneyIn but no $ prefix and no decimal
+// enforcement, for fields like acres, head count, pounds, bushels, mileage.
+// Formats with thousand separators while idle so 50000 reads as "50,000",
+// but still saves raw digits so downstream math is unchanged.
+function QtyIn({ value, onChange, placeholder, style }) {
+  const [focused, setFocused] = React.useState(false);
+  const fmt = (v) => {
+    if (v === '' || v == null) return '';
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    if (!isFinite(n)) return String(v);
+    const hasDot = String(v).indexOf('.') >= 0;
+    return n.toLocaleString('en-US', hasDot
+      ? { minimumFractionDigits: 0, maximumFractionDigits: 4 }
+      : { maximumFractionDigits: 0 });
+  };
+  const display = focused ? (value ?? '') : fmt(value);
+  const handle = (e) => {
+    let raw = e.target.value.replace(/[^0-9.\-]/g, '');
+    const firstDot = raw.indexOf('.');
+    if (firstDot >= 0) raw = raw.slice(0, firstDot + 1) + raw.slice(firstDot + 1).replace(/\./g, '');
+    onChange(raw);
+  };
+  return (
+    <input type="text" inputMode="decimal"
+      value={display}
+      placeholder={placeholder || "0"}
+      onChange={handle}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={style || undefined} />
+  );
+}
+
 function TxtInp({ label, value, onChange, placeholder }) {
   return (
     <div className="input-group">
@@ -1392,8 +1425,8 @@ function BudgetView({
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:62,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.acres} placeholder="0"
-                      onChange={e => setArr("budgetCrops",i,"acres",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.acres} placeholder="0"
+                      onChange={v=>setArr("budgetCrops",i,"acres",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{flex:1,position:"relative"}}>
@@ -1407,8 +1440,8 @@ function BudgetView({
                 </div>
                 <div className="input-group" style={{width:72,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.yieldPerAcre} placeholder="0"
-                      onChange={e => setArr("budgetCrops",i,"yieldPerAcre",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.yieldPerAcre} placeholder="0"
+                      onChange={v=>setArr("budgetCrops",i,"yieldPerAcre",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:50,flexShrink:0}}>
@@ -1521,8 +1554,8 @@ function BudgetView({
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:80,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.head} placeholder="0"
-                      onChange={e => setArr("budgetLivestock",i,"head",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.head} placeholder="0"
+                      onChange={v=>setArr("budgetLivestock",i,"head",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{flex:1}}>
@@ -1532,8 +1565,8 @@ function BudgetView({
                 </div>
                 <div className="input-group" style={{width:90,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.lbs} placeholder="0"
-                      onChange={e => setArr("budgetLivestock",i,"lbs",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.lbs} placeholder="0"
+                      onChange={v=>setArr("budgetLivestock",i,"lbs",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:110,flexShrink:0}}>
@@ -3696,14 +3729,27 @@ async function notifySubmission(type, clientName, shareId, lenderEmail) {
   } catch {}
 }
 
-function CustSec({title,children,open,onToggle}) {
+// Context carrying the customer wizard's current step id. When CustSec has a
+// `stepId` prop that doesn't match, it hides itself — turning the long
+// scroll-through form into the same step-by-step experience the lender sees.
+// Pre-step (legacy) callers without a stepId render regardless.
+const CustStepContext = React.createContext(null);
+
+function CustSec({title,children,open,onToggle,stepId}) {
+  const currentStep = React.useContext(CustStepContext);
+  // When the parent provides a step and this section belongs to another step,
+  // render nothing. Also auto-open the section when it IS the current step
+  // so the user doesn't have to click to see what's inside.
+  if (stepId && currentStep && currentStep !== stepId) return null;
+  const effectiveOpen = stepId ? true : open;
   return (
     <div style={{marginBottom:12,border:'1px solid #e5e7eb',borderRadius:8,overflow:'hidden'}}>
-      <div onClick={onToggle} style={{background:'#f5e8ea',padding:'10px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',userSelect:'none'}}>
+      <div onClick={stepId ? undefined : onToggle}
+        style={{background:'#f5e8ea',padding:'10px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:stepId?'default':'pointer',userSelect:'none'}}>
         <span style={{fontWeight:700,fontSize:14,color:'#6B0E1E'}}>{title}</span>
-        <span style={{color:'#6B0E1E',fontSize:12}}>{open?'▲':'▼'}</span>
+        {!stepId && <span style={{color:'#6B0E1E',fontSize:12}}>{open?'▲':'▼'}</span>}
       </div>
-      {open && <div style={{padding:14,background:'white'}}>{children}</div>}
+      {effectiveOpen && <div style={{padding:14,background:'white'}}>{children}</div>}
     </div>
   );
 }
@@ -3803,6 +3849,42 @@ function CustomerBalanceSheetForm({shareId}) {
   const [expenseList]=React.useState(()=>loadExpenseList());
   const [customExpense,setCustomExpense]=React.useState('');
   const [open,setOpen]=React.useState({cash:true,receivables:false,fedPay:false,farmProducts:true,livestock:true,cropInv:true,supplies:false,otherCur:false,breeding:false,re:true,reContracts:false,vehicles:false,machinery:false,otherA:false,opNotes:true,acctsDue:false,termDebt:true,reCurrent:false,otherCurLiab:false,reMort:false,reDebt:false,otherL:false});
+
+  // ── Wizard mode (matches the lender's step-by-step experience) ────────
+  // Each step id maps to a CustSec via its stepId prop. Only the section
+  // whose stepId matches `currentStep` renders in the body; the sidebar
+  // lists every step and lets the user jump directly or walk through with
+  // Next / Back. The final step ("submit") renders the running totals +
+  // Submit button instead of a section.
+  const BS_STEPS = [
+    ['cash',                'Cash & Bank'],
+    ['receivables',         'Receivables'],
+    ['fed_payments',        'Federal Payments'],
+    ['farm_products',       'Farm Products'],
+    ['livestock_market',    'Market Livestock'],
+    ['crop_investment',     'Growing Crops'],
+    ['supplies',            'Supplies & Prepaid'],
+    ['other_current',       'Other Current Assets'],
+    ['breeding_stock',      'Breeding Stock'],
+    ['real_estate',         'Real Estate'],
+    ['re_contracts',        'Contracts for Deed'],
+    ['vehicles',            'Titled Vehicles'],
+    ['machinery',           'Machinery & Equipment'],
+    ['other_assets',        'Other Assets'],
+    ['operating_notes',     'Operating Notes'],
+    ['accounts_due',        'Accounts Due'],
+    ['re_current',          'Current-Year RE Pmts'],
+    ['other_current_liab',  'Other Current Liab'],
+    ['term_debt',           'Term Debt'],
+    ['re_mortgages',        'RE Mortgages'],
+    ['re_debt',             'RE Debt'],
+    ['other_liabilities',   'Taxes & Other Liab'],
+    ['submit',              'Review & Submit'],
+  ];
+  const [currentStep, setCurrentStep] = React.useState(BS_STEPS[0][0]);
+  const currentIdx = BS_STEPS.findIndex(([id]) => id === currentStep);
+  const goNext = () => { const i = currentIdx + 1; if (i < BS_STEPS.length) setCurrentStep(BS_STEPS[i][0]); };
+  const goPrev = () => { const i = currentIdx - 1; if (i >= 0) setCurrentStep(BS_STEPS[i][0]); };
   const toggle = k => setOpen(o=>({...o,[k]:!o[k]}));
   const n = v => Number((v||'').toString().replace(/[^0-9.-]/g,''))||0;
   const fmt = v => v===''||v===null||v===undefined?'$0':'$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
@@ -4009,11 +4091,31 @@ function CustomerBalanceSheetForm({shareId}) {
         </div>
 
         {/* ASSETS */}
-        {/* Balance Sheet tab */}
-        {(!budgetIncluded || activeTab==='bs') && <>
-        <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase'}}>Assets</div>
+        {/* Balance Sheet tab — step-wizard layout (sidebar + one step at a time) */}
+        {(!budgetIncluded || activeTab==='bs') && (
+          <div style={{display:'flex',gap:16,alignItems:'flex-start'}}>
+            {/* Sidebar — step list, click to jump */}
+            <div style={{width:200,flexShrink:0,background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:8,position:'sticky',top:72,maxHeight:'calc(100vh - 100px)',overflowY:'auto'}}>
+              <div style={{fontSize:10,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:.5,padding:'6px 10px 4px'}}>Sections</div>
+              {BS_STEPS.map(([id,label], i) => (
+                <div key={id} onClick={()=>setCurrentStep(id)}
+                  style={{padding:'6px 10px',borderRadius:5,fontSize:12,cursor:'pointer',color: id===currentStep ? '#6B0E1E' : '#374151', fontWeight: id===currentStep ? 700 : 400, background: id===currentStep ? '#f5e8ea' : i<currentIdx ? '#f9fafb' : 'transparent',borderLeft: id===currentStep ? '3px solid #6B0E1E' : '3px solid transparent'}}>
+                  {i < currentIdx ? '✓ ' : ''}{label}
+                </div>
+              ))}
+            </div>
+            {/* Body — only the current step's CustSec renders (via CustStepContext) */}
+            <div style={{flex:1,minWidth:0}}>
+              <CustStepContext.Provider value={currentStep}>
+                <>
+        {currentStep === 'cash' && (
+          <div style={{background:'#6B0E1E',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase'}}>Assets · Step {currentIdx+1} of {BS_STEPS.length}</div>
+        )}
+        {(currentStep === 'operating_notes') && (
+          <div style={{background:'#7a1a1a',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase'}}>Liabilities · Step {currentIdx+1} of {BS_STEPS.length}</div>
+        )}
 
-        <CustSec title="Cash & Bank Accounts" open={open.cash} onToggle={()=>toggle('cash')}>
+        <CustSec title="Cash & Bank Accounts" stepId="cash" open={open.cash} onToggle={()=>toggle('cash')}>
           {lbl('Glacier Bank / FBMT Balance')}
           <CustInp prefix="$" value={data.cashGlacier} onChange={v=>updateData({cashGlacier:v})} placeholder="0"/>
           <div style={{marginTop:10}}>{lbl('Other Banks / Institutions')}</div>
@@ -4022,7 +4124,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total Cash: {fmt(cashTot)}</div>
         </CustSec>
 
-        <CustSec title="Receivables" open={open.receivables} onToggle={()=>toggle('receivables')}>
+        <CustSec title="Receivables" stepId="receivables" open={open.receivables} onToggle={()=>toggle('receivables')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Money owed to you — custom work, hedging accounts, unpaid contracts, etc.</div>
           {(data.receivables||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.description} onChange={v=>setArr('receivables',i,'description',v)} placeholder="Description" style={{flex:2}}/>
@@ -4033,7 +4135,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(recTot)}</div>
         </CustSec>
 
-        <CustSec title="Federal Payments" open={open.fedPay} onToggle={()=>toggle('fedPay')}>
+        <CustSec title="Federal Payments" stepId="fed_payments" open={open.fedPay} onToggle={()=>toggle('fedPay')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>FSA, ARC/PLC, CRP, disaster payments, LDPs — anything owed by USDA / federal ag programs.</div>
           {(Array.isArray(data.federalPayments)?data.federalPayments:[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.program} onChange={v=>setArr('federalPayments',i,'program',v)} placeholder="Program (e.g., ARC-CO 2024)" style={{flex:2}}/>
@@ -4044,7 +4146,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(fedPay)}</div>
         </CustSec>
 
-        <CustSec title="Farm Products on Hand" open={open.farmProducts} onToggle={()=>toggle('farmProducts')}>
+        <CustSec title="Farm Products on Hand" stepId="farm_products" open={open.farmProducts} onToggle={()=>toggle('farmProducts')}>
           {(data.farmProducts||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.kind} onChange={v=>setArr('farmProducts',i,'kind',v)} placeholder="e.g. Wheat, Barley" style={{flex:'1 1 120px'}}/>
             <CustInp value={r.quantity} onChange={v=>setArr('farmProducts',i,'quantity',v)} placeholder="Qty" type="number" style={{flex:'1 1 60px'}}/>
@@ -4058,7 +4160,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(farmProdTot)}</div>
         </CustSec>
 
-        <CustSec title="Market Livestock" open={open.livestock} onToggle={()=>toggle('livestock')}>
+        <CustSec title="Market Livestock" stepId="livestock_market" open={open.livestock} onToggle={()=>toggle('livestock')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Enter # head × avg weight × price (cwt / lb / head). The row total updates automatically.</div>
           {(data.livestockMarket||[]).map((r,i)=>{
             const rowVal = _mktLs(r);
@@ -4083,13 +4185,13 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(lsMktTot)}</div>
         </CustSec>
 
-        <CustSec title="Growing Crops (Input Costs)" open={open.cropInv} onToggle={()=>toggle('cropInv')}>
+        <CustSec title="Growing Crops (Input Costs)" stepId="crop_investment" open={open.cropInv} onToggle={()=>toggle('cropInv')}>
           {(data.cropInvestment||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.cropType} onChange={v=>setArr('cropInvestment',i,'cropType',v)} placeholder="Crop type" style={{flex:2}}/><CustInp value={r.acres} onChange={v=>setArr('cropInvestment',i,'acres',v)} placeholder="Acres" type="number" style={{flex:1}}/><CustInp prefix="$" value={r.valuePerAcre} onChange={v=>setArr('cropInvestment',i,'valuePerAcre',v)} placeholder="$/acre" style={{flex:1}}/>{remBtn('cropInvestment',i)}</div>)}
           {addBtn('cropInvestment',{cropType:'',acres:'',valuePerAcre:''},'Add Crop')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(cropInvTot)}</div>
         </CustSec>
 
-        <CustSec title="Supplies & Prepaid" open={open.supplies} onToggle={()=>toggle('supplies')}>
+        <CustSec title="Supplies & Prepaid" stepId="supplies" open={open.supplies} onToggle={()=>toggle('supplies')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Fuel, chemical, fertilizer, seed on hand.</div>
           {(data.supplies||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.description} onChange={v=>setArr('supplies',i,'description',v)} placeholder="Description" style={{flex:2}}/>
@@ -4100,7 +4202,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(supTot)}</div>
         </CustSec>
 
-        <CustSec title="Other Current Assets" open={open.otherCur} onToggle={()=>toggle('otherCur')}>
+        <CustSec title="Other Current Assets" stepId="other_current" open={open.otherCur} onToggle={()=>toggle('otherCur')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Anything else convertible to cash within 12 months not covered above.</div>
           {(data.otherCurrent||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.description} onChange={v=>setArr('otherCurrent',i,'description',v)} placeholder="Description" style={{flex:2}}/>
@@ -4111,7 +4213,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(otherCurTot)}</div>
         </CustSec>
 
-        <CustSec title="Breeding Stock" open={open.breeding} onToggle={()=>toggle('breeding')}>
+        <CustSec title="Breeding Stock" stepId="breeding_stock" open={open.breeding} onToggle={()=>toggle('breeding')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Enter # head × $/head. The row total updates automatically.</div>
           {(data.breedingStock||[]).map((r,i)=>{
             const rowVal = _brLs(r);
@@ -4129,7 +4231,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(breedTot)}</div>
         </CustSec>
 
-        <CustSec title="Real Estate" open={open.re} onToggle={()=>toggle('re')}>
+        <CustSec title="Real Estate" stepId="real_estate" open={open.re} onToggle={()=>toggle('re')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Pick how you want to value each tract — per acre, per lot, or a lump total.</div>
           {(data.realEstate||[]).map((r,i)=>{
             const basis = r.valueBasis || 'acre';
@@ -4156,7 +4258,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(reTot)}</div>
         </CustSec>
 
-        <CustSec title="Contracts for Deed (owed to you)" open={open.reContracts} onToggle={()=>toggle('reContracts')}>
+        <CustSec title="Contracts for Deed (owed to you)" stepId="re_contracts" open={open.reContracts} onToggle={()=>toggle('reContracts')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Land you're selling on contract — balance still owed to you.</div>
           {(data.reContracts||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.description} onChange={v=>setArr('reContracts',i,'description',v)} placeholder="Description" style={{flex:2}}/>
@@ -4167,13 +4269,13 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(reContractsTot)}</div>
         </CustSec>
 
-        <CustSec title="Titled Vehicles" open={open.vehicles} onToggle={()=>toggle('vehicles')}>
+        <CustSec title="Titled Vehicles" stepId="vehicles" open={open.vehicles} onToggle={()=>toggle('vehicles')}>
           {(data.vehicles||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.year} onChange={v=>setArr('vehicles',i,'year',v)} placeholder="Year" style={{width:70,flex:'none'}}/><CustInp value={r.make} onChange={v=>setArr('vehicles',i,'make',v)} placeholder="Make / Model" style={{flex:2}}/><CustInp prefix="$" value={r.value} onChange={v=>setArr('vehicles',i,'value',v)} placeholder="Value" style={{flex:1}}/>{remBtn('vehicles',i)}</div>)}
           {addBtn('vehicles',{year:'',make:'',vin:'',condition:'',value:''},'Add Vehicle')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(vehTot)}</div>
         </CustSec>
 
-        <CustSec title="Machinery & Equipment" open={open.machinery} onToggle={()=>toggle('machinery')}>
+        <CustSec title="Machinery & Equipment" stepId="machinery" open={open.machinery} onToggle={()=>toggle('machinery')}>
           {(data.machinery||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.year} onChange={v=>setArr('machinery',i,'year',v)} placeholder="Year" style={{width:70,flex:'none'}}/>
             <CustInp value={r.make} onChange={v=>setArr('machinery',i,'make',v)} placeholder="Make / Model" style={{flex:2}}/>
@@ -4184,7 +4286,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(machTot)}</div>
         </CustSec>
 
-        <CustSec title="Other Assets" open={open.otherA} onToggle={()=>toggle('otherA')}>
+        <CustSec title="Other Assets" stepId="other_assets" open={open.otherA} onToggle={()=>toggle('otherA')}>
           {(data.otherAssets||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.description} onChange={v=>setArr('otherAssets',i,'description',v)} placeholder="Description" style={{flex:2}}/><CustInp prefix="$" value={r.amount} onChange={v=>setArr('otherAssets',i,'amount',v)} placeholder="Value" style={{flex:1}}/>{remBtn('otherAssets',i)}</div>)}
           {addBtn('otherAssets',{description:'',amount:''},'Add Asset')}
           <div style={{marginTop:8,fontWeight:600,color:'#6B0E1E',fontSize:13}}>Total: {fmt(otherATot)}</div>
@@ -4197,7 +4299,7 @@ function CustomerBalanceSheetForm({shareId}) {
         {/* LIABILITIES */}
         <div style={{background:'#4a0810',color:'white',fontWeight:700,fontSize:14,padding:'8px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase',marginTop:8}}>Liabilities</div>
 
-        <CustSec title="Operating Notes & Lines of Credit" open={open.opNotes} onToggle={()=>toggle('opNotes')}>
+        <CustSec title="Operating Notes & Lines of Credit" stepId="operating_notes" open={open.opNotes} onToggle={()=>toggle('opNotes')}>
           {(data.operatingNotes||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.creditor} onChange={v=>setArr('operatingNotes',i,'creditor',v)} placeholder="Lender" style={{flex:'2 1 120px'}}/>
             <CustInp prefix="$" value={r.balance} onChange={v=>setArr('operatingNotes',i,'balance',v)} placeholder="Balance" style={{flex:'1 1 80px'}}/>
@@ -4207,7 +4309,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(opNotesTot)}</div>
         </CustSec>
 
-        <CustSec title="Accounts Due (Trade Payables)" open={open.acctsDue} onToggle={()=>toggle('acctsDue')}>
+        <CustSec title="Accounts Due (Trade Payables)" stepId="accounts_due" open={open.acctsDue} onToggle={()=>toggle('acctsDue')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Amounts you owe suppliers — fuel dealer, elevator, feed store, vet, etc.</div>
           {(data.accountsDue||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.creditor} onChange={v=>setArr('accountsDue',i,'creditor',v)} placeholder="Supplier" style={{flex:2}}/>
@@ -4218,7 +4320,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(acctsDueTot)}</div>
         </CustSec>
 
-        <CustSec title="Current-Year Real Estate Payments" open={open.reCurrent} onToggle={()=>toggle('reCurrent')}>
+        <CustSec title="Current-Year Real Estate Payments" stepId="re_current" open={open.reCurrent} onToggle={()=>toggle('reCurrent')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Annual payment on real-estate mortgages (the principal + interest coming due in the next 12 months).</div>
           {(data.reCurrent||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.creditor} onChange={v=>setArr('reCurrent',i,'creditor',v)} placeholder="Lender" style={{flex:2}}/>
@@ -4229,7 +4331,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(reCurTot)}</div>
         </CustSec>
 
-        <CustSec title="Other Current Liabilities" open={open.otherCurLiab} onToggle={()=>toggle('otherCurLiab')}>
+        <CustSec title="Other Current Liabilities" stepId="other_current_liab" open={open.otherCurLiab} onToggle={()=>toggle('otherCurLiab')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Anything else due within 12 months not covered above.</div>
           {(data.otherCurrentLiab||[]).map((r,i)=><div key={i} style={rowStyle}>
             <CustInp value={r.description} onChange={v=>setArr('otherCurrentLiab',i,'description',v)} placeholder="Description" style={{flex:2}}/>
@@ -4240,7 +4342,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(otherCurLiabTot)}</div>
         </CustSec>
 
-        <CustSec title="Term Debt / Equipment Loans" open={open.termDebt} onToggle={()=>toggle('termDebt')}>
+        <CustSec title="Term Debt / Equipment Loans" stepId="term_debt" open={open.termDebt} onToggle={()=>toggle('termDebt')}>
           {(data.intermediatDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.creditor} onChange={v=>setArr('intermediatDebt',i,'creditor',v)} placeholder="Lender" style={{flex:'2 1 120px'}}/>
             <CustInp value={r.security} onChange={v=>setArr('intermediatDebt',i,'security',v)} placeholder="Collateral" style={{flex:'2 1 100px'}}/>
@@ -4252,7 +4354,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Annual Payments: {fmt(termTot)}</div>
         </CustSec>
 
-        <CustSec title="Real Estate Mortgages" open={open.reMort} onToggle={()=>toggle('reMort')}>
+        <CustSec title="Real Estate Mortgages" stepId="re_mortgages" open={open.reMort} onToggle={()=>toggle('reMort')}>
           {(data.reMortgages||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.lienHolder} onChange={v=>setArr('reMortgages',i,'lienHolder',v)} placeholder="Lender" style={{flex:2}}/><CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('reMortgages',i,'principal',v)} placeholder="0" style={{flex:1}}/>{remBtn('reMortgages',i)}</div>)}
           {addBtn('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''},'Add Mortgage')}
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(reMortTot)}</div>
@@ -4261,7 +4363,7 @@ function CustomerBalanceSheetForm({shareId}) {
         {/* Real Estate Debt (unified) — mirror of the lender form. Accrued
             interest + principal + annual payment lets the lender see the real
             principal-reduction split on each loan. */}
-        <CustSec title="Real Estate Debt (with payment & accrued interest)" open={open.reDebt} onToggle={()=>toggle('reDebt')}>
+        <CustSec title="Real Estate Debt (with payment & accrued interest)" stepId="re_debt" open={open.reDebt} onToggle={()=>toggle('reDebt')}>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Each mortgage: who you owe, the full balance, your annual payment, and any interest that's already accrued since the last payment.</div>
           {(data.reDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.lienHolder} onChange={v=>setArr('reDebt',i,'lienHolder',v)} placeholder="Lender" style={{flex:'2 1 160px'}}/>
@@ -4273,7 +4375,7 @@ function CustomerBalanceSheetForm({shareId}) {
           {addBtn('reDebt',{lienHolder:'',annualPmt:'',accruedInterest:'',principal:'',rate:'',terms:''},'Add Mortgage')}
         </CustSec>
 
-        <CustSec title="Taxes Due & Other Liabilities" open={open.otherL} onToggle={()=>toggle('otherL')}>
+        <CustSec title="Taxes Due & Other Liabilities" stepId="other_liabilities" open={open.otherL} onToggle={()=>toggle('otherL')}>
           <div style={{marginBottom:10}}>
             {lbl('Income Taxes Due')}
             <CustInp prefix="$" value={data.taxesDue} onChange={v=>updateData({taxesDue:v})} placeholder="0"/>
@@ -4282,21 +4384,63 @@ function CustomerBalanceSheetForm({shareId}) {
           {addBtn('otherLiabilities',{description:'',balance:''},'Add Liability')}
         </CustSec>
 
-        <div style={{background:'#7a1a1a',color:'white',fontWeight:700,padding:'10px 16px',borderRadius:6,marginBottom:12,display:'flex',justifyContent:'space-between'}}>
-          <span>TOTAL LIABILITIES</span><span>{fmt(totalLiab)}</span>
-        </div>
-        <div style={{background:netWorth>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginBottom:24,display:'flex',justifyContent:'space-between',fontSize:16}}>
-          <span>NET WORTH</span><span>{fmt(netWorth)}</span>
+        {/* Review & Submit — only shown on the last step */}
+        {currentStep === 'submit' && (<>
+          <div style={{background:'#1a5c25',color:'white',fontWeight:700,fontSize:14,padding:'10px 14px',borderRadius:'8px 8px 0 0',letterSpacing:.5,textTransform:'uppercase'}}>Review & Submit</div>
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'0 0 8px 8px',padding:16,marginBottom:16}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,fontSize:14}}>
+              <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 14px'}}>
+                <div style={{fontSize:11,color:'#166534',textTransform:'uppercase',letterSpacing:.3}}>Total Assets</div>
+                <div style={{fontSize:20,fontWeight:700,color:'#15803d'}}>{fmt(totalAssets)}</div>
+              </div>
+              <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'10px 14px'}}>
+                <div style={{fontSize:11,color:'#991b1b',textTransform:'uppercase',letterSpacing:.3}}>Total Liabilities</div>
+                <div style={{fontSize:20,fontWeight:700,color:'#7a1a1a'}}>{fmt(totalLiab)}</div>
+              </div>
+            </div>
+            <div style={{marginTop:14,background:netWorth>=0?'#1a5c25':'#7a1a1a',color:'white',padding:'14px 18px',borderRadius:8,display:'flex',justifyContent:'space-between',fontSize:17,fontWeight:800}}>
+              <span>NET WORTH</span><span>{fmt(netWorth)}</span>
+            </div>
+            <div style={{marginTop:14,background:'#f9f5f5',border:'1px solid #e5e7eb',borderRadius:8,padding:14}}>
+              <div style={{fontWeight:700,fontSize:13,color:'#374151',marginBottom:4}}>Certification</div>
+              <p style={{fontSize:12,color:'#555',lineHeight:1.6,margin:0}}>I certify that the information provided above is a true and accurate statement of my financial condition as of the date submitted.</p>
+            </div>
+          </div>
+        </>)}
+
+        {/* Running totals summary below each step */}
+        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'10px 14px',margin:'14px 0',display:'flex',justifyContent:'space-between',fontSize:12,color:'#6b7280'}}>
+          <span>Running totals — Assets {fmt(totalAssets)}</span>
+          <span>Liabilities {fmt(totalLiab)}</span>
+          <span style={{fontWeight:600,color:netWorth>=0?'#15803d':'#7a1a1a'}}>Net Worth {fmt(netWorth)}</span>
         </div>
 
-        {/* Signature area */}
-        <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:10,padding:20,marginBottom:24}}>
-          <div style={{fontWeight:700,fontSize:14,color:'#374151',marginBottom:4}}>Certification</div>
-          <p style={{fontSize:13,color:'#555',lineHeight:1.6,marginBottom:0}}>I certify that the information provided above is a true and accurate statement of my financial condition as of the date submitted.</p>
+        {/* Back / Next / Submit navigation */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:16,marginBottom:24,gap:10}}>
+          <button type="button" onClick={goPrev} disabled={currentIdx === 0}
+            style={{background:'white',border:'1px solid #d1d5db',color:'#374151',borderRadius:8,padding:'10px 18px',fontWeight:600,fontSize:14,cursor:currentIdx===0?'not-allowed':'pointer',opacity:currentIdx===0?.5:1,fontFamily:'inherit'}}>
+            ← Back
+          </button>
+          <span style={{fontSize:12,color:'#6b7280'}}>
+            Step {currentIdx + 1} of {BS_STEPS.length}
+            {' · '}{BS_STEPS[currentIdx] ? BS_STEPS[currentIdx][1] : ''}
+          </span>
+          {currentStep !== 'submit' ? (
+            <button type="button" onClick={goNext}
+              style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:8,padding:'10px 22px',fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}}>
+              Next →
+            </button>
+          ) : (
+            <button type="button" onClick={submit} disabled={submitting}
+              style={{background:'#15803d',color:'white',border:'none',borderRadius:8,padding:'10px 22px',fontWeight:700,fontSize:14,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
+              {submitting ? '⏳ Submitting…' : '✅ Submit My Balance Sheet'}
+            </button>
+          )}
         </div>
-
-        {/* Close BS tab conditional */}
-        </>}
+              </></CustStepContext.Provider>
+            </div>
+          </div>
+        )}
 
         {/* Budget tab */}
         {budgetIncluded && activeTab==='budget' && (()=>{
@@ -4305,12 +4449,31 @@ function CustomerBalanceSheetForm({shareId}) {
           const bMiscTot=budgetMisc.reduce((s,r)=>s+n(r.amount),0);
           const bTotalInc=bCropTot+bLsTot+bMiscTot;
           const bTotalExp=budgetExpenses.reduce((s,r)=>s+n(r.amount),0);
-          const bNet=bTotalInc-bTotalExp;
+          // Derive debt service from the balance-sheet side the customer is
+          // seeing (intermediate term debt + unified RE debt + legacy RE
+          // current payments). This is what wasn't "pulling over" before —
+          // the budget tab was ignoring these rows, so the net was off by
+          // the annual payments.
+          const _dbg = [
+            ...((data.intermediatDebt||[]).filter(r => r.creditor && n(r.annualPmt) > 0)
+              .map(r => ({ creditor: r.creditor, annualPmt: n(r.annualPmt), type: 'Term debt' }))),
+            ...((data.reCurrent||[]).filter(r => r.creditor && n(r.annualPmt) > 0)
+              .map(r => ({ creditor: r.creditor, annualPmt: n(r.annualPmt), type: 'RE current' }))),
+            ...((data.reDebt||[]).filter(r => (r.lienHolder || r.creditor) && n(r.annualPmt) > 0)
+              .map(r => ({ creditor: r.lienHolder || r.creditor, annualPmt: n(r.annualPmt), type: 'RE mortgage' }))),
+          ];
+          const bDebtTot = _dbg.reduce((s,r) => s + n(r.annualPmt), 0);
+          const bNet=bTotalInc-bTotalExp-bDebtTot;
           const fmt2=v=>'$'+(Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}));
           const inpS={border:'1px solid #d1d5db',borderRadius:6,padding:'7px 10px',fontSize:13,fontFamily:'inherit',outline:'none',boxSizing:'border-box',width:'100%'};
           return(<>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
-              {[['Income',bTotalInc,'#1a5c25'],['Expenses',bTotalExp,'#7a1a1a'],[bNet>=0?'Net Income':'Net Loss',Math.abs(bNet),bNet>=0?'#1a5c25':'#7a1a1a']].map(([l,v,c])=>(
+            <div style={{display:'grid',gridTemplateColumns: bDebtTot>0?'repeat(4,1fr)':'repeat(3,1fr)',gap:10,marginBottom:16}}>
+              {[
+                ['Income',bTotalInc,'#1a5c25'],
+                ['Expenses',bTotalExp,'#7a1a1a'],
+                ...(bDebtTot>0 ? [['Debt Service',bDebtTot,'#7a1a1a']] : []),
+                [bNet>=0?'Net Income':'Net Loss',Math.abs(bNet),bNet>=0?'#1a5c25':'#7a1a1a'],
+              ].map(([l,v,c])=>(
                 <div key={l} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'10px 12px',textAlign:'center'}}>
                   <div style={{fontSize:11,color:'#888',textTransform:'uppercase',letterSpacing:.3,marginBottom:3}}>{l}</div>
                   <div style={{fontSize:17,fontWeight:700,color:c}}>{fmt2(v)}</div>
@@ -4378,15 +4541,44 @@ function CustomerBalanceSheetForm({shareId}) {
                 </div>
               ))}
             </div>
+            {/* Debt Service — derived from the balance-sheet debt rows.
+                Read-only: these are the customer's scheduled loan payments
+                already on file at the bank. */}
+            {_dbg.length > 0 && (<>
+              <div style={{background:'#7a1a1a',color:'white',fontWeight:700,fontSize:13,padding:'8px 14px',borderRadius:'8px 8px 0 0',textTransform:'uppercase',letterSpacing:.5}}>🏦 Debt Service (from your loans)</div>
+              <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'0 0 8px 8px',padding:14,marginBottom:16}}>
+                {_dbg.map((r,i) => (
+                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid #f3f4f6',fontSize:13}}>
+                    <div>
+                      <span style={{fontWeight:600}}>{r.creditor}</span>
+                      <span style={{color:'#888',marginLeft:6,fontSize:11}}>· {r.type}</span>
+                    </div>
+                    <div style={{fontWeight:700,color:'#7a1a1a'}}>{fmt2(r.annualPmt)}</div>
+                  </div>
+                ))}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:8,marginTop:4,borderTop:'2px solid #e5e7eb',fontWeight:700,color:'#7a1a1a',fontSize:14}}>
+                  <span>TOTAL DEBT SERVICE</span>
+                  <span>{fmt2(bDebtTot)}</span>
+                </div>
+                <div style={{fontSize:11,color:'#6b7280',marginTop:8,fontStyle:'italic'}}>
+                  These come from your loans on file with the bank. Change the Term Debt or Real Estate Mortgage sections on the Balance Sheet tab to adjust.
+                </div>
+              </div>
+            </>)}
             <div style={{background:bNet>=0?'#1a5c25':'#7a1a1a',color:'white',fontWeight:800,padding:'12px 16px',borderRadius:6,marginBottom:16,display:'flex',justifyContent:'space-between',fontSize:15}}>
               <span>{bNet>=0?'PROJECTED NET INCOME':'PROJECTED NET LOSS'}</span><span>{fmt2(Math.abs(bNet))}</span>
             </div>
           </>);
         })()}
 
-        <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
-          {submitting?'⏳ Submitting…': budgetIncluded?'✅ Submit Balance Sheet & Budget':'✅ Submit My Balance Sheet'}
-        </button>
+        {/* Only render the legacy global Submit button when NOT in the
+            step-wizard view (i.e. budget tab for combined shares). The BS
+            step wizard provides its own Submit on the final step. */}
+        {budgetIncluded && activeTab === 'budget' && (
+          <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
+            {submitting?'⏳ Submitting…':'✅ Submit Balance Sheet & Budget'}
+          </button>
+        )}
         <div style={{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:10}}>Sent securely to First Bank of Montana · Your draft saves automatically</div>
       </div>
     </div>
@@ -13677,8 +13869,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.number} placeholder="0"
-                      onChange={e=>setArr("livestockMarket",i,"number",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.number} placeholder="0"
+                      onChange={v=>setArr("livestockMarket",i,"number",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{flex:1,minWidth:140}}>
@@ -13687,8 +13879,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 </div>
                 <div className="input-group" style={{width:80,flexShrink:0}}>
                   <div className="input-wrap" title="Average weight per head (lbs). Leave 0 to price per head.">
-                    <input type="text" value={r.weightPerHd||''} placeholder="0"
-                      onChange={e=>setArr("livestockMarket",i,"weightPerHd",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.weightPerHd||''} placeholder="0"
+                      onChange={v=>setArr("livestockMarket",i,"weightPerHd",v)} />
                     <span className="prefix" style={{borderLeft:"1.5px solid #ddd",borderRight:"none",fontSize:11}}>lb</span>
                   </div>
                 </div>
@@ -13762,8 +13954,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:90,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.quantity} placeholder="0"
-                      onChange={e=>setArr("farmProducts",i,"quantity",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.quantity} placeholder="0"
+                      onChange={v=>setArr("farmProducts",i,"quantity",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:72,flexShrink:0}}>
@@ -13833,8 +14025,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 </div>
                 <div className="input-group" style={{width:90,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.acres} placeholder="0"
-                      onChange={e=>setArr("cropInvestment",i,"acres",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.acres} placeholder="0"
+                      onChange={v=>setArr("cropInvestment",i,"acres",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{width:120,flexShrink:0}}>
@@ -13912,8 +14104,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <span className="row-num">{i+1}</span>
                 <div className="input-group" style={{width:70,flexShrink:0}}>
                   <div className="input-wrap">
-                    <input type="text" value={r.number} placeholder="0"
-                      onChange={e=>setArr("breedingStock",i,"number",e.target.value.replace(/[^0-9.]/g,""))} />
+                    <QtyIn value={r.number} placeholder="0"
+                      onChange={v=>setArr("breedingStock",i,"number",v)} />
                   </div>
                 </div>
                 <div className="input-group" style={{flex:1,minWidth:160}}>
