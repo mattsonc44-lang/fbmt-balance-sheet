@@ -4132,15 +4132,15 @@ function CustomerBalanceSheetForm({shareId}) {
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 <button type="button" onClick={finalSubmit} disabled={submitting}
                   style={{background:'#15803d',color:'white',border:'none',borderRadius:8,padding:'12px 18px',fontWeight:700,fontSize:15,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
-                  {submitting ? '⏳ Submitting…' : '✅ Save & Submit to Lender'}
+                  {submitting
+                    ? '⏳ Submitting…'
+                    : (shareRow?.original_data?.budgetIncluded
+                        ? '✅ Submit Balance Sheet and Budget'
+                        : '✅ Submit Balance Sheet')}
                 </button>
                 <button type="button" onClick={saveDraftOnly} disabled={submitting}
                   style={{background:'white',color:'#374151',border:'1.5px solid #d1d5db',borderRadius:8,padding:'12px 18px',fontWeight:600,fontSize:14,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
-                  💾 Save Draft & Finish Later
-                </button>
-                <button type="button" onClick={()=>setShowSubmitDialog(false)}
-                  style={{background:'transparent',border:'none',color:'#6b7280',fontSize:13,padding:'6px 10px',cursor:'pointer',fontFamily:'inherit'}}>
-                  Keep editing
+                  💾 Save and Finish Later
                 </button>
               </div>
             </div>
@@ -4845,15 +4845,11 @@ function CustomerBudgetForm({shareId}) {
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 <button type="button" onClick={finalSubmit} disabled={submitting}
                   style={{background:'#15803d',color:'white',border:'none',borderRadius:8,padding:'12px 18px',fontWeight:700,fontSize:15,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
-                  {submitting ? '⏳ Submitting…' : '✅ Save & Submit to Lender'}
+                  {submitting ? '⏳ Submitting…' : '✅ Submit Budget'}
                 </button>
                 <button type="button" onClick={saveDraftOnly} disabled={submitting}
                   style={{background:'white',color:'#374151',border:'1.5px solid #d1d5db',borderRadius:8,padding:'12px 18px',fontWeight:600,fontSize:14,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
-                  💾 Save Draft & Finish Later
-                </button>
-                <button type="button" onClick={()=>setShowSubmitDialog(false)}
-                  style={{background:'transparent',border:'none',color:'#6b7280',fontSize:13,padding:'6px 10px',cursor:'pointer',fontFamily:'inherit'}}>
-                  Keep editing
+                  💾 Save and Finish Later
                 </button>
               </div>
             </div>
@@ -12544,8 +12540,11 @@ Rules:
     try {
       const uidFilter = '&user_id=eq.' + encodeURIComponent(uid);
       const [bsResp, budResp] = await Promise.all([
-        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?customer_draft=not.is.null&status=neq.dismissed'+uidFilter+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
-        fetch(SUPABASE_URL+'/rest/v1/budget_shares?customer_draft=not.is.null&status=neq.dismissed'+uidFilter+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        // Only rows whose status has flipped to 'submitted' — in-progress
+        // drafts (saved via "Save and Finish Later") stay hidden from the
+        // pending-review list so an unfinished sheet never nags the lender.
+        fetch(SUPABASE_URL+'/rest/v1/balance_sheet_shares?status=eq.submitted'+uidFilter+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,original_data,status&order=submitted_at.desc', {headers:supaHeaders()}),
+        fetch(SUPABASE_URL+'/rest/v1/budget_shares?status=eq.submitted'+uidFilter+'&select=share_id,client_name,as_of_date,submitted_at,customer_draft,status&order=submitted_at.desc', {headers:supaHeaders()}),
       ]);
       const bsRows = bsResp.ok ? await bsResp.json() : [];
       const budRows = budResp.ok ? await budResp.json() : [];
