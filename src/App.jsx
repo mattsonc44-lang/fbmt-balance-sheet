@@ -4527,7 +4527,7 @@ function CustomerBalanceSheetForm({shareId}) {
           ) : (
             <button type="button" onClick={submit} disabled={submitting}
               style={{background:'#15803d',color:'white',border:'none',borderRadius:8,padding:'10px 22px',fontWeight:700,fontSize:14,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
-              {submitting ? '⏳ Submitting…' : '✅ Submit My Balance Sheet'}
+              {submitting ? '⏳ Submitting…' : '✅ Submit / Save'}
             </button>
           )}
         </div>
@@ -4670,7 +4670,7 @@ function CustomerBalanceSheetForm({shareId}) {
             step wizard provides its own Submit on the final step. */}
         {budgetIncluded && activeTab === 'budget' && (
           <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
-            {submitting?'⏳ Submitting…':'✅ Submit Balance Sheet & Budget'}
+            {submitting?'⏳ Submitting…':'✅ Submit / Save'}
           </button>
         )}
         <div style={{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:10}}>Sent securely to First Bank of Montana · Your draft saves automatically</div>
@@ -4996,7 +4996,7 @@ function CustomerBudgetForm({shareId}) {
         </div>
 
         <button onClick={submit} disabled={submitting} style={{width:'100%',background:'#6B0E1E',color:'white',border:'none',borderRadius:10,padding:16,fontWeight:700,fontSize:17,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,boxShadow:'0 4px 16px rgba(107,14,30,.3)',fontFamily:'inherit'}}>
-          {submitting?'⏳ Submitting…':'✅ Submit My Budget'}
+          {submitting?'⏳ Submitting…':'✅ Submit / Save'}
         </button>
         <div style={{textAlign:'center',fontSize:11,color:'#9ca3af',marginTop:10}}>Sent securely to First Bank of Montana · Your draft saves automatically</div>
       </div>
