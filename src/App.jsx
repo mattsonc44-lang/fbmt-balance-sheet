@@ -3907,7 +3907,12 @@ function CustomerBalanceSheetForm({shareId}) {
   const verifyPin = async () => {
     setPinErr('');
     try {
-      const resp = await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId+'&select=*',{headers:custHeaders()});
+      // Pull only the columns the form actually needs. The default `select=*`
+      // dragged in every column including large analysis blobs, which on a
+      // populated share row can push the response past the Supabase 60s
+      // statement_timeout (error 57014). This stays well under.
+      const FIELDS = 'share_id,pin,client_name,as_of_date,expires_at,status,lender_email,original_data,customer_draft';
+      const resp = await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId+'&select='+FIELDS+'&limit=1',{headers:custHeaders()});
       const body = await resp.text();
       if (!resp.ok) { setPinErr('Server error ('+resp.status+'): '+body.slice(0,200)); return; }
       let rows;
@@ -4700,7 +4705,9 @@ function CustomerBudgetForm({shareId}) {
   const verifyPin=async()=>{
     setPinErr('');
     try{
-      const resp=await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId+'&select=*',{headers:custHeaders()});
+      // Narrow select + limit=1 to avoid 57014 statement_timeout on big rows.
+      const FIELDS='share_id,pin,client_name,as_of_date,expires_at,status,lender_email,original_data,customer_draft';
+      const resp=await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId+'&select='+FIELDS+'&limit=1',{headers:custHeaders()});
       const rows=await resp.json();
       if(!rows.length){setPinErr('Link not found or expired.');return;}
       const row=rows[0];
