@@ -3956,7 +3956,46 @@ function CustomerBalanceSheetForm({shareId}) {
   const addRow = (k,tpl) => updateData({[k]:[...(data[k]||[]),{...tpl}]});
   const remRow = (k,i) => updateData({[k]:(data[k]||[]).filter((_,j)=>j!==i)});
 
-  const submit = async () => {
+  // ── Submit-confirm dialog state ──────────────────────────────────────
+  // Opening the Submit button no longer immediately posts the sheet to the
+  // lender. It pops a confirmation that lets the customer choose between
+  // "Save draft" (keep working later) and "Save & submit" (final hand-off).
+  // The dialog also surfaces any obviously-empty sections so they can
+  // decide whether to skip them intentionally or go back and fill them in.
+  const [showSubmitDialog, setShowSubmitDialog] = React.useState(false);
+
+  const findIncompleteSections = () => {
+    const issues = [];
+    const anyRow = (arr, keys) => Array.isArray(arr) && arr.some(r => keys.some(k => (r?.[k] ?? '') !== ''));
+    if (!(n(data.cashGlacier) > 0 || anyRow(data.cashOther, ['institution','amount']))) issues.push('Cash & Bank');
+    if (!anyRow(data.livestockMarket, ['number','kind','value','weightPerHd','pricePerUnit'])
+        && !anyRow(data.breedingStock, ['number','kind','value','valuePerHd'])) issues.push('Livestock (market and breeding)');
+    if (!anyRow(data.realEstate, ['acres','description','reType','valuePerAcre'])) issues.push('Real Estate');
+    if (!anyRow(data.machinery, ['year','make','value'])) issues.push('Machinery & Equipment');
+    if (!(n(data.taxesDue) > 0 || anyRow(data.otherLiabilities, ['description','balance']))
+        && !anyRow(data.operatingNotes, ['creditor','balance'])
+        && !anyRow(data.intermediatDebt, ['creditor','principal','annualPmt'])
+        && !anyRow(data.reDebt, ['lienHolder','principal','annualPmt'])) issues.push('Liabilities (no debts entered)');
+    return issues;
+  };
+
+  const saveDraftOnly = async () => {
+    setSubmitting(true);
+    try {
+      const draft = shareRow?.original_data?.budgetIncluded
+        ? {...data, budgetData:{budgetCrops,budgetLivestock,budgetMisc,budgetExpenses}}
+        : data;
+      await fetch(CUST_SUPABASE_URL()+'/rest/v1/balance_sheet_shares?share_id=eq.'+shareId,{
+        method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},
+        body:JSON.stringify({customer_draft:draft}),
+      });
+      setShowSubmitDialog(false);
+      alert('Draft saved. You can come back anytime using this link + your PIN.');
+    } catch(e){alert('Save failed: '+e.message);}
+    setSubmitting(false);
+  };
+
+  const finalSubmit = async () => {
     setSubmitting(true);
     try {
       const draft = shareRow?.original_data?.budgetIncluded
@@ -3967,10 +4006,15 @@ function CustomerBalanceSheetForm({shareId}) {
         body:JSON.stringify({customer_draft:draft,status:'submitted',submitted_at:new Date().toISOString()}),
       });
       await notifySubmission('balance_sheet',shareRow?.client_name||'',shareId,shareRow?.lender_email||'');
+      setShowSubmitDialog(false);
       setStage('done');
     } catch(e){alert('Submit failed: '+e.message);}
     setSubmitting(false);
   };
+
+  // Legacy submit() still exists for the combined BS+Budget flow's global
+  // button; just opens the dialog now.
+  const submit = () => { setShowSubmitDialog(true); };
 
   const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
   const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
@@ -4059,6 +4103,51 @@ function CustomerBalanceSheetForm({shareId}) {
 
   return (
     <div style={pageStyle}>
+      {/* ── Submit-confirm dialog ─────────────────────────────────────
+          Opens when the customer clicks Submit on the final step (or the
+          combined BS+Budget page). Gives them a clear "save draft now and
+          come back" option vs. "send this to the lender as final", and
+          lists any sections that still look empty so an unfinished submit
+          doesn't get sent back to the bank by accident. */}
+      {showSubmitDialog && (() => {
+        const issues = findIncompleteSections();
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <div style={{background:'white',borderRadius:12,maxWidth:520,width:'100%',padding:24,boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
+              <div style={{fontSize:20,fontWeight:800,color:'#1a1a1a',marginBottom:6}}>Ready to send this back?</div>
+              <div style={{fontSize:13,color:'#6b7280',marginBottom:16,lineHeight:1.5}}>
+                You can save your work as a draft and come back later, or submit the final balance sheet to your lender now.
+              </div>
+              {issues.length > 0 && (
+                <div style={{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:8,padding:'12px 14px',marginBottom:16}}>
+                  <div style={{fontSize:13,fontWeight:700,color:'#92400e',marginBottom:6}}>⚠ Some sections look empty:</div>
+                  <ul style={{margin:0,paddingLeft:18,fontSize:13,color:'#78350f',lineHeight:1.6}}>
+                    {issues.map((s,i)=><li key={i}>{s}</li>)}
+                  </ul>
+                  <div style={{fontSize:12,color:'#78350f',marginTop:8,fontStyle:'italic'}}>
+                    That's fine if you don't have anything for those sections — but if you meant to fill them in, go back first.
+                  </div>
+                </div>
+              )}
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <button type="button" onClick={finalSubmit} disabled={submitting}
+                  style={{background:'#15803d',color:'white',border:'none',borderRadius:8,padding:'12px 18px',fontWeight:700,fontSize:15,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
+                  {submitting ? '⏳ Submitting…' : '✅ Save & Submit to Lender'}
+                </button>
+                <button type="button" onClick={saveDraftOnly} disabled={submitting}
+                  style={{background:'white',color:'#374151',border:'1.5px solid #d1d5db',borderRadius:8,padding:'12px 18px',fontWeight:600,fontSize:14,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
+                  💾 Save Draft & Finish Later
+                </button>
+                <button type="button" onClick={()=>setShowSubmitDialog(false)}
+                  style={{background:'transparent',border:'none',color:'#6b7280',fontSize:13,padding:'6px 10px',cursor:'pointer',fontFamily:'inherit'}}>
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Top bar */}
       <div style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:99,boxShadow:'0 2px 8px rgba(0,0,0,.3)'}}>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -4669,15 +4758,37 @@ function CustomerBudgetForm({shareId}) {
   const debtTot = debtService.reduce((s,r)=>s+n(r.annualPmt),0);
   const net=totalIncome-totalExpenses-debtTot;
 
-  const submit=async()=>{
+  // Confirm-before-send dialog, mirroring the balance-sheet form so
+  // customers can't hit Submit accidentally on an unfinished budget.
+  const [showSubmitDialog,setShowSubmitDialog]=React.useState(false);
+  const budgetIssues=()=>{
+    const issues=[];
+    const anyRow=(arr,keys)=>Array.isArray(arr)&&arr.some(r=>keys.some(k=>(r?.[k]??'')!==''));
+    if(!anyRow(crops,['crop','acres','price'])) issues.push('Crop Income');
+    if(!anyRow(livestock,['type','head','price'])&&!anyRow(misc,['description','amount'])) issues.push('Livestock / Misc Income');
+    if(!anyRow(expenses,['description','amount'])) issues.push('Operating Expenses');
+    return issues;
+  };
+  const saveDraftOnly=async()=>{
+    setSubmitting(true);
+    try{
+      await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId,{method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},body:JSON.stringify({customer_draft:{budgetCrops:crops,budgetLivestock:livestock,budgetMisc:misc,budgetExpenses:expenses}})});
+      setShowSubmitDialog(false);
+      alert('Draft saved. You can come back anytime using this link + your PIN.');
+    }catch(e){alert('Save failed: '+e.message);}
+    setSubmitting(false);
+  };
+  const finalSubmit=async()=>{
     setSubmitting(true);
     try{
       await fetch(CUST_SUPABASE_URL()+'/rest/v1/budget_shares?share_id=eq.'+shareId,{method:'PATCH',headers:{...custHeaders(),'Prefer':'return=minimal'},body:JSON.stringify({customer_draft:{budgetCrops:crops,budgetLivestock:livestock,budgetMisc:misc,budgetExpenses:expenses},status:'submitted',submitted_at:new Date().toISOString()})});
       await notifySubmission('budget',shareRow?.client_name||'',shareId,shareRow?.lender_email||'');
+      setShowSubmitDialog(false);
       setStage('done');
     }catch(e){alert('Submit failed: '+e.message);}
     setSubmitting(false);
   };
+  const submit=()=>setShowSubmitDialog(true);
 
   const pageStyle={fontFamily:"'Source Sans 3',system-ui,sans-serif",minHeight:'100vh',background:'#f9f5f5'};
   const cardStyle={background:'white',borderRadius:12,padding:32,maxWidth:600,margin:'0 auto'};
@@ -4709,6 +4820,47 @@ function CustomerBudgetForm({shareId}) {
 
   return(
     <div style={pageStyle}>
+      {/* Submit-confirm dialog — same pattern as the balance-sheet form so
+          customers can't fire off an unfinished budget by accident. */}
+      {showSubmitDialog && (() => {
+        const issues = budgetIssues();
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <div style={{background:'white',borderRadius:12,maxWidth:520,width:'100%',padding:24,boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
+              <div style={{fontSize:20,fontWeight:800,color:'#1a1a1a',marginBottom:6}}>Ready to send this back?</div>
+              <div style={{fontSize:13,color:'#6b7280',marginBottom:16,lineHeight:1.5}}>
+                You can save your work as a draft and come back later, or submit the final budget to your lender now.
+              </div>
+              {issues.length > 0 && (
+                <div style={{background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:8,padding:'12px 14px',marginBottom:16}}>
+                  <div style={{fontSize:13,fontWeight:700,color:'#92400e',marginBottom:6}}>⚠ Some sections look empty:</div>
+                  <ul style={{margin:0,paddingLeft:18,fontSize:13,color:'#78350f',lineHeight:1.6}}>
+                    {issues.map((s,i)=><li key={i}>{s}</li>)}
+                  </ul>
+                  <div style={{fontSize:12,color:'#78350f',marginTop:8,fontStyle:'italic'}}>
+                    That's fine if you don't have anything for those — but if you meant to fill them in, go back first.
+                  </div>
+                </div>
+              )}
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <button type="button" onClick={finalSubmit} disabled={submitting}
+                  style={{background:'#15803d',color:'white',border:'none',borderRadius:8,padding:'12px 18px',fontWeight:700,fontSize:15,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
+                  {submitting ? '⏳ Submitting…' : '✅ Save & Submit to Lender'}
+                </button>
+                <button type="button" onClick={saveDraftOnly} disabled={submitting}
+                  style={{background:'white',color:'#374151',border:'1.5px solid #d1d5db',borderRadius:8,padding:'12px 18px',fontWeight:600,fontSize:14,cursor:submitting?'wait':'pointer',opacity:submitting?.7:1,fontFamily:'inherit'}}>
+                  💾 Save Draft & Finish Later
+                </button>
+                <button type="button" onClick={()=>setShowSubmitDialog(false)}
+                  style={{background:'transparent',border:'none',color:'#6b7280',fontSize:13,padding:'6px 10px',cursor:'pointer',fontFamily:'inherit'}}>
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{background:'#6B0E1E',padding:'12px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:99,boxShadow:'0 2px 8px rgba(0,0,0,.3)'}}>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
           <span style={{fontSize:20}}>🌾</span>
