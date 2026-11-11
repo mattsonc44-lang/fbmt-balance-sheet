@@ -13005,6 +13005,10 @@ h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;ma
    below auto-scale the base font to fill the available space without
    overflowing. */
 @page { size: legal; margin: .4in .4in; }
+/* Make #fit-page always stretch to the full printable height of the legal
+   page so the signature block gets pushed to the bottom (margin-top:auto
+   on .sig consumes the empty space between the totals and the signature). */
+.sig { margin-top: auto !important; }
 @media print {
   html, body { margin: 0 !important; padding: 0 !important; }
   body > *:empty { display: none !important; }
@@ -13013,7 +13017,7 @@ h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;ma
   div[style*="page-break-after"]:empty,
   div[style*="page-break-before"]:empty { display: none !important; }
 }
-#fit-page { transform-origin: top left; }
+#fit-page { transform-origin: top left; display: flex; flex-direction: column; min-height: 13.2in; }
 .sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
 .sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
 .sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
