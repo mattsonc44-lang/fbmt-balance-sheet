@@ -1129,7 +1129,7 @@ function emptyData() {
     otherAssets:[{description:"",amount:""}],
     operatingNotes:[{creditor:"",dueDate:"",pmt:"",balance:"",security:""}],
     accountsDue:[{creditor:"",amount:""}],
-    intermediatDebt:[{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:""}],
+    intermediatDebt:[{creditor:"",security:"",dueDate:"",maturityDate:"",annualPmt:"",principal:"",rate:""}],
     reCurrent:[{creditor:"",annualPmt:"",rate:""}],
     // Unified RE debt entry — one row per mortgage captures annual payment,
     // principal, rate, terms. Printing automatically shows the annual pmt in
@@ -4439,7 +4439,8 @@ function CustomerBalanceSheetForm({shareId}) {
           {(data.intermediatDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.creditor} onChange={v=>setArr('intermediatDebt',i,'creditor',v)} placeholder="Lender" style={{flex:'2 1 120px'}}/>
             <CustInp value={r.security} onChange={v=>setArr('intermediatDebt',i,'security',v)} placeholder="Collateral" style={{flex:'2 1 100px'}}/>
-            <CustInp value={r.dueDate||r.maturityDate||''} onChange={v=>setArr('intermediatDebt',i,'dueDate',v)} placeholder="Maturity mm/dd/yy" style={{flex:'1 1 110px'}}/>
+            <CustInp value={r.dueDate||''} onChange={v=>setArr('intermediatDebt',i,'dueDate',v)} placeholder="Due mm/dd" style={{flex:'1 1 90px'}}/>
+            <CustInp value={r.maturityDate||''} onChange={v=>setArr('intermediatDebt',i,'maturityDate',v)} placeholder="Maturity mm/dd/yy" style={{flex:'1 1 110px'}}/>
             <CustInp prefix="Ann Pmt $" value={r.annualPmt} onChange={v=>setArr('intermediatDebt',i,'annualPmt',v)} placeholder="0" style={{flex:'1 1 80px'}}/>
             <CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('intermediatDebt',i,'principal',v)} placeholder="0" style={{flex:'1 1 80px'}}/>
             {remBtn('intermediatDebt',i)}
@@ -14683,7 +14684,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             <div key={i} className="row-entry" data-rowkey={`operatingNotes-${i}`}>
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("operatingNotes",i,"creditor",v)} placeholder="Lender name" />
-              <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("operatingNotes",i,"dueDate",v)} placeholder="mm/dd/yy" />
+              <TxtInp label="Maturity" value={r.dueDate||r.maturityDate||''} onChange={v=>setArr("operatingNotes",i,"dueDate",v)} placeholder="mm/dd/yy" />
               <Inp label="Payment" prefix="$" value={r.pmt} onChange={v=>setArr("operatingNotes",i,"pmt",v)} />
               <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("operatingNotes",i,"balance",v)} />
               <TxtInp label="Security" value={r.security} onChange={v=>setArr("operatingNotes",i,"security",v)} placeholder="Collateral type" />
@@ -14722,7 +14723,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <span className="row-num">{i+1}</span>
               <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("intermediatDebt",i,"creditor",v)} placeholder="Lender" />
               <TxtInp label="Security" value={r.security} onChange={v=>setArr("intermediatDebt",i,"security",v)} placeholder="Collateral" />
-              <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("intermediatDebt",i,"dueDate",v)} placeholder="mm/dd/yy" />
+              <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("intermediatDebt",i,"dueDate",v)} placeholder="Payment due mm/dd" />
+              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("intermediatDebt",i,"maturityDate",v)} placeholder="Loan maturity mm/dd/yy" />
               <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
               <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
@@ -14741,7 +14743,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Loan</button>
+          <button className="add-btn" onClick={()=>addRow("intermediatDebt",{creditor:"",security:"",dueDate:"",maturityDate:"",annualPmt:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Loan</button>
           <div className="subtotal-row"><span>Total Intermediate Debt</span><strong className="red">{fmt(intermedTotal)}</strong></div>
         </div>
       );
@@ -17736,7 +17738,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                           cropInvestment:{cropType:"",acres:"",valuePerAcre:""},
                           farmProducts:{quantity:"",kind:"",pricePerUnit:"",unit:"bu",share:"100",contracted:false},
                           federalPayments:{program:"",amount:""},
-                          intermediatDebt:{creditor:"",security:"",dueDate:"",annualPmt:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false},
+                          intermediatDebt:{creditor:"",security:"",dueDate:"",maturityDate:"",annualPmt:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false},
                           livestockMarket:{number:"",kind:"",weightPerHd:"",pricePerUnit:"",priceBasis:"cwt",value:"",share:"100"},
                           machinery:{year:"",make:"",size:"",serial:"",condition:"",value:""},
                           operatingNotes:{creditor:"",dueDate:"",pmt:"",balance:"",security:""},
