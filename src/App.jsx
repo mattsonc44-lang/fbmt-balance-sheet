@@ -13017,12 +13017,12 @@ h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;ma
   div[style*="page-break-after"]:empty,
   div[style*="page-break-before"]:empty { display: none !important; }
 }
-/* Legal printable area ≈ 13.2in. Give #fit-page a hair less so Chrome's
-   own rounding doesn't push the sig below the page break. page-break-after
-   on #fit-page + page-break-before on .page2 guarantees the schedules
-   start on page 2 instead of chasing the sig onto a new sheet.  */
-#fit-page { transform-origin: top left; display: flex; flex-direction: column; min-height: 12.9in; height: 12.9in; page-break-after: always; break-after: page; overflow: hidden; }
-.sig { page-break-inside: avoid; break-inside: avoid; }
+/* Flex column so .sig's margin-top:auto pushes it to the bottom of the
+   page. min-height fills the sheet; we DON'T set a hard height or
+   overflow:hidden (that was clipping the signature when content was
+   tall). page-break-after forces the schedules onto page 2. */
+#fit-page { transform-origin: top left; display: flex; flex-direction: column; min-height: 12.8in; page-break-after: always; break-after: page; }
+.sig { page-break-inside: avoid; break-inside: avoid; margin-top: auto; }
 .sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
 .sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
 .sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
