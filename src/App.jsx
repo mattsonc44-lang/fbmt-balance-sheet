@@ -9194,6 +9194,7 @@ ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'
           const byIdx = {};
           (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = {...it, note: (it.note||'') + ' (estimate — no live web search)'}; });
           setMachPriceCheck(byIdx);
+          setData(d => ({ ...d, machPriceCheck: byIdx, _machPriceCheckAt: new Date().toISOString() }));
           setMachPriceCheckLoading(false);
           return;
         }
@@ -9211,6 +9212,10 @@ ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'
       const byIdx = {};
       (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
       setMachPriceCheck(byIdx);
+      // Persist on the sheet so the check sticks between opens/saves — only
+      // the sheet the lender ran it on gets the results. Timestamped so we
+      // know how fresh the comps are.
+      setData(d => ({ ...d, machPriceCheck: byIdx, _machPriceCheckAt: new Date().toISOString() }));
     } catch (e) {
       alert('Price check failed: ' + (e.message || e));
     }
@@ -9323,6 +9328,7 @@ ${items.map((r,k) => describe(r,k)).join('\n')}`;
           const byIdx = {};
           (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = {...it, note: (it.note||'') + ' (estimate — no live web search)'}; });
           setVehPriceCheck(byIdx);
+          setData(d => ({ ...d, vehPriceCheck: byIdx, _vehPriceCheckAt: new Date().toISOString() }));
           setVehPriceCheckLoading(false);
           return;
         }
@@ -9336,6 +9342,7 @@ ${items.map((r,k) => describe(r,k)).join('\n')}`;
       const byIdx = {};
       (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
       setVehPriceCheck(byIdx);
+      setData(d => ({ ...d, vehPriceCheck: byIdx, _vehPriceCheckAt: new Date().toISOString() }));
     } catch (e) {
       alert('Vehicle price check failed: ' + (e.message || e));
     }
@@ -9935,10 +9942,12 @@ Question: ${q}`,
       const p = JSON.parse(item.value); delete p._savedAt;
       setData({ ...emptyData(), ...p });
       setOriginalKey(key);           // remember where we loaded from
+      // Rehydrate price-check caches from whatever the lender last ran on
+      // this sheet. They're keyed by the current row index, so if someone
+      // reorders / deletes rows the mapping may drift — re-run the check.
+      setMachPriceCheck(p.machPriceCheck && typeof p.machPriceCheck === 'object' ? p.machPriceCheck : {});
+      setVehPriceCheck(p.vehPriceCheck && typeof p.vehPriceCheck === 'object' ? p.vehPriceCheck : {});
       setStep(0); setScreen("wizard");
-      // If we're already in the wizard, the compare tab (if open) will show stale
-      // linked-entity data until the totals refresh. Bump the active tab back to
-      // the balance-sheet step so the user lands on the newly-loaded sheet's data.
       setActiveTab('balance');
     } catch (e) {
       console.error('loadSheet failed:', e);
