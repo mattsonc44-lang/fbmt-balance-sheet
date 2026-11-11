@@ -14721,13 +14721,29 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             return (
             <div key={i} className="row-entry" data-rowkey={`intermediatDebt-${i}`}>
               <span className="row-num">{i+1}</span>
-              <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("intermediatDebt",i,"creditor",v)} placeholder="Lender" />
-              <TxtInp label="Security" value={r.security} onChange={v=>setArr("intermediatDebt",i,"security",v)} placeholder="Collateral" />
-              <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("intermediatDebt",i,"dueDate",v)} placeholder="Payment due mm/dd" />
-              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("intermediatDebt",i,"maturityDate",v)} placeholder="Loan maturity mm/dd/yy" />
-              <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
-              <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
-              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
+              {/* Keep the whole row on one line — dates and rate are narrow
+                  so the two $-columns have room without wrapping. */}
+              <div style={{flex:'2 1 160px',minWidth:140}}>
+                <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("intermediatDebt",i,"creditor",v)} placeholder="Lender" />
+              </div>
+              <div style={{flex:'2 1 140px',minWidth:120}}>
+                <TxtInp label="Security" value={r.security} onChange={v=>setArr("intermediatDebt",i,"security",v)} placeholder="Collateral" />
+              </div>
+              <div style={{flex:'0 1 90px',minWidth:80}}>
+                <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("intermediatDebt",i,"dueDate",v)} placeholder="mm/dd" />
+              </div>
+              <div style={{flex:'0 1 70px',minWidth:60}}>
+                <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
+              </div>
+              <div style={{flex:'0 1 110px',minWidth:95}}>
+                <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
+              </div>
+              <div style={{flex:'0 1 110px',minWidth:95}}>
+                <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
+              </div>
+              <div style={{flex:'0 1 100px',minWidth:90}}>
+                <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("intermediatDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
+              </div>
               {linkedCorpNames.length > 0 && (
                 <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130}}>
                   <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}} title="Which linked entity pays this debt (leave Personal if the client pays)">Paid by</span>
@@ -14768,13 +14784,27 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             return (
             <div key={i} className="row-entry" data-rowkey={`reDebt-${i}`} style={{alignItems:'flex-end',flexWrap:'wrap'}}>
               <span className="row-num">{i+1}</span>
-              <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
-              <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr fixed" />
-              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
-              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
-              <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("reDebt",i,"annualPmt",v)} />
-              <Inp label="Accrued Int" prefix="$" value={r.accruedInterest||''} onChange={v=>setArr("reDebt",i,"accruedInterest",v)} />
-              <Inp label="Principal (total)" prefix="$" value={r.principal} onChange={v=>setArr("reDebt",i,"principal",v)} />
+              <div style={{flex:'2 1 160px',minWidth:140}}>
+                <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
+              </div>
+              <div style={{flex:'0 1 100px',minWidth:90}}>
+                <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr" />
+              </div>
+              <div style={{flex:'0 1 70px',minWidth:60}}>
+                <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
+              </div>
+              <div style={{flex:'0 1 110px',minWidth:95}}>
+                <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("reDebt",i,"annualPmt",v)} />
+              </div>
+              <div style={{flex:'0 1 110px',minWidth:95}}>
+                <Inp label="Accrued Int" prefix="$" value={r.accruedInterest||''} onChange={v=>setArr("reDebt",i,"accruedInterest",v)} />
+              </div>
+              <div style={{flex:'0 1 120px',minWidth:100}}>
+                <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("reDebt",i,"principal",v)} />
+              </div>
+              <div style={{flex:'0 1 100px',minWidth:90}}>
+                <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
+              </div>
               <div style={{display:"flex",flexDirection:"column",fontSize:11,color:"#6b7280",minWidth:170,paddingBottom:6}}>
                 <span>Next payment splits:</span>
                 <span>• Interest: <strong style={{color:"#92400e"}}>{fmt(accruedInt)}</strong></span>
@@ -14923,9 +14953,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
-              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reMortgages",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reMortgages",i,"rate",v)} />
               <Inp label="Principal (beyond 12 mo)" prefix="$" value={r.principal} onChange={v=>setArr("reMortgages",i,"principal",v)} />
+              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reMortgages",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               {linkedCorpNames.length > 0 && (
                 <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130}}>
                   <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Paid by</span>
