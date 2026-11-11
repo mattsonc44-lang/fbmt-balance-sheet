@@ -15730,6 +15730,92 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
     />;
   }
 
+  // ── Admin modals (priced list + expense list) ────────────────────────
+  // Rendered inside BOTH the home-screen early return and the main return
+  // below. Previously they lived only at the bottom of the main return, so
+  // clicking "Commodity Price List" or "Expense Category List" from the
+  // Admin screen (which closes itself and bounces the app back to home)
+  // appeared to do nothing — the modal just wasn't in the home-screen tree.
+  const priceListModal = showPriceList && profile?.role === 'admin' ? (
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"white",borderRadius:14,padding:28,maxWidth:620,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:"1.05rem",color:"#1a1a1a"}}>Commodity Price List</div>
+            <div style={{fontSize:".75rem",color:"#888",marginTop:2}}>First Bank of Montana · Prices auto-fill on the Budget tab · Edit any price to update</div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{
+              const newId = commodityPrices.length;
+              const updated = [...commodityPrices,{id:newId,category:"Crops",name:"",price:"",unit:"bu"}];
+              setCommodityPrices(updated); saveCommodityPrices(updated);
+            }} style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"4px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>+ Add</button>
+            <button onClick={()=>{
+              if(window.confirm("Reset to FBMT default prices? Your edits will be lost.")) {
+                const defaults = DEFAULT_COMMODITY_PRICES.map((p,i)=>({...p,id:i}));
+                setCommodityPrices(defaults); saveCommodityPrices(defaults);
+              }
+            }} style={{background:"none",border:"1px solid #ddd",borderRadius:6,padding:"4px 12px",color:"#888",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>Reset to Defaults</button>
+            <button onClick={()=>setShowPriceList(false)} style={{background:"none",border:"none",fontSize:"1.3rem",cursor:"pointer",color:"#888",lineHeight:1}}>×</button>
+          </div>
+        </div>
+        {["Crops","Livestock"].map(cat => (
+          <div key={cat} style={{marginBottom:16}}>
+            <div style={{background:"#6B0E1E",color:"white",fontWeight:700,fontSize:".8rem",padding:"6px 12px",borderRadius:"6px 6px 0 0",letterSpacing:".05em",textTransform:"uppercase"}}>{cat}</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:".85rem"}}>
+              <thead>
+                <tr style={{background:"#f5f0f0"}}>
+                  <th style={{padding:"7px 12px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Commodity</th>
+                  <th style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Price</th>
+                  <th style={{padding:"7px 12px",textAlign:"center",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Unit</th>
+                  <th style={{width:36}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {commodityPrices.filter(p=>p.category===cat).map((p,i)=>(
+                  <tr key={p.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"white":"#fafafa"}}>
+                    <td style={{padding:"6px 12px"}}>
+                      <input type="text" value={p.name} onChange={e=>updateCommodityPrice(p.id,"name",e.target.value)}
+                        style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".85rem",width:"100%",fontFamily:"inherit",outline:"none"}} />
+                    </td>
+                    <td style={{padding:"6px 12px"}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
+                        <span style={{color:"#888",fontSize:".85rem"}}>$</span>
+                        <input type="text" value={p.price}
+                          onChange={e=>updateCommodityPrice(p.id,"price",e.target.value.replace(/[^0-9.]/g,""))}
+                          style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".9rem",width:80,textAlign:"right",fontFamily:"inherit",outline:"none",fontWeight:700,color:"#6B0E1E"}} />
+                      </div>
+                    </td>
+                    <td style={{padding:"6px 12px",textAlign:"center"}}>
+                      <select value={p.unit} onChange={e=>updateCommodityPrice(p.id,"unit",e.target.value)}
+                        style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 6px",fontSize:".8rem",fontFamily:"inherit",outline:"none",background:"white"}}>
+                        {["bu","lb","ton","cwt","bale","hd"].map(u=><option key={u}>{u}</option>)}
+                      </select>
+                    </td>
+                    <td style={{padding:"4px 8px",textAlign:"center"}}>
+                      <button onClick={()=>{
+                        const updated = commodityPrices.filter(x=>x.id!==p.id);
+                        setCommodityPrices(updated); saveCommodityPrices(updated);
+                      }} style={{background:"#fee2e2",color:"#b91c1c",border:"none",borderRadius:4,padding:"2px 7px",cursor:"pointer",fontSize:12}}>×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+        <div style={{fontSize:".72rem",color:"#aaa",marginTop:8}}>Changes save automatically · Prices marked "list price" on the Budget tab are pulled from this list</div>
+      </div>
+    </div>
+  ) : null;
+  const expenseEditorModal = showExpenseEditor && profile?.role === 'admin' ? (
+    <ExpenseListEditor
+      expenseList={expenseList}
+      setExpenseList={setExpenseList}
+      onClose={()=>setShowExpenseEditor(false)}
+    />
+  ) : null;
+
   if (screen === "home") {
     const uniqueClients = Object.keys(savedSheets.reduce((g,s)=>{g[s.clientName]=true;return g;},{}));
     const clientCount = uniqueClients.length;
@@ -16868,6 +16954,10 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             );
           })()}
         </div>
+        {/* Admin modals — also rendered here so they work from the home
+            screen. (Main return has its own copies too via the same vars.) */}
+        {priceListModal}
+        {expenseEditorModal}
       </div>
     );
   }
@@ -17998,98 +18088,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         </div>
       )}
 
-      {showPriceList && profile?.role === 'admin' && (
-        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"white",borderRadius:14,padding:28,maxWidth:620,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:"1.05rem",color:"#1a1a1a"}}>Commodity Price List</div>
-                <div style={{fontSize:".75rem",color:"#888",marginTop:2}}>
-                  First Bank of Montana · Prices auto-fill on the Budget tab · Edit any price to update
-                </div>
-              </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>{
-                  const newId = commodityPrices.length;
-                  const updated = [...commodityPrices,{id:newId,category:"Crops",name:"",price:"",unit:"bu"}];
-                  setCommodityPrices(updated); saveCommodityPrices(updated);
-                }} style={{background:"none",border:"1.5px solid #6B0E1E",borderRadius:6,padding:"4px 12px",color:"#6B0E1E",fontWeight:700,fontSize:".78rem",cursor:"pointer",fontFamily:"inherit"}}>
-                  + Add
-                </button>
-                <button onClick={()=>{
-                  if(window.confirm("Reset to FBMT default prices? Your edits will be lost.")) {
-                    const defaults = DEFAULT_COMMODITY_PRICES.map((p,i)=>({...p,id:i}));
-                    setCommodityPrices(defaults); saveCommodityPrices(defaults);
-                  }
-                }} style={{background:"none",border:"1px solid #ddd",borderRadius:6,padding:"4px 12px",color:"#888",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit"}}>
-                  Reset to Defaults
-                </button>
-                <button onClick={()=>setShowPriceList(false)}
-                  style={{background:"none",border:"none",fontSize:"1.3rem",cursor:"pointer",color:"#888",lineHeight:1}}>×</button>
-              </div>
-            </div>
-            {["Crops","Livestock"].map(cat => (
-              <div key={cat} style={{marginBottom:16}}>
-                <div style={{background:"#6B0E1E",color:"white",fontWeight:700,fontSize:".8rem",padding:"6px 12px",borderRadius:"6px 6px 0 0",letterSpacing:".05em",textTransform:"uppercase"}}>
-                  {cat}
-                </div>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:".85rem"}}>
-                  <thead>
-                    <tr style={{background:"#f5f0f0"}}>
-                      <th style={{padding:"7px 12px",textAlign:"left",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Commodity</th>
-                      <th style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Price</th>
-                      <th style={{padding:"7px 12px",textAlign:"center",fontWeight:700,color:"#555",fontSize:".75rem",textTransform:"uppercase",letterSpacing:".04em"}}>Unit</th>
-                      <th style={{width:36}}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {commodityPrices.filter(p=>p.category===cat).map((p,i)=>(
-                      <tr key={p.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"white":"#fafafa"}}>
-                        <td style={{padding:"6px 12px"}}>
-                          <input type="text" value={p.name}
-                            onChange={e=>updateCommodityPrice(p.id,"name",e.target.value)}
-                            style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".85rem",width:"100%",fontFamily:"inherit",outline:"none"}} />
-                        </td>
-                        <td style={{padding:"6px 12px"}}>
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
-                            <span style={{color:"#888",fontSize:".85rem"}}>$</span>
-                            <input type="text" value={p.price}
-                              onChange={e=>updateCommodityPrice(p.id,"price",e.target.value.replace(/[^0-9.]/g,""))}
-                              style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 8px",fontSize:".9rem",width:80,textAlign:"right",fontFamily:"inherit",outline:"none",fontWeight:700,color:"#6B0E1E"}} />
-                          </div>
-                        </td>
-                        <td style={{padding:"6px 12px",textAlign:"center"}}>
-                          <select value={p.unit} onChange={e=>updateCommodityPrice(p.id,"unit",e.target.value)}
-                            style={{border:"1px solid #e0e0e0",borderRadius:4,padding:"4px 6px",fontSize:".8rem",fontFamily:"inherit",outline:"none",background:"white"}}>
-                            {["bu","lb","ton","cwt","bale","hd"].map(u=><option key={u}>{u}</option>)}
-                          </select>
-                        </td>
-                        <td style={{padding:"4px 8px",textAlign:"center"}}>
-                          <button onClick={()=>{
-                            const updated = commodityPrices.filter(x=>x.id!==p.id);
-                            setCommodityPrices(updated); saveCommodityPrices(updated);
-                          }} style={{background:"#fee2e2",color:"#b91c1c",border:"none",borderRadius:4,padding:"2px 7px",cursor:"pointer",fontSize:12}}>×</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-            <div style={{fontSize:".72rem",color:"#aaa",marginTop:8}}>
-              Changes save automatically · Prices marked "list price" on the Budget tab are pulled from this list
-            </div>
-          </div>
-        </div>
-      )}
+      {priceListModal}
 
-      {showExpenseEditor && profile?.role === 'admin' && (
-        <ExpenseListEditor
-          expenseList={expenseList}
-          setExpenseList={setExpenseList}
-          onClose={()=>setShowExpenseEditor(false)}
-        />
-      )}
+      {expenseEditorModal}
 
       {/* ── Share Package Pre-Modal ── */}
       {showSharePre && (
