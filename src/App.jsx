@@ -14805,13 +14805,15 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <div style={{flex:'0 1 135px',minWidth:120}}>
                 <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               </div>
-              <div style={{display:"flex",flexDirection:"column",fontSize:11,color:"#6b7280",minWidth:170,paddingBottom:6}}>
-                <span>Next payment splits:</span>
-                <span>• Interest: <strong style={{color:"#92400e"}}>{fmt(accruedInt)}</strong></span>
-                <span>• Principal: <strong style={{color:"#15803d"}}>{fmt(principalPmt)}</strong></span>
-                <span style={{marginTop:4,paddingTop:4,borderTop:'0.5px solid #f0f0f0'}}>Prints as:</span>
-                <span>• Current: <strong style={{color:"#991b1b"}}>{fmt(currentPortion)}</strong></span>
-                <span>• Long-term: <strong style={{color:"#991b1b"}}>{fmt(ltPortion)}</strong></span>
+              {/* Compact splits panel — tight column so the whole row stays
+                  on one line. Hover any value for the full label. */}
+              <div style={{display:"flex",flexDirection:"column",fontSize:10,lineHeight:1.25,color:"#6b7280",width:110,minWidth:95,paddingBottom:6,gap:1}}>
+                <span style={{fontSize:9,textTransform:'uppercase',letterSpacing:.3,color:'#9ca3af'}}>Next pmt</span>
+                <span title="Interest portion">Int: <strong style={{color:"#92400e"}}>{fmt(accruedInt)}</strong></span>
+                <span title="Principal reduction">Prin: <strong style={{color:"#15803d"}}>{fmt(principalPmt)}</strong></span>
+                <span style={{fontSize:9,textTransform:'uppercase',letterSpacing:.3,color:'#9ca3af',marginTop:2,paddingTop:2,borderTop:'0.5px solid #f0f0f0'}}>Prints</span>
+                <span title="Current portion">Cur: <strong style={{color:"#991b1b"}}>{fmt(currentPortion)}</strong></span>
+                <span title="Long-term portion">LT: <strong style={{color:"#991b1b"}}>{fmt(ltPortion)}</strong></span>
               </div>
               {linkedCorpNames.length > 0 && (
                 <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130,paddingBottom:6}}>
