@@ -9160,7 +9160,74 @@ Rules:
 Equipment list:
 ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'('+r.condition+')':''} — declared $${numVal(r.value).toLocaleString()}`).join('\n')}`;
 
+    // Batch items into small groups so each analyze-search call stays well
+    // under Netlify's function timeout. Large machinery lists used to run
+    // as a single call with 15+ web searches and routinely hit 30s+ which
+    // the platform aborts. 4 items per batch × ~15s each works reliably.
+    const batchSize = 4;
+    const batches = [];
+    for (let i = 0; i < items.length; i += batchSize) batches.push(items.slice(i, i + batchSize));
     try {
+      const runBatch = async (batch) => {
+        const batchPrompt = prompt.replace(
+          /Equipment list:[\s\S]*$/,
+          'Equipment list:\n' + batch.map(r => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'('+r.condition+')':''} — declared $${numVal(r.value).toLocaleString()}`).join('\n')
+        );
+        const r = await fetch('/.netlify/functions/analyze-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5',
+            max_tokens: 2500,
+            max_searches: batch.length + 2,
+            system: 'You are a conservative, numerate agricultural equipment appraiser. Use the web_search tool to pull real recent-sale comps before answering. Cite the source in your note. Return STRICT JSON as your final response block.',
+            messages: [{ role:'user', content: batchPrompt }],
+          }),
+        });
+        return r;
+      };
+      // Fire batches in parallel. One batch failing shouldn't kill the rest.
+      const results = await Promise.allSettled(batches.map(runBatch));
+      const firstBad = results.find(x => x.status === 'fulfilled' && !x.value.ok);
+      // Parse every successful response and merge byIdx.
+      const mergedByIdx = {};
+      for (const r of results) {
+        if (r.status !== 'fulfilled' || !r.value.ok) continue;
+        try {
+          const json = await r.value.json();
+          const text = (json.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+          const m = text.match(/\{[\s\S]*"items"[\s\S]*\}/);
+          const raw = m ? m[0] : text.replace(/```json|```/g,'').trim();
+          const parsed = JSON.parse(raw);
+          (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') mergedByIdx[it.index] = it; });
+        } catch {}
+      }
+      if (Object.keys(mergedByIdx).length === 0 && firstBad) {
+        const errBody = await firstBad.value.text().catch(()=>'');
+        throw new Error('Server returned ' + firstBad.value.status + ': ' + errBody.slice(0,200));
+      }
+      // Replace the single-call path below by stuffing mergedByIdx in and
+      // continuing straight to the sanity-check stage.
+      {
+        const byIdx = mergedByIdx;
+        items.forEach(r => {
+          const chk = byIdx[r._i];
+          if (!chk) return;
+          const v = numVal(r.value);
+          const lo = Number(chk.low) || 0;
+          const hi = Number(chk.high) || 0;
+          if (!v || !lo || !hi) return;
+          if (v >= lo && v <= hi) chk.status = 'ok';
+          else if (v > hi * 1.15) chk.status = 'high';
+          else if (v < lo * 0.85) chk.status = 'low';
+          else chk.status = 'ok';
+        });
+        setMachPriceCheck(byIdx);
+        setData(d => ({ ...d, machPriceCheck: byIdx, _machPriceCheckAt: new Date().toISOString() }));
+        setMachPriceCheckLoading(false);
+        return;
+      }
+      // (legacy single-call path — retained below for the 404 fallback)
       const resp = await fetch('/.netlify/functions/analyze-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
@@ -13060,9 +13127,12 @@ h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;ma
    remaining space (overflow:hidden clips a too-tall list instead of
    pushing the signature off the page), signature glued at the bottom.
    page-break-after sends the schedules onto page 2. */
-#fit-page { transform-origin: top left; display: flex; flex-direction: column; height: 12.8in; page-break-after: always; break-after: page; overflow: hidden; }
-#fit-page > .body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-#fit-page > .sig { flex: 0 0 auto; page-break-inside: avoid; break-inside: avoid; }
+/* Flex column. Signature sits below the body (never overlaps). The zoom
+   script shrinks everything together if the natural content is taller
+   than a legal page, so totals stay visible AND sig lands at the bottom. */
+#fit-page { transform-origin: top left; display: flex; flex-direction: column; min-height: 12.8in; page-break-after: always; break-after: page; }
+#fit-page > .body { flex: 0 0 auto; }
+#fit-page > .sig { flex: 0 0 auto; margin-top: auto; page-break-inside: avoid; break-inside: avoid; }
 .sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
 .sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
 .sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
@@ -13172,10 +13242,11 @@ ${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const prinCur=Math
       el.style.zoom = 1;                   // reset before measuring
       el.style.transform = 'none';
       el.style.width = '';
-      // 13in page − ~1.6in signature block = ~11.4in available for body.
-      // The sig is position:absolute at the bottom, so we size content to
-      // fit above it.
-      var pageH = 11.4 * 96;               // ~1094px
+      // Target the full legal printable area (~12.8in). Zoom shrinks the
+      // whole #fit-page (body + sig together), so content never overlaps
+      // the signature — if the natural height is taller than one page we
+      // just scale everything down proportionally.
+      var pageH = 12.8 * 96;               // ~1229px
       var h = el.scrollHeight;
       if (!h) return;
       var scale = 1;
