@@ -13026,12 +13026,13 @@ h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;ma
   div[style*="page-break-after"]:empty,
   div[style*="page-break-before"]:empty { display: none !important; }
 }
-/* Flex column so .sig's margin-top:auto pushes it to the bottom of the
-   page. min-height fills the sheet; we DON'T set a hard height or
-   overflow:hidden (that was clipping the signature when content was
-   tall). page-break-after forces the schedules onto page 2. */
-#fit-page { transform-origin: top left; display: flex; flex-direction: column; min-height: 12.8in; page-break-after: always; break-after: page; }
-.sig { page-break-inside: avoid; break-inside: avoid; margin-top: auto; }
+/* Pin the signature to the bottom of the legal page with absolute
+   positioning. #fit-page is a fixed 13in tall box; everything above the
+   .sig block can scroll/clip inside it, but the signature always lands
+   at the same vertical spot — the bottom of page 1. page-break-after
+   forces the schedules onto page 2. */
+#fit-page { transform-origin: top left; position: relative; height: 13in; page-break-after: always; break-after: page; overflow: hidden; }
+#fit-page > .sig { position: absolute; left: 0; right: 0; bottom: 0; page-break-inside: avoid; break-inside: avoid; }
 .sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
 .sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
 .sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
@@ -13141,7 +13142,10 @@ ${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const prinCur=Math
       el.style.zoom = 1;                   // reset before measuring
       el.style.transform = 'none';
       el.style.width = '';
-      var pageH = 13.0 * 96;               // ~1248px — stay just inside legal printable
+      // 13in page − ~1.6in signature block = ~11.4in available for body.
+      // The sig is position:absolute at the bottom, so we size content to
+      // fit above it.
+      var pageH = 11.4 * 96;               // ~1094px
       var h = el.scrollHeight;
       if (!h) return;
       var scale = 1;
