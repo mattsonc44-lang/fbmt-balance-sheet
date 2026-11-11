@@ -14729,19 +14729,19 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <div style={{flex:'2 1 140px',minWidth:120}}>
                 <TxtInp label="Security" value={r.security} onChange={v=>setArr("intermediatDebt",i,"security",v)} placeholder="Collateral" />
               </div>
-              <div style={{flex:'0 1 90px',minWidth:80}}>
+              <div style={{flex:'0 1 130px',minWidth:120}}>
                 <TxtInp label="Due Date" value={r.dueDate} onChange={v=>setArr("intermediatDebt",i,"dueDate",v)} placeholder="mm/dd" />
               </div>
-              <div style={{flex:'0 1 70px',minWidth:60}}>
+              <div style={{flex:'0 1 60px',minWidth:55}}>
                 <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("intermediatDebt",i,"rate",v)} />
               </div>
-              <div style={{flex:'0 1 110px',minWidth:95}}>
+              <div style={{flex:'0 1 105px',minWidth:90}}>
                 <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("intermediatDebt",i,"annualPmt",v)} />
               </div>
-              <div style={{flex:'0 1 110px',minWidth:95}}>
+              <div style={{flex:'0 1 105px',minWidth:90}}>
                 <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("intermediatDebt",i,"principal",v)} />
               </div>
-              <div style={{flex:'0 1 100px',minWidth:90}}>
+              <div style={{flex:'0 1 135px',minWidth:120}}>
                 <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("intermediatDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               </div>
               {linkedCorpNames.length > 0 && (
@@ -14787,22 +14787,22 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <div style={{flex:'2 1 160px',minWidth:140}}>
                 <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
               </div>
-              <div style={{flex:'0 1 100px',minWidth:90}}>
+              <div style={{flex:'0 1 90px',minWidth:80}}>
                 <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr" />
               </div>
-              <div style={{flex:'0 1 70px',minWidth:60}}>
+              <div style={{flex:'0 1 60px',minWidth:55}}>
                 <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
               </div>
-              <div style={{flex:'0 1 110px',minWidth:95}}>
+              <div style={{flex:'0 1 105px',minWidth:90}}>
                 <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("reDebt",i,"annualPmt",v)} />
               </div>
-              <div style={{flex:'0 1 110px',minWidth:95}}>
+              <div style={{flex:'0 1 105px',minWidth:90}}>
                 <Inp label="Accrued Int" prefix="$" value={r.accruedInterest||''} onChange={v=>setArr("reDebt",i,"accruedInterest",v)} />
               </div>
-              <div style={{flex:'0 1 120px',minWidth:100}}>
+              <div style={{flex:'0 1 115px',minWidth:100}}>
                 <Inp label="Principal" prefix="$" value={r.principal} onChange={v=>setArr("reDebt",i,"principal",v)} />
               </div>
-              <div style={{flex:'0 1 100px',minWidth:90}}>
+              <div style={{flex:'0 1 135px',minWidth:120}}>
                 <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               </div>
               <div style={{display:"flex",flexDirection:"column",fontSize:11,color:"#6b7280",minWidth:170,paddingBottom:6}}>
