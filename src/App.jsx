@@ -13129,33 +13129,44 @@ ${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const prinCur=Math
 
 </div><!-- /#fit-page -->
 <script>
-  // Auto-fit the first page: measure #fit-page vs the printable area of
-  // legal paper (14in − top/bottom margins ≈ 13.2in = ~1267px @ 96dpi) and
-  // apply a transform scale so the content fills the page down to the
-  // signature line without overflowing. Caps scale at 1.4× so fonts don't
-  // get silly big on skinny sheets.
-  window.addEventListener('load', function() {
+  // Auto-fit the first page. We use CSS `zoom` instead of `transform: scale`
+  // because transform doesn't reflow for print pagination — Chrome still
+  // paginates based on the pre-scaled box, so a tall sheet's signature spills
+  // to page 2. `zoom` DOES change the laid-out box size, so pagination sees
+  // the shrunk height.
+  function fbmtFit() {
     try {
       var el = document.getElementById('fit-page');
       if (!el) return;
-      var pageH = 13.2 * 96; // ≈ 1267px
-      // Give the layout a tick to settle (fonts + inline SVG/img measure).
-      requestAnimationFrame(function() {
-        var h = el.scrollHeight;
-        if (!h) return;
-        var scale = 1;
-        if (h > pageH) {
-          scale = Math.max(0.55, pageH / h);
-        } else if (h < pageH * 0.80) {
-          scale = Math.min(1.4, (pageH * 0.95) / h);
-        }
-        if (scale !== 1) {
+      el.style.zoom = 1;                   // reset before measuring
+      el.style.transform = 'none';
+      el.style.width = '';
+      var pageH = 13.0 * 96;               // ~1248px — stay just inside legal printable
+      var h = el.scrollHeight;
+      if (!h) return;
+      var scale = 1;
+      if (h > pageH) {
+        scale = Math.max(0.55, pageH / h);
+      } else if (h < pageH * 0.80) {
+        scale = Math.min(1.4, (pageH * 0.95) / h);
+      }
+      if (scale !== 1) {
+        // zoom affects layout + pagination. Fall back to transform if the
+        // browser doesn't support zoom (older Firefox), accepting the
+        // original limitation on that engine.
+        if (typeof el.style.zoom !== 'undefined') {
+          el.style.zoom = scale;
+        } else {
           el.style.transform = 'scale(' + scale + ')';
           el.style.width = (100 / scale) + '%';
         }
-      });
+      }
     } catch (e) {}
-  });
+  }
+  // Fit on load AND right before the browser paginates for print, in case
+  // webfonts shifted layout between the two moments.
+  window.addEventListener('load', function(){ requestAnimationFrame(fbmtFit); });
+  window.addEventListener('beforeprint', fbmtFit);
 </script>
 <!-- ═══ PAGE 2 — SCHEDULES ═══════════════════════════════════════════════ -->
 <div class="page2">
