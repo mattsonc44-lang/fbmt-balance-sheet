@@ -1136,7 +1136,7 @@ function emptyData() {
     // the Current-Portion section and the (principal − annual pmt) in the
     // Long-Term section. Older sheets with reCurrent/reMortgages continue to
     // work; totals combine both sources.
-    reDebt:[{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false}],
+    reDebt:[{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",maturityDate:"",corpPaidBy:"",corpPaid:false}],
     // ── Collateral valuation (lender-side analysis) ─────────────────────────
     // Everything else on the sheet is the borrower's financial picture.
     // `collateral` is the BANK's view of what the pledged assets would really
@@ -1161,7 +1161,7 @@ function emptyData() {
       otherCollateralValue: "",
     },
     taxesDue:"", otherCurrentLiab:[{description:"",amount:""}],
-    reMortgages:[{lienHolder:"",terms:"",principal:"",rate:""}],
+    reMortgages:[{lienHolder:"",terms:"",principal:"",rate:"",maturityDate:""}],
     otherLiabilities:[{description:"",balance:""}],
     budgetCrops:[{acres:"",crop:"",yieldPerAcre:"",unit:"bu",price:"",share:"100",contracted:false,insYield:"",insPrice:""}],
     budgetInsuranceEnabled:false,
@@ -3876,7 +3876,6 @@ function CustomerBalanceSheetForm({shareId}) {
     ['re_current',          'Current-Year RE Pmts'],
     ['other_current_liab',  'Other Current Liab'],
     ['term_debt',           'Term Debt'],
-    ['re_mortgages',        'RE Mortgages'],
     ['re_debt',             'RE Debt'],
     ['other_liabilities',   'Taxes & Other Liab'],
     ['submit',              'Review & Submit'],
@@ -4440,6 +4439,7 @@ function CustomerBalanceSheetForm({shareId}) {
           {(data.intermediatDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.creditor} onChange={v=>setArr('intermediatDebt',i,'creditor',v)} placeholder="Lender" style={{flex:'2 1 120px'}}/>
             <CustInp value={r.security} onChange={v=>setArr('intermediatDebt',i,'security',v)} placeholder="Collateral" style={{flex:'2 1 100px'}}/>
+            <CustInp value={r.dueDate||r.maturityDate||''} onChange={v=>setArr('intermediatDebt',i,'dueDate',v)} placeholder="Maturity mm/dd/yy" style={{flex:'1 1 110px'}}/>
             <CustInp prefix="Ann Pmt $" value={r.annualPmt} onChange={v=>setArr('intermediatDebt',i,'annualPmt',v)} placeholder="0" style={{flex:'1 1 80px'}}/>
             <CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('intermediatDebt',i,'principal',v)} placeholder="0" style={{flex:'1 1 80px'}}/>
             {remBtn('intermediatDebt',i)}
@@ -4448,11 +4448,11 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Annual Payments: {fmt(termTot)}</div>
         </CustSec>
 
-        <CustSec title="Real Estate Mortgages" stepId="re_mortgages" open={open.reMort} onToggle={()=>toggle('reMort')}>
-          {(data.reMortgages||[]).map((r,i)=><div key={i} style={rowStyle}><CustInp value={r.lienHolder} onChange={v=>setArr('reMortgages',i,'lienHolder',v)} placeholder="Lender" style={{flex:2}}/><CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('reMortgages',i,'principal',v)} placeholder="0" style={{flex:1}}/>{remBtn('reMortgages',i)}</div>)}
-          {addBtn('reMortgages',{lienHolder:'',terms:'',principal:'',rate:''},'Add Mortgage')}
-          <div style={{marginTop:8,fontWeight:600,color:'#7a1a1a',fontSize:13}}>Total: {fmt(reMortTot)}</div>
-        </CustSec>
+        {/* Real Estate Mortgages section removed — superseded by the
+            unified "Real Estate Debt" section below. Any legacy
+            reMortgages data on the sheet is still preserved and carried
+            through on save; it just isn't editable on the customer form
+            anymore. */}
 
         {/* Real Estate Debt (unified) — mirror of the lender form. Accrued
             interest + principal + annual payment lets the lender see the real
@@ -4461,6 +4461,7 @@ function CustomerBalanceSheetForm({shareId}) {
           <div style={{fontSize:12,color:'#6b7280',marginBottom:8}}>Each mortgage: who you owe, the full balance, your annual payment, and any interest that's already accrued since the last payment.</div>
           {(data.reDebt||[]).map((r,i)=><div key={i} style={{...rowStyle,flexWrap:'wrap'}}>
             <CustInp value={r.lienHolder} onChange={v=>setArr('reDebt',i,'lienHolder',v)} placeholder="Lender" style={{flex:'2 1 160px'}}/>
+            <CustInp value={r.maturityDate||''} onChange={v=>setArr('reDebt',i,'maturityDate',v)} placeholder="Maturity mm/dd/yy" style={{flex:'1 1 120px'}}/>
             <CustInp prefix="Bal $" value={r.principal} onChange={v=>setArr('reDebt',i,'principal',v)} placeholder="0" style={{flex:'1 1 110px'}}/>
             <CustInp prefix="Pmt $" value={r.annualPmt} onChange={v=>setArr('reDebt',i,'annualPmt',v)} placeholder="Annual pmt" style={{flex:'1 1 110px'}}/>
             <CustInp prefix="Int $" value={r.accruedInterest||''} onChange={v=>setArr('reDebt',i,'accruedInterest',v)} placeholder="Accrued int" style={{flex:'1 1 110px'}}/>
@@ -14767,6 +14768,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr fixed" />
+              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
               <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("reDebt",i,"annualPmt",v)} />
               <Inp label="Accrued Int" prefix="$" value={r.accruedInterest||''} onChange={v=>setArr("reDebt",i,"accruedInterest",v)} />
@@ -14794,7 +14796,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",maturityDate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row">
             <span>Current-portion total</span><strong className="red">{fmt(reDebtCurrentPortion)}</strong>
           </div>
@@ -14863,7 +14865,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 ...data,
                 reDebt: [...existingReDebt, ...merged],
                 reCurrent: [{creditor:"",annualPmt:"",rate:""}],   // reset to empty default
-                reMortgages: [{lienHolder:"",terms:"",principal:"",rate:""}],
+                reMortgages: [{lienHolder:"",terms:"",principal:"",rate:"",maturityDate:""}],
               };
               setData(nextData);
               alert(`Migrated ${merged.length} RE Debt entries. Legacy sections cleared.`);
@@ -14919,6 +14921,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <span className="row-num">{i+1}</span>
               <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
+              <TxtInp label="Maturity" value={r.maturityDate||''} onChange={v=>setArr("reMortgages",i,"maturityDate",v)} placeholder="mm/dd/yy" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reMortgages",i,"rate",v)} />
               <Inp label="Principal (beyond 12 mo)" prefix="$" value={r.principal} onChange={v=>setArr("reMortgages",i,"principal",v)} />
               {linkedCorpNames.length > 0 && (
@@ -14936,7 +14939,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reMortgages",{lienHolder:"",terms:"",principal:"",rate:"",maturityDate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row"><span>Total RE Mortgages (LT)</span><strong className="red">{fmt(reMortTotal)}</strong></div>
         </div>
       );
@@ -17742,8 +17745,8 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                           otherCurrentLiab:{description:"",amount:""},
                           otherLiabilities:{description:"",balance:""},
                           reContracts:{description:"",amount:""},
-                          reDebt:{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",corpPaidBy:"",corpPaid:false},
-                          reMortgages:{lienHolder:"",terms:"",principal:"",rate:"",corpPaidBy:"",corpPaid:false},
+                          reDebt:{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",maturityDate:"",corpPaidBy:"",corpPaid:false},
+                          reMortgages:{lienHolder:"",terms:"",principal:"",rate:"",maturityDate:"",corpPaidBy:"",corpPaid:false},
                           realEstate:{acres:"",reType:"",description:"",valuePerAcre:""},
                           receivables:{description:"",amount:""},
                           supplies:{description:"",value:""},
