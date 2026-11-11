@@ -9211,6 +9211,22 @@ ${items.map((r,k) => `${r._i}. ${r.year} ${r.make} ${r.size||''} ${r.condition?'
       const parsed = JSON.parse(raw);
       const byIdx = {};
       (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
+      // Sanity check the model's status against the numbers it returned.
+      // It regularly flags items as "high" even when the declared value
+      // falls inside its own low/high range — override to "ok" in that
+      // case. Same for "low" false positives.
+      items.forEach(r => {
+        const chk = byIdx[r._i];
+        if (!chk) return;
+        const v = numVal(r.value);
+        const lo = Number(chk.low) || 0;
+        const hi = Number(chk.high) || 0;
+        if (!v || !lo || !hi) return;
+        if (v >= lo && v <= hi) chk.status = 'ok';
+        else if (v > hi * 1.15) chk.status = 'high';
+        else if (v < lo * 0.85) chk.status = 'low';
+        else chk.status = 'ok';
+      });
       setMachPriceCheck(byIdx);
       // Persist on the sheet so the check sticks between opens/saves — only
       // the sheet the lender ran it on gets the results. Timestamped so we
@@ -9341,6 +9357,20 @@ ${items.map((r,k) => describe(r,k)).join('\n')}`;
       const parsed = JSON.parse(raw);
       const byIdx = {};
       (parsed.items||[]).forEach(it => { if (typeof it.index === 'number') byIdx[it.index] = it; });
+      // Same sanity-check as machinery — correct status when declared value
+      // is inside the returned range.
+      items.forEach(r => {
+        const chk = byIdx[r._i];
+        if (!chk) return;
+        const v = numVal(r.value);
+        const lo = Number(chk.low) || 0;
+        const hi = Number(chk.high) || 0;
+        if (!v || !lo || !hi) return;
+        if (v >= lo && v <= hi) chk.status = 'ok';
+        else if (v > hi * 1.15) chk.status = 'high';
+        else if (v < lo * 0.85) chk.status = 'low';
+        else chk.status = 'ok';
+      });
       setVehPriceCheck(byIdx);
       setData(d => ({ ...d, vehPriceCheck: byIdx, _vehPriceCheckAt: new Date().toISOString() }));
     } catch (e) {
@@ -13026,13 +13056,13 @@ h2{font-size:14pt;font-weight:700;text-decoration:underline;text-align:center;ma
   div[style*="page-break-after"]:empty,
   div[style*="page-break-before"]:empty { display: none !important; }
 }
-/* Pin the signature to the bottom of the legal page with absolute
-   positioning. #fit-page is a fixed 13in tall box; everything above the
-   .sig block can scroll/clip inside it, but the signature always lands
-   at the same vertical spot — the bottom of page 1. page-break-after
-   forces the schedules onto page 2. */
-#fit-page { transform-origin: top left; position: relative; height: 13in; page-break-after: always; break-after: page; overflow: hidden; }
-#fit-page > .sig { position: absolute; left: 0; right: 0; bottom: 0; page-break-inside: avoid; break-inside: avoid; }
+/* Fixed-height flex column: hdr + name-row at the top, body takes all
+   remaining space (overflow:hidden clips a too-tall list instead of
+   pushing the signature off the page), signature glued at the bottom.
+   page-break-after sends the schedules onto page 2. */
+#fit-page { transform-origin: top left; display: flex; flex-direction: column; height: 12.8in; page-break-after: always; break-after: page; overflow: hidden; }
+#fit-page > .body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+#fit-page > .sig { flex: 0 0 auto; page-break-inside: avoid; break-inside: avoid; }
 .sched-title{font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-bottom:2pt solid #000;padding-bottom:3pt;margin-bottom:6pt;}
 .sched-table{width:100%;border-collapse:collapse;font-size:7.5pt;margin-bottom:16pt;}
 .sched-table th{background:#000;color:#fff;padding:3pt 5pt;text-align:left;font-size:7pt;font-weight:700;}
@@ -13130,10 +13160,10 @@ ${(d.reDebt||[]).filter(r=>r.lienHolder||r.principal).map(r=>{const prinCur=Math
 
 </div><!-- /#fit-page -->
 <script>
-  // Auto-fit the first page. We use CSS `zoom` instead of `transform: scale`
-  // because transform doesn't reflow for print pagination — Chrome still
-  // paginates based on the pre-scaled box, so a tall sheet's signature spills
-  // to page 2. `zoom` DOES change the laid-out box size, so pagination sees
+  // Auto-fit the first page. We use CSS zoom instead of transform scale
+  // because transform does not reflow for print pagination — Chrome still
+  // paginates based on the pre-scaled box, so a tall sheet signature spills
+  // to page 2. zoom DOES change the laid-out box size, so pagination sees
   // the shrunk height.
   function fbmtFit() {
     try {
