@@ -11779,12 +11779,25 @@ Question: ${q}`,
         return a + nm(r.head) * nm(r.lbs) * effectivePrice;
       }, 0);
       const miscInc      = (p.budgetMisc||[]).reduce((a,r) => a + nm(r.amount), 0);
+      // Crop on hand — prior-year production the client hasn't sold yet.
+      // It converts to cash during the current operating cycle, so it belongs
+      // in projected income alongside the new-production crop budget. Price
+      // the stored bushels/lbs at the lender commodity list when the row
+      // itself is blank (e.g. the customer entered 50,000 bu of wheat with
+      // no price filled in) so the model doesn't see a zero.
+      const cropOnHandInc = (p.farmProducts||[]).reduce((a,r) => {
+        const pct = nm(r.share||'100') / 100;
+        let price = nm(r.pricePerUnit);
+        if (!price) { const cp = listPriceFor(r.kind); if (cp != null) price = cp; }
+        return a + nm(r.quantity) * price * pct;
+      }, 0);
       const opEx         = (p.budgetExpenses||[]).filter(r=>!r.prepaid).reduce((a,r) => a + nm(r.amount), 0);
       const debtSvc      = (p.intermediatDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
                          + (p.reCurrent||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
                          + (p.reDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0)
                          + (p.budgetProposedDebt||[]).reduce((a,r)=>a+nm(r.annualPmt),0);
-      return { cropInc, livestockInc, miscInc, opEx, debtSvc, totalInc: cropInc+livestockInc+miscInc };
+      return { cropInc, livestockInc, miscInc, cropOnHandInc, opEx, debtSvc,
+               totalInc: cropInc+livestockInc+miscInc+cropOnHandInc };
     };
     // Post-harvest liquidation snapshot: stored grain + livestock-for-market on the
     // balance sheet vs the operating note balance. If crop-on-hand > op line, the
@@ -11897,7 +11910,7 @@ Question: ${q}`,
         // In consolidated mode, also fold in each linked entity's budget × ownership %.
         // Cache lookups to avoid re-fetching the same entity for each year.
         let entityLines = [];
-        let comboInc = own.totalInc, comboCrop = own.cropInc, comboLs = own.livestockInc, comboMisc = own.miscInc, comboOpEx = own.opEx, comboDebt = own.debtSvc;
+        let comboInc = own.totalInc, comboCrop = own.cropInc, comboLs = own.livestockInc, comboMisc = own.miscInc, comboCoh = own.cropOnHandInc || 0, comboOpEx = own.opEx, comboDebt = own.debtSvc;
         if (useConsolidated) {
           for (const entry of normalizeLinked(p.linkedEntities || [])) {
             const pct = (Number(String(entry.ownership || '100').replace(/[^0-9.]/g,'')) || 100) / 100;
@@ -11926,6 +11939,7 @@ Question: ${q}`,
               comboCrop += eb.cropInc * pct;
               comboLs   += eb.livestockInc * pct;
               comboMisc += eb.miscInc * pct;
+              comboCoh  += (eb.cropOnHandInc || 0) * pct;
               comboOpEx += eb.opEx * pct;
               comboDebt += eb.debtSvc * pct;
               entityLines.push(`${entry.name} (${(pct*100).toFixed(0)}% of ${ep.asOfDate}): income ${fmtM(eb.totalInc)}, opEx ${fmtM(eb.opEx)}, debt svc ${fmtM(eb.debtSvc)}`);
@@ -11935,13 +11949,13 @@ Question: ${q}`,
         const dscrCombo = comboDebt > 0 ? ((comboInc - comboOpEx) / comboDebt).toFixed(2) : 'n/a';
         if (useConsolidated && entityLines.length) {
           budgetRows.push(
-            `- ${s.date} (${p.clientName || 'unknown'}) CONSOLIDATED: projected income ${fmtM(comboInc)} (crop ${fmtM(comboCrop)}, livestock ${fmtM(comboLs)}, misc ${fmtM(comboMisc)}), operating exp ${fmtM(comboOpEx)}, debt service ${fmtM(comboDebt)}, DSCR ${dscrCombo}`
-            + `\n    · Personal own: income ${fmtM(own.totalInc)}, opEx ${fmtM(own.opEx)}, debt svc ${fmtM(own.debtSvc)}`
+            `- ${s.date} (${p.clientName || 'unknown'}) CONSOLIDATED: projected income ${fmtM(comboInc)} (crop ${fmtM(comboCrop)}, livestock ${fmtM(comboLs)}, misc ${fmtM(comboMisc)}, crop-on-hand ${fmtM(comboCoh)}), operating exp ${fmtM(comboOpEx)}, debt service ${fmtM(comboDebt)}, DSCR ${dscrCombo}`
+            + `\n    · Personal own: income ${fmtM(own.totalInc)} (incl. crop-on-hand ${fmtM(own.cropOnHandInc||0)}), opEx ${fmtM(own.opEx)}, debt svc ${fmtM(own.debtSvc)}`
             + entityLines.map(l => `\n    · ${l}`).join('')
           );
         } else {
           const dscrOwn = own.debtSvc > 0 ? ((own.totalInc - own.opEx) / own.debtSvc).toFixed(2) : 'n/a';
-          budgetRows.push(`- ${s.date} (${p.clientName || 'unknown'}): projected income ${fmtM(own.totalInc)} (crop ${fmtM(own.cropInc)}, livestock ${fmtM(own.livestockInc)}, misc ${fmtM(own.miscInc)}), operating exp ${fmtM(own.opEx)}, debt service ${fmtM(own.debtSvc)}, DSCR ${dscrOwn}`);
+          budgetRows.push(`- ${s.date} (${p.clientName || 'unknown'}): projected income ${fmtM(own.totalInc)} (crop ${fmtM(own.cropInc)}, livestock ${fmtM(own.livestockInc)}, misc ${fmtM(own.miscInc)}, crop-on-hand ${fmtM(own.cropOnHandInc||0)}), operating exp ${fmtM(own.opEx)}, debt service ${fmtM(own.debtSvc)}, DSCR ${dscrOwn}`);
         }
       } catch {}
     }
