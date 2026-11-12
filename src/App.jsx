@@ -1990,9 +1990,11 @@ function computeNWExplainer(priorSheet, newerSheet) {
 
 function ComparisonView({
   compSheets: rawCompSheets, compLoading, compInsight, compInsightLoading,
+  insightChat = [], insightChatBusy = false, askInsightFollowUp,
   generateInsights, clientName, SECTION_BREAKS, SECTION_HEADERS, BOLD_ROWS,
   onDeleteSheet, currentFolderPath, nwExplainerEnabled,
 }) {
+  const [chatQ, setChatQ] = React.useState('');
   const [selectedYears, setSelectedYears] = React.useState(null);
   // Default: show every sheet for this client (matches how comparison always worked).
   // If the user wants to narrow, they can tick "only this folder" and it filters to
@@ -2658,6 +2660,52 @@ ${insightHtml}
             <span>Analyzing {years.length} years of data...</span>
           </div>
         )}
+        {/* Follow-up chat — appears once the first briefing is on screen.
+            Lets the lender ask "where did that DSCR come from?" or "which
+            row drove the drop?" and the model answers using the same
+            context it saw when it wrote the briefing. */}
+        {compInsight && !compInsightLoading && askInsightFollowUp && (
+          <div style={{background:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:12,marginTop:12,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#374151',marginBottom:8,textTransform:'uppercase',letterSpacing:.4}}>
+              Ask about this analysis
+            </div>
+            {insightChat.length > 0 && (
+              <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:10,maxHeight:300,overflowY:'auto'}}>
+                {insightChat.map((m, i) => (
+                  <div key={i} style={{
+                    background: m.role === 'user' ? '#eff6ff' : '#f9fafb',
+                    border: '1px solid ' + (m.role === 'user' ? '#bfdbfe' : '#e5e7eb'),
+                    borderRadius: 6, padding: '8px 10px', fontSize: 13, lineHeight: 1.45,
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    <div style={{fontSize:10,fontWeight:700,color: m.role==='user'?'#1e40af':'#6b7280',textTransform:'uppercase',letterSpacing:.3,marginBottom:3}}>
+                      {m.role === 'user' ? 'You' : 'Analyst'}
+                    </div>
+                    {m.content}
+                  </div>
+                ))}
+                {insightChatBusy && <div style={{fontSize:12,color:'#6b7280',fontStyle:'italic'}}>Thinking…</div>}
+              </div>
+            )}
+            <div style={{display:'flex',gap:8}}>
+              <input type="text" value={chatQ} onChange={e=>setChatQ(e.target.value)}
+                onKeyDown={e=>{
+                  if (e.key === 'Enter' && chatQ.trim() && !insightChatBusy) {
+                    askInsightFollowUp(chatQ.trim()); setChatQ('');
+                  }
+                }}
+                placeholder="e.g. Which year's number drove that drop? Where did DSCR come from?"
+                style={{flex:1,border:'1px solid #d1d5db',borderRadius:6,padding:'8px 10px',fontSize:13,fontFamily:'inherit',outline:'none'}}/>
+              <button type="button"
+                onClick={()=>{ if (chatQ.trim() && !insightChatBusy) { askInsightFollowUp(chatQ.trim()); setChatQ(''); } }}
+                disabled={!chatQ.trim() || insightChatBusy}
+                style={{background:'#2d5a8e',color:'white',border:'none',borderRadius:6,padding:'8px 16px',fontSize:13,fontWeight:600,cursor:(!chatQ.trim()||insightChatBusy)?'not-allowed':'pointer',opacity:(!chatQ.trim()||insightChatBusy)?.6:1,fontFamily:'inherit'}}>
+                Ask
+              </button>
+            </div>
+          </div>
+        )}
+
         {compInsight && !compInsightLoading && (
           <div className="insight-body" style={{maxHeight:'none',height:'auto',overflow:'visible',display:'block'}}>
             {compInsight.split("\n").map((line, i) => {
@@ -8687,6 +8735,12 @@ export default function BalanceSheet() {
   const [compLoading, setCompLoading] = useState(false);
   const [compInsight, setCompInsight] = useState("");
   const [compInsightLoading, setCompInsightLoading] = useState(false);
+  // Last insight prompt / system so the follow-up chat can hand the model the
+  // same context it saw when it wrote the briefing — questions like "where
+  // did you get that DSCR?" need the underlying numbers available.
+  const lastInsightCtxRef = React.useRef({ userMsg: '', system: '' });
+  const [insightChat, setInsightChat] = useState([]);  // [{role:'user'|'assistant', content:string}]
+  const [insightChatBusy, setInsightChatBusy] = useState(false);
   // Credit summary — bank-internal "why approve + committee pitfalls" writeup.
   // Feature-flagged per user (profile.features.creditSummary), rendered on
   // Year Comparison. Never shared out of the bank.
@@ -11622,6 +11676,53 @@ Question: ${q}`,
     }
   };
 
+  // Follow-up chat for the Generate-Insights briefing. Takes the user's
+  // question and sends the model the same context + the current briefing +
+  // every prior Q/A in the thread, so it can answer "why did you say that?"
+  // or "which number drove that?" without losing the thread.
+  const askInsightFollowUp = async (question) => {
+    const ctx = lastInsightCtxRef.current;
+    if (!ctx.userMsg) throw new Error('Generate an insight first — then I can answer questions about it.');
+    const q = String(question || '').trim();
+    if (!q) return;
+    // Build the thread for the model. We give it the exact original user
+    // turn, then the briefing as the assistant's prior reply, then every
+    // Q/A so far, then the new question.
+    const priorThread = insightChat.slice(); // snapshot
+    const reqMessages = [
+      { role: 'user', content: ctx.userMsg },
+      ...(compInsight ? [{ role: 'assistant', content: compInsight }] : []),
+      ...priorThread,
+      { role: 'user', content: q },
+    ];
+    // Optimistically show the user's turn
+    setInsightChat(c => [...c, { role: 'user', content: q }]);
+    setInsightChatBusy(true);
+    try {
+      const resp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET || '' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 1500,
+          system: ctx.system + '\n\nWhen answering follow-up questions, name the specific row, line item, or dollar figure from the briefing that supports your answer. Keep it concise.',
+          messages: reqMessages,
+        }),
+      });
+      if (!resp.ok) {
+        const t = await resp.text().catch(()=>'');
+        setInsightChat(c => [...c, { role: 'assistant', content: 'Error (' + resp.status + '): ' + t.slice(0,180) }]);
+        return;
+      }
+      const json = await resp.json();
+      const text = (json.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('') || 'No answer returned.';
+      setInsightChat(c => [...c, { role: 'assistant', content: text }]);
+    } catch (e) {
+      setInsightChat(c => [...c, { role: 'assistant', content: 'Connection error: ' + (e.message || e) }]);
+    }
+    setInsightChatBusy(false);
+  };
+
   const generateInsights = async (useConsolidated = false) => {
     if (compSheets.length < 2) return;
     setCompInsightLoading(true); setCompInsight("");
@@ -11858,6 +11959,9 @@ Question: ${q}`,
         + liquidationRows.join("\n")
       : "";
 
+    // Fresh insight run clears any previous follow-up chat so the Q&A
+    // thread attaches to the briefing the user is actually looking at.
+    setInsightChat([]);
     // Stream the response from analyze-stream so long analytical responses don't
     // hit Netlify's inactivity-timeout ceiling. Text appears progressively as the
     // model generates it, so we can safely run at full verbosity.
@@ -11919,6 +12023,11 @@ FORMAT RULES — follow exactly:
           + " if it doesn't cover, flag the roll-over debt risk."
           + (useConsolidated ? " Because these figures consolidate the individual and their linked entities, discuss the combined operation as a whole (e.g. how the operating entity supports the land base held personally, or vice versa)." : "")
       }]
+    };
+    // Capture the exact context so the follow-up chat can reuse it.
+    lastInsightCtxRef.current = {
+      userMsg: requestBody.messages[0].content,
+      system:  requestBody.system,
     };
     try {
       const resp = await fetch('/.netlify/functions/analyze-stream', {
@@ -18210,6 +18319,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               compInsight={compInsight}
               compInsightLoading={compInsightLoading}
               generateInsights={generateInsights}
+              insightChat={insightChat}
+              insightChatBusy={insightChatBusy}
+              askInsightFollowUp={askInsightFollowUp}
               clientName={data.clientName}
               SECTION_BREAKS={SECTION_BREAKS}
               SECTION_HEADERS={SECTION_HEADERS}
