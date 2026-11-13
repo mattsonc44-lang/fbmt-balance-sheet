@@ -5100,6 +5100,12 @@ const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
 
 // Auth session — module-level so all storage calls pick it up automatically
 let currentSession = null;
+// Mirror of the signed-in user's profile. Set by the App component on load
+// / profile refresh. storage.set reads this to stamp _lastEditedByName /
+// _lastEditedByRole onto every save.
+let currentProfile = null;
+const currentProfileName = () => currentProfile?.full_name || currentProfile?.email || null;
+const currentProfileRole = () => currentProfile?.role || '';
 try { const s = localStorage.getItem('fbmt_session'); if (s) currentSession = JSON.parse(s); } catch {}
 
 async function supaLogin(email, password) {
@@ -5208,17 +5214,47 @@ async function supaFetch(url, opts) {
   return fetch(url, { ...opts, headers });
 }
 
+// Lender UIDs the current session can read AND write. Starts with the
+// signed-in user's own UID; for CAs it's expanded by ca_access grants to
+// also include every lender they've been granted access to. Cached briefly
+// so we don't re-query on every list()/get()/set().
+let _accessibleUidsCache = { ids: null, at: 0 };
+async function accessibleLenderUids() {
+  const uid = currentSession?.user?.id;
+  if (!uid) return [];
+  const now = Date.now();
+  if (_accessibleUidsCache.ids && (now - _accessibleUidsCache.at) < 60000) return _accessibleUidsCache.ids;
+  const out = new Set([uid]);
+  try {
+    const r = await fetch(window.SUPABASE_URL + '/rest/v1/ca_access?ca_user_id=eq.' + encodeURIComponent(uid) + '&select=lender_user_id',
+      { headers: supaHeaders() });
+    if (r.ok) {
+      const rows = await r.json();
+      (Array.isArray(rows) ? rows : []).forEach(r2 => r2.lender_user_id && out.add(r2.lender_user_id));
+    }
+  } catch {}
+  const ids = Array.from(out);
+  _accessibleUidsCache = { ids, at: now };
+  return ids;
+}
+// Reset the cache after login / grant changes.
+function clearAccessibleUidsCache() { _accessibleUidsCache = { ids: null, at: 0 }; }
+
 const storage = {
   async list(prefix) {
     if (!isConfigured()) return { keys: [] };
-    // Scope every read to the logged-in user. Without this, the (permissive)
-    // RLS policy lets any authenticated session read every row in balance_sheets,
-    // which is what caused phantom entities to appear in the link-entity picker.
     const uid = currentSession?.user?.id;
     if (!uid) return { keys: [] };
+    // Pull the full set of lender UIDs this user can see — own + any CA
+    // grants — so a CA with access to a lender shows every one of that
+    // lender's sheets in the file tree.
+    const uids = await accessibleLenderUids();
     const clientPart = prefix.replace('fbmt_bs:', '').replace(/:$/, '').replace(/_/g, ' ');
+    const uidFilter = uids.length === 1
+      ? '&user_id=eq.' + encodeURIComponent(uids[0])
+      : '&user_id=in.(' + uids.map(encodeURIComponent).join(',') + ')';
     let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date'
-      + '&user_id=eq.' + encodeURIComponent(uid)
+      + uidFilter
       + '&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
     const resp = await supaFetch(url, { headers: supaHeaders() });
@@ -5235,9 +5271,13 @@ const storage = {
     const uid = currentSession?.user?.id;
     if (!uid) return null;
     const { clientName, asOfDate } = parseKey(key);
+    const uids = await accessibleLenderUids();
+    const uidFilter = uids.length === 1
+      ? '&user_id=eq.' + encodeURIComponent(uids[0])
+      : '&user_id=in.(' + uids.map(encodeURIComponent).join(',') + ')';
     const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
       + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate
-      + '&user_id=eq.' + encodeURIComponent(uid)
+      + uidFilter
       + '&limit=1';
     const resp = await supaFetch(url, { headers: supaHeaders() });
     if (!resp.ok) return null;
@@ -5253,28 +5293,49 @@ const storage = {
     if (!uid) throw new Error('Not signed in — cannot save.');
     const { clientName, asOfDate } = parseKey(key);
     const parsed = JSON.parse(value);
+    // Stamp who touched this sheet last and when. Shown on the sheet list
+    // and at the top of the wizard so lender + CA can see at a glance who
+    // the most recent editor was. profile may not be hydrated on cold load
+    // so fall back to email.
+    const editorId    = currentSession?.user?.id || null;
+    const editorEmail = currentSession?.user?.email || '';
+    const editorName  = (typeof currentProfileName === 'function'
+      ? (currentProfileName() || editorEmail)
+      : editorEmail) || 'Unknown';
+    parsed._lastEditedBy     = editorId;
+    parsed._lastEditedByName = editorName;
+    parsed._lastEditedByRole = (typeof currentProfileRole === 'function' ? currentProfileRole() : '') || '';
+    parsed._lastEditedAt     = new Date().toISOString();
     const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: uid };
 
-    // Check if THIS USER already has a record for this key. Scoping the check
-    // by user_id prevents silently overwriting another user's row that happens
-    // to share the same (client_name, as_of_date) — the UNIQUE constraint by
-    // itself doesn't prevent the PATCH from hitting somebody else's row.
-    const uidFilter = '&user_id=eq.' + encodeURIComponent(uid);
-    const checkUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
-      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + uidFilter + '&limit=1';
-    const checkResp = await supaFetch(checkUrl, { headers: supaHeaders() });
+    // Look up ANY existing row this session can see for (clientName,asOfDate)
+    // — the current user's own OR any lender they have CA access to. When a
+    // CA edits an existing sheet we PATCH it in place (keeps the lender's
+    // user_id as the owner). Only when no row exists do we INSERT, and only
+    // the signed-in user may be the new row's owner.
+    const uids = await accessibleLenderUids();
+    const uidFilter = uids.length === 1
+      ? '&user_id=eq.' + encodeURIComponent(uids[0])
+      : '&user_id=in.(' + uids.map(encodeURIComponent).join(',') + ')';
+    const findUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
+      + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate + uidFilter
+      + '&select=id,user_id&limit=1';
+    const checkResp = await supaFetch(findUrl, { headers: supaHeaders() });
     const existing = checkResp.ok ? await checkResp.json() : [];
 
     let resp;
     if (existing.length > 0) {
-      // Record exists (owned by this user) — update with PATCH, still scoped by user_id
-      resp = await supaFetch(checkUrl, {
+      const row = existing[0];
+      // PATCH the specific row (by id) so the CA can update the lender's
+      // own row without hitting a different user's sheet.
+      const patchUrl = window.SUPABASE_URL + '/rest/v1/balance_sheets?id=eq.' + encodeURIComponent(row.id);
+      resp = await supaFetch(patchUrl, {
         method: 'PATCH',
         headers: supaHeaders(),
         body: JSON.stringify({ data: parsed, saved_at: new Date().toISOString() })
       });
     } else {
-      // New record — insert with POST
+      // New record — insert with POST under the signed-in user.
       resp = await supaFetch(window.SUPABASE_URL + '/rest/v1/balance_sheets', {
         method: 'POST',
         headers: supaHeaders(),
@@ -5292,9 +5353,13 @@ const storage = {
     const uid = currentSession?.user?.id;
     if (!uid) return null;
     const { clientName, asOfDate } = parseKey(key);
+    const uids = await accessibleLenderUids();
+    const uidFilter = uids.length === 1
+      ? '&user_id=eq.' + encodeURIComponent(uids[0])
+      : '&user_id=in.(' + uids.map(encodeURIComponent).join(',') + ')';
     const url = window.SUPABASE_URL + '/rest/v1/balance_sheets?client_name=eq.'
       + encodeURIComponent(clientName) + '&as_of_date=eq.' + asOfDate
-      + '&user_id=eq.' + encodeURIComponent(uid);
+      + uidFilter;
     const resp = await supaFetch(url, { method: 'DELETE', headers: supaHeaders() });
     return resp.ok ? { key, deleted: true } : null;
   }
@@ -7389,6 +7454,9 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
   const [showAdd, setShowAdd] = React.useState(false);
   const [editUser, setEditUser] = React.useState(null);
   const [resetUser, setResetUser] = React.useState(null);
+  const [caAccessUser, setCaAccessUser] = React.useState(null);   // which CA we're editing grants for
+  const [caAccessGrants, setCaAccessGrants] = React.useState([]); // [{lender_user_id}] currently granted
+  const [caAccessBusy, setCaAccessBusy] = React.useState(false);
   const [newPwd, setNewPwd] = React.useState('');
   const [form, setForm] = React.useState({ fullName:'', email:'', role:'lender', password:'' });
   const [formError, setFormError] = React.useState('');
@@ -7455,6 +7523,39 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
     setLoading(false);
   };
   React.useEffect(()=>{ loadUsers(); },[]);
+
+  // Load current ca_access grants for the CA whose modal just opened.
+  React.useEffect(() => {
+    if (!caAccessUser) { setCaAccessGrants([]); return; }
+    (async () => {
+      try {
+        const r = await fetch(window.SUPABASE_URL + '/rest/v1/ca_access?ca_user_id=eq.' + encodeURIComponent(caAccessUser.id) + '&select=lender_user_id',
+          { headers: hdr });
+        if (r.ok) {
+          const rows = await r.json();
+          setCaAccessGrants(Array.isArray(rows) ? rows : []);
+        }
+      } catch {}
+    })();
+  }, [caAccessUser?.id]);
+
+  const toggleCaAccess = async (lenderId, currentlyGranted) => {
+    if (!caAccessUser) return;
+    setCaAccessBusy(true);
+    try {
+      if (currentlyGranted) {
+        await fetch(window.SUPABASE_URL + '/rest/v1/ca_access?ca_user_id=eq.' + encodeURIComponent(caAccessUser.id) + '&lender_user_id=eq.' + encodeURIComponent(lenderId),
+          { method: 'DELETE', headers: { ...hdr, 'Prefer': 'return=minimal' } });
+        setCaAccessGrants(g => g.filter(x => x.lender_user_id !== lenderId));
+      } else {
+        await fetch(window.SUPABASE_URL + '/rest/v1/ca_access',
+          { method: 'POST', headers: { ...hdr, 'Prefer': 'return=minimal,resolution=ignore-duplicates' },
+            body: JSON.stringify({ ca_user_id: caAccessUser.id, lender_user_id: lenderId, granted_by: session?.user?.id || null }) });
+        setCaAccessGrants(g => [...g, { lender_user_id: lenderId }]);
+      }
+    } catch (e) { alert('Access toggle failed: ' + (e.message || e)); }
+    setCaAccessBusy(false);
+  };
 
   const handleAddUser = async () => {
     if (!form.fullName||!form.email||!form.password) { setFormError('All fields required'); return; }
@@ -7649,6 +7750,13 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                           </button>
                         </div>
                       )}
+                      {u.role === 'ca' && (
+                        <button onClick={()=>setCaAccessUser(u)}
+                          title="Pick which lender file-trees this CA can see and edit"
+                          style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:'3px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit',color:'#1d4ed8'}}>
+                          🗂 Manage File Access
+                        </button>
+                      )}
                     </td>
                     <td style={{padding:'10px 16px'}}>
                       <div style={{display:'flex',gap:6}}>
@@ -7737,6 +7845,43 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
       )}
 
       {/* Reset Password Modal */}
+      {caAccessUser && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'white',borderRadius:12,maxWidth:520,width:'100%',padding:24,boxShadow:'0 10px 50px rgba(0,0,0,.25)'}}>
+            <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>Lender File Access — {caAccessUser.full_name || caAccessUser.email}</div>
+            <div style={{fontSize:12,color:'#6b7280',marginBottom:16}}>
+              Check each lender whose file tree this CA should be able to open and edit. Changes save immediately.
+            </div>
+            <div style={{maxHeight:'55vh',overflowY:'auto',border:'1px solid #e5e7eb',borderRadius:8,padding:4}}>
+              {users.filter(u => u.role === 'lender' || u.role === 'admin').sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||'')).map(l => {
+                const granted = caAccessGrants.some(g => g.lender_user_id === l.id);
+                return (
+                  <label key={l.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:6,cursor:'pointer',background: granted ? '#f0fdf4' : 'white'}}>
+                    <input type="checkbox" checked={granted} disabled={caAccessBusy}
+                      onChange={()=>toggleCaAccess(l.id, granted)}
+                      style={{width:16,height:16,accentColor:'#15803d'}} />
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:600,color:'#111'}}>{l.full_name || l.email}</div>
+                      <div style={{fontSize:11,color:'#6b7280'}}>{l.email}{l.role === 'admin' ? ' · admin' : ''}</div>
+                    </div>
+                    {granted && <span style={{fontSize:10,color:'#15803d',fontWeight:700}}>GRANTED</span>}
+                  </label>
+                );
+              })}
+              {users.filter(u => u.role === 'lender' || u.role === 'admin').length === 0 && (
+                <div style={{padding:16,fontSize:13,color:'#6b7280',fontStyle:'italic'}}>No lender accounts yet.</div>
+              )}
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}>
+              <button onClick={()=>setCaAccessUser(null)}
+                style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {resetUser && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
           <div style={{background:'white',borderRadius:12,padding:32,width:'min(420px,90%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
@@ -8695,6 +8840,10 @@ export default function BalanceSheet() {
   if (_budId)  return <CustomerBudgetForm shareId={_budId} />;
   const [session, setSession] = useState(currentSession);
   const [profile, setProfile] = useState(null);
+  // Mirror profile into the module-level `currentProfile` so storage.set
+  // (which runs outside the component) can stamp lastEditedByName/Role on
+  // every save.
+  React.useEffect(() => { currentProfile = profile; }, [profile]);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -9727,7 +9876,14 @@ Question: ${q}`,
             const item = await storage.get(key);
             if (item) {
               const p = JSON.parse(item.value);
-              sheets.push({ key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt, folderPath: p.folderPath || [] });
+              sheets.push({
+                key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt,
+                folderPath: p.folderPath || [],
+                lastEditedBy:     p._lastEditedBy     || null,
+                lastEditedByName: p._lastEditedByName || null,
+                lastEditedByRole: p._lastEditedByRole || null,
+                lastEditedAt:     p._lastEditedAt     || p._savedAt || null,
+              });
             }
           } catch {}
         }
@@ -17163,7 +17319,15 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                         <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft: (depth * 16) + 18, minWidth:0}}>
                           <div style={{minWidth:0,flex:1}}>
                             <div style={{fontSize:13,color:'#111',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.clientName}</div>
-                            <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>Balance sheet · as of {s.asOfDate}</div>
+                            <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>
+                              Balance sheet · as of {s.asOfDate}
+                              {s.lastEditedByName && (
+                                <span style={{marginLeft:8,color:'#4b5563'}}>
+                                  · last edited by {s.lastEditedByName}
+                                  {s.lastEditedAt && ' on ' + new Date(s.lastEditedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div style={{textAlign:'right',fontSize:12,color:'#6b7280'}}>
