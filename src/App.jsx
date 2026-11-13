@@ -15285,17 +15285,27 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                 <span title="Current portion">Cur: <strong style={{color:"#991b1b"}}>{fmt(currentPortion)}</strong></span>
                 <span title="Long-term portion">LT: <strong style={{color:"#991b1b"}}>{fmt(ltPortion)}</strong></span>
               </div>
-              {linkedCorpNames.length > 0 && (
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130,paddingBottom:6}}>
-                  <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Paid by</span>
+              {/* Paid by — always rendered now so the lender sees the
+                  control even before a corp is linked. If no linked
+                  entities exist, the only option is Personal and the
+                  dropdown is disabled with a hint. */}
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:130,paddingBottom:6}}>
+                <span style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:".07em",color:"#555",fontWeight:600}}>Paid by</span>
+                {linkedCorpNames.length > 0 ? (
                   <select value={currentPayer}
                     onChange={e=>{ setArr("reDebt",i,"corpPaidBy",e.target.value); setArr("reDebt",i,"corpPaid", !!e.target.value); }}
                     style={{border:"1px solid #ddd",borderRadius:5,padding:"3px 6px",fontSize:".8rem",fontFamily:"inherit",background:"white",cursor:"pointer",maxWidth:130}}>
                     <option value="">Personal</option>
                     {linkedCorpNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
-                </div>
-              )}
+                ) : (
+                  <div title="Link a related entity on the Linked Entities step to let a corp pick up this payment."
+                    style={{border:"1px dashed #ddd",borderRadius:5,padding:"3px 6px",fontSize:".75rem",fontFamily:"inherit",background:"#fafafa",color:"#9ca3af",maxWidth:130,textAlign:"center"}}>
+                    Personal
+                    <div style={{fontSize:9,marginTop:1}}>link a corp first</div>
+                  </div>
+                )}
+              </div>
               <button className="remove-btn" onClick={()=>removeRow("reDebt",i)}>x</button>
             </div>
             );
