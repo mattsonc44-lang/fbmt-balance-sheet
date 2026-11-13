@@ -7888,6 +7888,53 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                 <div style={{padding:16,fontSize:13,color:'#6b7280',fontStyle:'italic'}}>No lender accounts yet.</div>
               )}
             </div>
+            {/* Reassign old CA-owned sheets.
+                Before ca_access existed, any sheet a CA created saved
+                under their uid. This bulk-moves every sheet still owned
+                by this CA to whichever lender you pick, so they show up
+                on the correct file tree. */}
+            <div style={{marginTop:14,borderTop:'1px solid #e5e7eb',paddingTop:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#92400e',marginBottom:6}}>Reassign this CA's old sheets to a lender</div>
+              <div style={{fontSize:11,color:'#78350f',background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'8px 10px',marginBottom:8,lineHeight:1.45}}>
+                Any sheet this CA created before file-tree access was turned on is still filed under their own account. Pick a lender and click Move to transfer every one of those sheets onto the lender's file tree.
+              </div>
+              <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                <select id="reassignTarget" defaultValue=""
+                  style={{flex:1,border:'1px solid #d1d5db',borderRadius:6,padding:'7px 9px',fontSize:13,fontFamily:'inherit'}}>
+                  <option value="">— Move all of this CA's sheets to —</option>
+                  {users.filter(u => u.role === 'lender' || u.role === 'admin')
+                    .sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''))
+                    .map(l => (
+                      <option key={l.id} value={l.id}>{l.full_name || l.email}{l.role==='admin'?' (admin)':''}</option>
+                    ))}
+                </select>
+                <button
+                  onClick={async () => {
+                    const sel = document.getElementById('reassignTarget');
+                    const lenderId = sel && sel.value;
+                    if (!lenderId) { alert('Pick a lender first.'); return; }
+                    const lbl = sel.options[sel.selectedIndex].text;
+                    if (!window.confirm(`Move every balance sheet currently owned by ${caAccessUser.full_name || caAccessUser.email} to ${lbl}?\n\nThis can't be undone from this dialog — only another reassign in the SQL editor.`)) return;
+                    try {
+                      const r = await fetch(window.SUPABASE_URL
+                        + '/rest/v1/balance_sheets?user_id=eq.' + encodeURIComponent(caAccessUser.id),
+                        { method: 'PATCH',
+                          headers: { ...hdr, 'Prefer': 'return=minimal' },
+                          body: JSON.stringify({ user_id: lenderId }) });
+                      if (!r.ok) {
+                        const t = await r.text().catch(()=>'');
+                        alert('Reassign failed (' + r.status + '): ' + t.slice(0, 200));
+                        return;
+                      }
+                      alert('Done — all sheets owned by this CA were moved to ' + lbl + '. The lender will see them on their next refresh.');
+                    } catch (e) { alert('Reassign error: ' + (e.message || e)); }
+                  }}
+                  style={{background:'#b45309',color:'white',border:'none',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                  Move
+                </button>
+              </div>
+            </div>
+
             <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}>
               <button onClick={()=>setCaAccessUser(null)}
                 style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:7,padding:'8px 18px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
