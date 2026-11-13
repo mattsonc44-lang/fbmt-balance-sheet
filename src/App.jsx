@@ -1801,12 +1801,15 @@ function BudgetView({
               <div style={{fontWeight:700,marginBottom:4}}>Personal-debt scan found nothing for this corp.</div>
               <div>Looking for: <code>{corpPersonalDebtDiag.me}</code></div>
               <div>Sheets scanned: {corpPersonalDebtDiag.scanned} · Linked to this corp: {corpPersonalDebtDiag.linkedHits} · Rows checked: {corpPersonalDebtDiag.candidateRows} · Routed-to-me matches: {corpPersonalDebtDiag.matched}</div>
+              {corpPersonalDebtDiag.notLinkedCount > 0 && (
+                <div style={{fontSize:'.68rem',color:'#92400e',marginTop:2}}>{corpPersonalDebtDiag.notLinkedCount} other personal sheet(s) scanned but not linked to this corp — ignored.</div>
+              )}
               {(corpPersonalDebtDiag.skippedReasons||[]).length > 0 && (
-                <details style={{marginTop:4}}>
-                  <summary style={{cursor:'pointer',fontWeight:600}}>Why rows were skipped ({corpPersonalDebtDiag.skippedReasons.length})</summary>
-                  <ul style={{margin:'4px 0 0 18px',padding:0}}>
-                    {corpPersonalDebtDiag.skippedReasons.slice(0,20).map((s,i)=>(
-                      <li key={i}><strong>{s.client||'?'}:</strong> {s.reason}</li>
+                <details style={{marginTop:4}} open>
+                  <summary style={{cursor:'pointer',fontWeight:600}}>Rows on linked personal sheet(s) — {corpPersonalDebtDiag.skippedReasons.length} total</summary>
+                  <ul style={{margin:'4px 0 0 18px',padding:0,fontSize:'.68rem',fontFamily:'ui-monospace, Menlo, monospace'}}>
+                    {corpPersonalDebtDiag.skippedReasons.slice(0,30).map((s,i)=>(
+                      <li key={i}><strong>{s.client||'?'}</strong> [{s.section||'?'}]: {s.reason}</li>
                     ))}
                   </ul>
                 </details>
@@ -13377,7 +13380,11 @@ Rules:
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
           const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(norm);
           if (!linkedNames.includes(me)) {
-            diag.skippedReasons.push({ client: p.clientName, reason: 'not linked to this corp', linkedTo: linkedArr });
+            // Don't flood skippedReasons with the 60+ sheets that aren't
+            // linked — those aren't useful. Keep a small counter instead
+            // so the diagnostic panel shows a clean per-row explanation
+            // of what IS linked.
+            diag.notLinkedCount = (diag.notLinkedCount || 0) + 1;
             continue;
           }
           diag.linkedHits++;
@@ -13394,8 +13401,17 @@ Rules:
             if (routed && name && amt > 0) {
               diag.matched++;
               corpDebts.push({ creditor: name, security: r.security || '', annualPmt: r.annualPmt, owner: ownerName, type, sourceAsOfDate: p.asOfDate });
-            } else if (r.corpPaidBy || r.corpPaid) {
-              diag.skippedReasons.push({ client: p.clientName, reason: `has corpPaidBy="${r.corpPaidBy}" (normalized "${norm(r.corpPaidBy)}") amt=${amt} name="${name}" — routed=${routed}` });
+            } else {
+              // Log EVERY row on a linked personal sheet so we can see why
+              // nothing matched. Previously we only logged rows that had
+              // corpPaidBy set, which hides the common failure mode where
+              // the user thought they'd marked a row paid-by-corp but the
+              // field actually saved blank.
+              diag.skippedReasons.push({
+                client: p.clientName,
+                section: type,
+                reason: `${nameField}="${name||'(blank)'}" annualPmt="${r.annualPmt||'(blank)'}" (${amt}) corpPaidBy="${r.corpPaidBy||'(blank)'}" corpPaid=${!!r.corpPaid} → routed=${routed}`
+              });
             }
           };
           (p.intermediatDebt || []).forEach(r => tryRow(r, 'creditor', 'term'));
