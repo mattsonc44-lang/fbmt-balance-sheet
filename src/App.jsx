@@ -1352,7 +1352,7 @@ function BudgetView({
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal, budgetProposedDebtTotal,
   budgetInsuranceTotal, budgetTotalIncomeInsured, budgetNetIncomeInsured,
   toggleInsurance,
-  corpPersonalDebt, corpPersonalDebtTotal,
+  corpPersonalDebt, corpPersonalDebtTotal, corpPersonalDebtDiag,
   budgetTotalExpenses, budgetNetIncome,
   set, setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
 }) {
@@ -1794,6 +1794,26 @@ function BudgetView({
           {budgetCorpDebtTotal > 0 && (
             <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".8rem",color:"#2d5a8e",background:"#f0f6ff",borderRadius:5,marginTop:4}}>
               <span>Corp Paid Subtotal</span><strong>{fmt(budgetCorpDebtTotal)}</strong>
+            </div>
+          )}
+          {corpPersonalDebtDiag && (corpPersonalDebtDiag.foundCount === 0) && (corpPersonalDebtDiag.scanned > 0 || (corpPersonalDebtDiag.skippedReasons||[]).length > 0) && (
+            <div style={{marginTop:8,padding:'8px 10px',background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,fontSize:'.72rem',color:'#78350f',lineHeight:1.45}}>
+              <div style={{fontWeight:700,marginBottom:4}}>Personal-debt scan found nothing for this corp.</div>
+              <div>Looking for: <code>{corpPersonalDebtDiag.me}</code></div>
+              <div>Sheets scanned: {corpPersonalDebtDiag.scanned} · Linked to this corp: {corpPersonalDebtDiag.linkedHits} · Rows checked: {corpPersonalDebtDiag.candidateRows} · Routed-to-me matches: {corpPersonalDebtDiag.matched}</div>
+              {(corpPersonalDebtDiag.skippedReasons||[]).length > 0 && (
+                <details style={{marginTop:4}}>
+                  <summary style={{cursor:'pointer',fontWeight:600}}>Why rows were skipped ({corpPersonalDebtDiag.skippedReasons.length})</summary>
+                  <ul style={{margin:'4px 0 0 18px',padding:0}}>
+                    {corpPersonalDebtDiag.skippedReasons.slice(0,20).map((s,i)=>(
+                      <li key={i}><strong>{s.client||'?'}:</strong> {s.reason}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <div style={{marginTop:6,fontStyle:'italic'}}>
+                If the personal sheet's "Paid by" dropdown shows this corp but no row appears here, make sure the personal sheet was <strong>saved</strong> after you set it — the scan reads only saved sheets.
+              </div>
             </div>
           )}
           {corpPersonalDebt && corpPersonalDebt.length > 0 && (
@@ -9156,6 +9176,7 @@ export default function BalanceSheet() {
   const qaBookCache = React.useRef(null);                 // cached book summary so repeat asks are instant
   const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
+  const [corpPersonalDebtDiag, setCorpPersonalDebtDiag] = useState(null); // scan diagnostics for on-screen debug
   const [saveStatus, setSaveStatus] = useState(null);
   // Autosave state — distinct from the manual save button's status so clicks
   // and auto-pushes can coexist without stepping on each other's labels.
@@ -10080,10 +10101,17 @@ Question: ${q}`,
     }
   }, [savedSheets, data.clientName, JSON.stringify(data.linkedEntities)]);
 
-  // Auto-reload corp personal debt when client name changes
+  // Auto-reload corp personal debt when client name changes, when savedSheets
+  // finishes loading (cross-sheet scan needs that list populated), or when
+  // the user switches to the Budget tab. Previously the scan ran once on
+  // first client-name set, which often fired BEFORE savedSheets had come
+  // back from the API — so the scan found nothing and the budget rendered
+  // empty, which looked like the feature wasn't wired at all.
   useEffect(() => {
-    if (data.clientName) loadCorpPersonalDebt();
-  }, [data.clientName]);
+    if (data.clientName && (savedSheets||[]).length > 0 && activeTab === 'budget') {
+      loadCorpPersonalDebt();
+    }
+  }, [data.clientName, (savedSheets||[]).length, activeTab]);
 
   // ── Analysis-state hygiene ────────────────────────────────────────────────
   // Whenever the sheet identity changes (open a different sheet, or the CA
@@ -13303,15 +13331,23 @@ Rules:
   };
 
   const loadCorpPersonalDebt = async () => {
-    if (!data.clientName) return;
+    console.log('[corp-debt] loadCorpPersonalDebt() called, clientName=', data.clientName, 'role=', profile?.role, 'caOpenShare=', !!caOpenShare, 'savedSheets.length=', (savedSheets||[]).length);
+    if (!data.clientName) { console.warn('[corp-debt] aborting — no clientName set yet'); return; }
     // CA viewers see only the sheet the lender shared with them — the shared
     // snapshot already includes any corp-paid personal debt aggregated by the
     // lender at share time. Running the cross-sheet scan here would return
     // empty and wipe out that snapshot. Skip.
-    if (profile?.role === 'ca' || caOpenShare) return;
+    if (profile?.role === 'ca' || caOpenShare) { console.warn('[corp-debt] aborting — CA viewer'); return; }
     try {
       const corpDebts = [];
-      const me = data.clientName.trim().toLowerCase();
+      // Normalize aggressively — punctuation differences between the corp's
+      // clientName ("TH Farms, Inc.") and the corpPaidBy dropdown value
+      // ("TH Farms Inc") used to silently drop rows. Strip non-alphanumerics
+      // so the match is tolerant to commas, periods, and extra whitespace.
+      const norm = s => (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,'');
+      const me = norm(data.clientName);
+      const diag = { me: data.clientName, scanned: 0, linkedHits: 0, candidateRows: 0, matched: 0, skippedReasons: [] };
+      console.log('[corp-debt] scanning for corp =', data.clientName, '(normalized:', me, ')');
       // ── Use ONLY the latest saved sheet per personal client. Older sheets
       // may reference loans that have since been paid off — we don't want
       // last year's balance flowing back into this year's corp budget.
@@ -13329,46 +13365,44 @@ Rules:
           const item = await storage.get(s.key);
           if (!item) continue;
           const p = JSON.parse(item.value);
+          diag.scanned++;
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
-          const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(x => x.trim().toLowerCase());
-          if (!linkedNames.includes(me)) continue;
+          const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(norm);
+          if (!linkedNames.includes(me)) {
+            diag.skippedReasons.push({ client: p.clientName, reason: 'not linked to this corp', linkedTo: linkedArr });
+            continue;
+          }
+          diag.linkedHits++;
           const ownerName = p.clientName || "Unknown";
           const routedToMe = r => {
-            if (r.corpPaidBy) return r.corpPaidBy.trim().toLowerCase() === me;
+            if (r.corpPaidBy) return norm(r.corpPaidBy) === me;
             return !!r.corpPaid;
           };
-          (p.intermediatDebt || []).forEach(r => {
-            if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
-              corpDebts.push({ creditor: r.creditor, security: r.security || "", annualPmt: r.annualPmt, owner: ownerName, type: "term", sourceAsOfDate: p.asOfDate });
+          const tryRow = (r, nameField, type) => {
+            diag.candidateRows++;
+            const name = r[nameField] || r.creditor || r.lienHolder;
+            const routed = routedToMe(r);
+            const amt = numVal(r.annualPmt);
+            if (routed && name && amt > 0) {
+              diag.matched++;
+              corpDebts.push({ creditor: name, security: r.security || '', annualPmt: r.annualPmt, owner: ownerName, type, sourceAsOfDate: p.asOfDate });
+            } else if (r.corpPaidBy || r.corpPaid) {
+              diag.skippedReasons.push({ client: p.clientName, reason: `has corpPaidBy="${r.corpPaidBy}" (normalized "${norm(r.corpPaidBy)}") amt=${amt} name="${name}" — routed=${routed}` });
             }
-          });
-          (p.reCurrent || []).forEach(r => {
-            if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
-              corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re", sourceAsOfDate: p.asOfDate });
-            }
-          });
-          // Unified RE Debt rows (lienHolder field instead of creditor). Pick
-          // these up too so a mortgage the personal sheet marked "Paid by
-          // Corp X" flows into Corp X's budget as a debt-service obligation.
-          (p.reDebt || []).forEach(r => {
-            const name = r.lienHolder || r.creditor;
-            if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
-              corpDebts.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner: ownerName, type: 're', sourceAsOfDate: p.asOfDate });
-            }
-          });
-          // Legacy reMortgages rows — same routing. A personal mortgage
-          // still living in the older reMortgages section would otherwise
-          // never flow into the corp budget.
-          (p.reMortgages || []).forEach(r => {
-            const name = r.lienHolder || r.creditor;
-            if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
-              corpDebts.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner: ownerName, type: 're', sourceAsOfDate: p.asOfDate });
-            }
-          });
+          };
+          (p.intermediatDebt || []).forEach(r => tryRow(r, 'creditor', 'term'));
+          (p.reCurrent      || []).forEach(r => tryRow(r, 'creditor', 're'));
+          (p.reDebt         || []).forEach(r => tryRow(r, 'lienHolder', 're'));
+          (p.reMortgages    || []).forEach(r => tryRow(r, 'lienHolder', 're'));
         } catch {}
       }
+      console.log('[corp-debt] result:', diag, 'rows:', corpDebts);
+      if (corpDebts.length === 0 && diag.skippedReasons.length) {
+        console.warn('[corp-debt] nothing matched — skipped:', diag.skippedReasons);
+      }
       setCorpPersonalDebt(corpDebts);
-    } catch { setCorpPersonalDebt([]); }
+      setCorpPersonalDebtDiag({ ...diag, foundCount: corpDebts.length });
+    } catch (e) { console.error('[corp-debt] scan failed', e); setCorpPersonalDebt([]); setCorpPersonalDebtDiag({ error: String(e) }); }
   };
 
   const generateLenderPackage = async () => {
@@ -18716,6 +18750,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               budgetProposedDebtTotal={budgetProposedDebtTotal}
               corpPersonalDebt={corpPersonalDebt}
               corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
+              corpPersonalDebtDiag={corpPersonalDebtDiag}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
               set={set}
