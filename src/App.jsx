@@ -8844,6 +8844,22 @@ export default function BalanceSheet() {
   // (which runs outside the component) can stamp lastEditedByName/Role on
   // every save.
   React.useEffect(() => { currentProfile = profile; }, [profile]);
+
+  // CAs with at least one ca_access grant should land in the regular file
+  // tree instead of the old per-sheet CA Portal. Fetch that count whenever
+  // the profile or session changes; `caHasFileAccess` controls routing below.
+  const [caHasFileAccess, setCaHasFileAccess] = useState(false);
+  React.useEffect(() => {
+    if (!profile || profile.role !== 'ca' || !session?.access_token) { setCaHasFileAccess(false); return; }
+    (async () => {
+      try {
+        clearAccessibleUidsCache();
+        const uids = await accessibleLenderUids();
+        // uids always includes the CA's own id, so "has access" means > 1.
+        setCaHasFileAccess(Array.isArray(uids) && uids.length > 1);
+      } catch { setCaHasFileAccess(false); }
+    })();
+  }, [profile?.id, session?.access_token]);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -16046,7 +16062,13 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
   }
 
   if (profile?.role === 'ca') {
-    if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
+    // If this CA has been granted ca_access to at least one lender, drop
+    // them straight into the normal file tree — they see what that lender
+    // sees. Legacy per-sheet share flow (CAPortal) is only used when no
+    // grants exist yet, so nobody loses access during the transition.
+    if (caHasFileAccess && !caOpenShare) {
+      // fall through to the normal lender-style render below
+    } else if (!caOpenShare) return <CAPortal session={session} profile={profile} onSignOut={handleSignOut}
       onImportForLender={({ lender_user_id, lender_name }) => {
         // Virtual share — tells the main wizard it's running in "CA new
         // import" mode. caDirectSave reads _isNewImport + _newImportLenderId
