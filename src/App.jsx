@@ -7473,6 +7473,9 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
   const [caAccessUser, setCaAccessUser] = React.useState(null);   // which CA we're editing grants for
   const [caAccessGrants, setCaAccessGrants] = React.useState([]); // [{lender_user_id}] currently granted
   const [caAccessBusy, setCaAccessBusy] = React.useState(false);
+  const [orphanSheets, setOrphanSheets] = React.useState([]);     // sheets still owned by this CA
+  const [orphanPick, setOrphanPick] = React.useState({});         // {sheetId: lenderUid chosen in dropdown}
+  const [orphanBusy, setOrphanBusy] = React.useState({});         // {sheetId: true while moving}
   const [newPwd, setNewPwd] = React.useState('');
   const [form, setForm] = React.useState({ fullName:'', email:'', role:'lender', password:'' });
   const [formError, setFormError] = React.useState('');
@@ -7542,7 +7545,7 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
 
   // Load current ca_access grants for the CA whose modal just opened.
   React.useEffect(() => {
-    if (!caAccessUser) { setCaAccessGrants([]); return; }
+    if (!caAccessUser) { setCaAccessGrants([]); setOrphanSheets([]); setOrphanPick({}); setOrphanBusy({}); return; }
     (async () => {
       try {
         const r = await fetch(window.SUPABASE_URL + '/rest/v1/ca_access?ca_user_id=eq.' + encodeURIComponent(caAccessUser.id) + '&select=lender_user_id',
@@ -7552,6 +7555,20 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
           setCaAccessGrants(Array.isArray(rows) ? rows : []);
         }
       } catch {}
+      // Also pull every balance_sheet still owned by this CA so the admin
+      // can route each one to the correct lender individually.
+      try {
+        const r = await fetch(window.SUPABASE_URL
+          + '/rest/v1/balance_sheets?user_id=eq.' + encodeURIComponent(caAccessUser.id)
+          + '&select=id,client_name,as_of_date,saved_at&order=saved_at.desc',
+          { headers: hdr });
+        if (r.ok) {
+          const rows = await r.json();
+          setOrphanSheets(Array.isArray(rows) ? rows : []);
+        } else {
+          setOrphanSheets([]);
+        }
+      } catch { setOrphanSheets([]); }
     })();
   }, [caAccessUser?.id]);
 
@@ -7888,51 +7905,85 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                 <div style={{padding:16,fontSize:13,color:'#6b7280',fontStyle:'italic'}}>No lender accounts yet.</div>
               )}
             </div>
-            {/* Reassign old CA-owned sheets.
-                Before ca_access existed, any sheet a CA created saved
-                under their uid. This bulk-moves every sheet still owned
-                by this CA to whichever lender you pick, so they show up
-                on the correct file tree. */}
+            {/* Reassign old CA-owned sheets — one row per sheet so the
+                admin can route each sheet to the correct lender
+                individually (a CA that works for multiple lenders
+                shouldn't be forced into a single bulk destination). */}
             <div style={{marginTop:14,borderTop:'1px solid #e5e7eb',paddingTop:14}}>
-              <div style={{fontSize:12,fontWeight:700,color:'#92400e',marginBottom:6}}>Reassign this CA's old sheets to a lender</div>
+              <div style={{fontSize:12,fontWeight:700,color:'#92400e',marginBottom:6}}>
+                Sheets still owned by this CA{orphanSheets.length>0 && ` (${orphanSheets.length})`}
+              </div>
               <div style={{fontSize:11,color:'#78350f',background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'8px 10px',marginBottom:8,lineHeight:1.45}}>
-                Any sheet this CA created before file-tree access was turned on is still filed under their own account. Pick a lender and click Move to transfer every one of those sheets onto the lender's file tree.
+                Each row is a balance sheet still filed under this CA's own account (usually created before file-tree access was turned on). Pick the correct lender for each one, then click Move. The sheet jumps onto that lender's file tree immediately.
               </div>
-              <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                <select id="reassignTarget" defaultValue=""
-                  style={{flex:1,border:'1px solid #d1d5db',borderRadius:6,padding:'7px 9px',fontSize:13,fontFamily:'inherit'}}>
-                  <option value="">— Move all of this CA's sheets to —</option>
-                  {users.filter(u => u.role === 'lender' || u.role === 'admin')
-                    .sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''))
-                    .map(l => (
-                      <option key={l.id} value={l.id}>{l.full_name || l.email}{l.role==='admin'?' (admin)':''}</option>
-                    ))}
-                </select>
-                <button
-                  onClick={async () => {
-                    const sel = document.getElementById('reassignTarget');
-                    const lenderId = sel && sel.value;
-                    if (!lenderId) { alert('Pick a lender first.'); return; }
-                    const lbl = sel.options[sel.selectedIndex].text;
-                    if (!window.confirm(`Move every balance sheet currently owned by ${caAccessUser.full_name || caAccessUser.email} to ${lbl}?\n\nThis can't be undone from this dialog — only another reassign in the SQL editor.`)) return;
-                    try {
-                      const r = await fetch(window.SUPABASE_URL
-                        + '/rest/v1/balance_sheets?user_id=eq.' + encodeURIComponent(caAccessUser.id),
-                        { method: 'PATCH',
-                          headers: { ...hdr, 'Prefer': 'return=minimal' },
-                          body: JSON.stringify({ user_id: lenderId }) });
-                      if (!r.ok) {
-                        const t = await r.text().catch(()=>'');
-                        alert('Reassign failed (' + r.status + '): ' + t.slice(0, 200));
-                        return;
-                      }
-                      alert('Done — all sheets owned by this CA were moved to ' + lbl + '. The lender will see them on their next refresh.');
-                    } catch (e) { alert('Reassign error: ' + (e.message || e)); }
-                  }}
-                  style={{background:'#b45309',color:'white',border:'none',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
-                  Move
-                </button>
-              </div>
+              {orphanSheets.length === 0 ? (
+                <div style={{padding:'10px 12px',fontSize:12,color:'#6b7280',fontStyle:'italic',border:'1px dashed #e5e7eb',borderRadius:6}}>
+                  No sheets are currently owned by this CA. (If one you expected is missing, make sure the admin RLS policies in <code>supabase_reassign_ca_sheets.sql</code> have been applied.)
+                </div>
+              ) : (
+                <div style={{maxHeight:'32vh',overflowY:'auto',border:'1px solid #e5e7eb',borderRadius:6}}>
+                  {orphanSheets.map(s => {
+                    const busy = !!orphanBusy[s.id];
+                    const picked = orphanPick[s.id] || '';
+                    return (
+                      <div key={s.id} style={{display:'flex',gap:8,alignItems:'center',padding:'8px 10px',borderBottom:'1px solid #f3f4f6'}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:'#111',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                            {s.client_name || '(no client name)'}
+                          </div>
+                          <div style={{fontSize:11,color:'#6b7280'}}>
+                            {s.as_of_date ? `as of ${s.as_of_date}` : ''}{s.saved_at ? ` · saved ${new Date(s.saved_at).toLocaleDateString()}` : ''}
+                          </div>
+                        </div>
+                        <select value={picked}
+                          disabled={busy}
+                          onChange={e => setOrphanPick(prev => ({...prev, [s.id]: e.target.value}))}
+                          style={{border:'1px solid #d1d5db',borderRadius:6,padding:'6px 8px',fontSize:12,fontFamily:'inherit',minWidth:180}}>
+                          <option value="">— Move to lender —</option>
+                          {users.filter(u => u.role === 'lender' || u.role === 'admin')
+                            .sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''))
+                            .map(l => (
+                              <option key={l.id} value={l.id}>{l.full_name || l.email}{l.role==='admin'?' (admin)':''}</option>
+                            ))}
+                        </select>
+                        <button
+                          disabled={busy || !picked}
+                          onClick={async () => {
+                            if (!picked) { alert('Pick a lender first.'); return; }
+                            const l = users.find(u => u.id === picked);
+                            const lbl = l ? (l.full_name || l.email) : 'that lender';
+                            if (!window.confirm(`Move "${s.client_name || '(no client name)'}" to ${lbl}?`)) return;
+                            setOrphanBusy(prev => ({...prev, [s.id]: true}));
+                            try {
+                              const r = await fetch(window.SUPABASE_URL
+                                + '/rest/v1/balance_sheets?id=eq.' + encodeURIComponent(s.id),
+                                { method: 'PATCH',
+                                  headers: { ...hdr, 'Prefer': 'return=minimal' },
+                                  body: JSON.stringify({ user_id: picked }) });
+                              if (!r.ok) {
+                                const t = await r.text().catch(()=>'');
+                                alert('Move failed (' + r.status + '): ' + t.slice(0,200));
+                                setOrphanBusy(prev => { const n={...prev}; delete n[s.id]; return n; });
+                                return;
+                              }
+                              // Drop the row from the list — the admin will refresh
+                              // the lender's file tree on their next open.
+                              setOrphanSheets(prev => prev.filter(x => x.id !== s.id));
+                              setOrphanPick(prev => { const n={...prev}; delete n[s.id]; return n; });
+                              setOrphanBusy(prev => { const n={...prev}; delete n[s.id]; return n; });
+                            } catch (e) {
+                              alert('Move error: ' + (e.message || e));
+                              setOrphanBusy(prev => { const n={...prev}; delete n[s.id]; return n; });
+                            }
+                          }}
+                          style={{background: (busy||!picked) ? '#d1d5db' : '#b45309',color:'white',border:'none',borderRadius:6,padding:'6px 12px',fontSize:12,fontWeight:700,cursor:(busy||!picked)?'not-allowed':'pointer',fontFamily:'inherit'}}>
+                          {busy ? 'Moving…' : 'Move'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}>
@@ -12883,6 +12934,16 @@ Rules:
                 corpPersonalDebtSnapshot.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner, type: 're', sourceAsOfDate: p.asOfDate });
               }
             });
+            // Legacy reMortgages rows (older sheets still use this section
+            // even after we consolidated RE debt into reDebt). Same routing
+            // rules, so pick them up too — otherwise a personal mortgage
+            // marked "Paid by Corp X" on an older sheet silently drops.
+            (p.reMortgages || []).forEach(r => {
+              const name = r.lienHolder || r.creditor;
+              if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
+                corpPersonalDebtSnapshot.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner, type: 're', sourceAsOfDate: p.asOfDate });
+              }
+            });
           } catch {}
         }
       }
@@ -13290,6 +13351,15 @@ Rules:
           // these up too so a mortgage the personal sheet marked "Paid by
           // Corp X" flows into Corp X's budget as a debt-service obligation.
           (p.reDebt || []).forEach(r => {
+            const name = r.lienHolder || r.creditor;
+            if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
+              corpDebts.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner: ownerName, type: 're', sourceAsOfDate: p.asOfDate });
+            }
+          });
+          // Legacy reMortgages rows — same routing. A personal mortgage
+          // still living in the older reMortgages section would otherwise
+          // never flow into the corp budget.
+          (p.reMortgages || []).forEach(r => {
             const name = r.lienHolder || r.creditor;
             if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
               corpDebts.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner: ownerName, type: 're', sourceAsOfDate: p.asOfDate });
