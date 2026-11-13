@@ -13360,11 +13360,19 @@ Rules:
           latestByClient.set(s.clientName, s);
         }
       }
-      for (const s of latestByClient.values()) {
+      // Fetch every candidate sheet in parallel — the old sequential await
+      // took long enough with 100+ sheets that the user hit the "no logs"
+      // state because the scan still hadn't finished.
+      const candidates = Array.from(latestByClient.values());
+      console.log('[corp-debt] fetching', candidates.length, 'personal sheets in parallel');
+      const fetched = await Promise.all(candidates.map(async s => {
+        try { const it = await storage.get(s.key); return it ? { s, p: JSON.parse(it.value) } : null; }
+        catch (e) { console.warn('[corp-debt] storage.get failed for', s.key, e); return null; }
+      }));
+      for (const row of fetched) {
+        if (!row) continue;
+        const { s, p } = row;
         try {
-          const item = await storage.get(s.key);
-          if (!item) continue;
-          const p = JSON.parse(item.value);
           diag.scanned++;
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
           const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(norm);
