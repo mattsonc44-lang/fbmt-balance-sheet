@@ -15594,17 +15594,42 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               setData(nextData);
               alert(`Migrated ${merged.length} RE Debt entries. Legacy sections cleared.`);
             };
+            const doDiscard = () => {
+              // Clear the legacy sections after the user has already
+              // moved everything into reDebt manually. Shows a preview
+              // of what will be dropped so nothing disappears silently.
+              const lines = [
+                ...legacyCur.map(r => `• RE-Current: ${r.creditor || '(no name)'} — pmt ${fmt(n(r.annualPmt))}`),
+                ...legacyLT.map(r => `• RE-Mortgage: ${r.lienHolder || '(no name)'} — principal ${fmt(n(r.principal))}`)
+              ];
+              const msg = `Discard these legacy entries? They've already been moved to the unified RE Debt section above, or you don't need them anymore.\n\n`
+                + lines.join('\n') + '\n\n'
+                + `This clears both legacy sections but leaves your unified RE Debt rows untouched. Save the sheet afterward to persist.`;
+              if (!window.confirm(msg)) return;
+              setData({
+                ...data,
+                reCurrent:   [{creditor:"",annualPmt:"",rate:""}],
+                reMortgages: [{lienHolder:"",terms:"",principal:"",rate:"",maturityDate:""}],
+              });
+            };
             return (
               <div style={{marginTop:14,padding:'12px 14px',background:'#fdf7f7',border:'1px solid #f0dcdf',borderRadius:6}}>
                 <div style={{fontSize:12,color:'#7a1a1a',marginBottom:8}}>
                   ℹ️ This sheet has <strong>{legacyCur.length}</strong> entr{legacyCur.length===1?'y':'ies'} in the legacy RE-Current section and <strong>{legacyLT.length}</strong> in the legacy RE-Mortgages section. They still count toward totals but are stored separately from the new unified entries above.
                 </div>
-                <button type="button" onClick={doMigrate}
-                  style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
-                  🔀 Review &amp; merge into unified entries
-                </button>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <button type="button" onClick={doMigrate}
+                    style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                    🔀 Review &amp; merge into unified entries
+                  </button>
+                  <button type="button" onClick={doDiscard}
+                    title="Clear the legacy sections if you've already copied everything into the unified RE Debt section above."
+                    style={{background:'white',color:'#6B0E1E',border:'1px solid #6B0E1E',borderRadius:6,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                    🗑 Discard legacy entries
+                  </button>
+                </div>
                 <div style={{fontSize:11,color:'#7a1a1a',marginTop:8}}>
-                  You'll see the merge preview and can cancel. Nothing changes until you confirm. Save the sheet after migrating.
+                  You'll see a preview before anything changes. Save the sheet after you decide.
                 </div>
               </div>
             );
