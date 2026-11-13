@@ -6050,7 +6050,11 @@ function ClientDashboard({
       if (!cancelled) { setSheetSummaries(summaries); setLoadingSheets(false); }
     })();
     return () => { cancelled = true; };
-  }, [thisClientSheets.map(s=>s.key).join('|')]); // eslint-disable-line
+    // Re-run whenever a sheet is saved, not just when a new one is added.
+    // Keying only on `s.key` missed resaves (same key, newer content) and
+    // left the dashboard showing yesterday's totals after the lender had
+    // already fixed the sheet. Include savedAt so any write re-fetches.
+  }, [thisClientSheets.map(s=>`${s.key}@${s.savedAt||''}`).join('|')]); // eslint-disable-line
 
   // Load linked entities — both forward (from this client's latest sheet) and reverse
   // (other clients whose latest sheet lists this one). One pass over saved sheets.
@@ -6130,7 +6134,12 @@ function ClientDashboard({
       }
     })();
     return () => { cancelled = true; };
-  }, [clientName, thisClientSheets.map(s=>s.key).join('|'), savedSheets.length]); // eslint-disable-line
+    // Refresh when any sheet (this client's OR a linked-entity's) is
+    // resaved — keying on savedAt as well as key catches resaves that
+    // don't change the sheet id. Without this, a corp dashboard kept
+    // showing stale net-worth figures for a personal client after the
+    // personal sheet had been fixed.
+  }, [clientName, savedSheets.map(s=>`${s.key}@${s.savedAt||''}`).join('|')]); // eslint-disable-line
 
   // Load notes + renewal fields + base acres.
   React.useEffect(() => {
