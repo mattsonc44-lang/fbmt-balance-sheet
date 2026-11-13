@@ -5106,6 +5106,12 @@ let currentSession = null;
 let currentProfile = null;
 const currentProfileName = () => currentProfile?.full_name || currentProfile?.email || null;
 const currentProfileRole = () => currentProfile?.role || '';
+// When a CA creates a BRAND NEW sheet, we insert it under this lender UID
+// so it shows up on the right lender's file tree instead of the CA's own
+// (otherwise invisible) book. Set from the lender-filter dropdown on the
+// home screen whenever the CA picks a specific lender.
+let preferredOwnerUid = null;
+const setPreferredOwnerUid = (uid) => { preferredOwnerUid = uid || null; };
 try { const s = localStorage.getItem('fbmt_session'); if (s) currentSession = JSON.parse(s); } catch {}
 
 async function supaLogin(email, password) {
@@ -5310,7 +5316,13 @@ const storage = {
     parsed._lastEditedByName = editorName;
     parsed._lastEditedByRole = (typeof currentProfileRole === 'function' ? currentProfileRole() : '') || '';
     parsed._lastEditedAt     = new Date().toISOString();
-    const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: uid };
+    // Owner for a brand-new row. A CA with the lender filter set to a
+    // specific lender inserts under that lender's uid so the sheet shows
+    // up on the lender's file tree. Everyone else (or CA with 'all'
+    // selected) uses their own uid.
+    const role = currentProfileRole ? currentProfileRole() : '';
+    const insertOwnerUid = (role === 'ca' && preferredOwnerUid) ? preferredOwnerUid : uid;
+    const body = { client_name: clientName, as_of_date: asOfDate, data: parsed, saved_at: new Date().toISOString(), user_id: insertOwnerUid };
 
     // Look up ANY existing row this session can see for (clientName,asOfDate)
     // — the current user's own OR any lender they have CA access to. When a
@@ -8858,6 +8870,13 @@ export default function BalanceSheet() {
   // filter dropdown. Everyone has at least their own row.
   const [accessibleLenders, setAccessibleLenders] = useState([]);
   const [selectedLenderFilter, setSelectedLenderFilter] = useState('all'); // 'all' or a lender_user_id
+  // Push the filter into a module-level var so storage.set (which runs
+  // outside the component) can insert new sheets under the chosen lender
+  // when the signed-in user is a CA. 'all' clears it so CAs save under
+  // their own uid (ok because their uid is in accessibleLenderUids).
+  React.useEffect(() => {
+    setPreferredOwnerUid(selectedLenderFilter === 'all' ? null : selectedLenderFilter);
+  }, [selectedLenderFilter]);
   React.useEffect(() => {
     if (!profile || !session?.access_token) {
       setCaHasFileAccess(false); setAccessibleLenders([]); return;
@@ -10303,7 +10322,30 @@ Question: ${q}`,
       alert('Could not open that sheet: ' + (e?.message || e));
     }
   };
-  const startNew = () => { setData(emptyData()); setOriginalKey(null); setStep(0); setScreen("wizard"); };
+  const startNew = () => {
+    // If the signed-in user is a CA with access to more than one lender's
+    // book, require them to pick which lender this new sheet belongs to
+    // first — otherwise it'd land under their own uid and hide from the
+    // lenders.
+    if (profile?.role === 'ca' && accessibleLenders.length > 1 && selectedLenderFilter === 'all') {
+      const lenders = accessibleLenders.filter(l => !l.isMe);
+      if (lenders.length > 1) {
+        const choices = lenders.map((l,i)=>`${i+1}. ${l.name}`).join('\n');
+        const ans = window.prompt(
+          `Which lender's book is this new sheet for?\n\n${choices}\n\nEnter the number:`,
+          '1'
+        );
+        const idx = parseInt(ans, 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= lenders.length) return;
+        setSelectedLenderFilter(lenders[idx].id);
+        setPreferredOwnerUid(lenders[idx].id);
+      } else if (lenders.length === 1) {
+        setSelectedLenderFilter(lenders[0].id);
+        setPreferredOwnerUid(lenders[0].id);
+      }
+    }
+    setData(emptyData()); setOriginalKey(null); setStep(0); setScreen("wizard");
+  };
 
   // ── Import helpers ─────────────────────────────────────────────────────────
   async function downloadTemplate() {
@@ -12787,6 +12829,13 @@ Rules:
                 corpPersonalDebtSnapshot.push({ creditor: r.creditor, security: '', annualPmt: r.annualPmt, owner, type: 're', sourceAsOfDate: p.asOfDate });
               }
             });
+            // Unified reDebt rows — same corpPaidBy routing.
+            (p.reDebt || []).forEach(r => {
+              const name = r.lienHolder || r.creditor;
+              if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
+                corpPersonalDebtSnapshot.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner, type: 're', sourceAsOfDate: p.asOfDate });
+              }
+            });
           } catch {}
         }
       }
@@ -13188,6 +13237,15 @@ Rules:
           (p.reCurrent || []).forEach(r => {
             if (routedToMe(r) && r.creditor && numVal(r.annualPmt) > 0) {
               corpDebts.push({ creditor: r.creditor, security: "", annualPmt: r.annualPmt, owner: ownerName, type: "re", sourceAsOfDate: p.asOfDate });
+            }
+          });
+          // Unified RE Debt rows (lienHolder field instead of creditor). Pick
+          // these up too so a mortgage the personal sheet marked "Paid by
+          // Corp X" flows into Corp X's budget as a debt-service obligation.
+          (p.reDebt || []).forEach(r => {
+            const name = r.lienHolder || r.creditor;
+            if (routedToMe(r) && name && numVal(r.annualPmt) > 0) {
+              corpDebts.push({ creditor: name, security: '', annualPmt: r.annualPmt, owner: ownerName, type: 're', sourceAsOfDate: p.asOfDate });
             }
           });
         } catch {}
