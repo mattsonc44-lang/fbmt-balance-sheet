@@ -1352,7 +1352,7 @@ function BudgetView({
   budgetTotalDebtService, budgetPersonalDebtTotal, budgetCorpDebtTotal, budgetProposedDebtTotal,
   budgetInsuranceTotal, budgetTotalIncomeInsured, budgetNetIncomeInsured,
   toggleInsurance,
-  corpPersonalDebt, corpPersonalDebtTotal, corpPersonalDebtDiag,
+  corpPersonalDebt, corpPersonalDebtTotal,
   budgetTotalExpenses, budgetNetIncome,
   set, setArr, removeRow, addRow, lookupPrice, commodityPrices, expenseList
 }) {
@@ -1794,29 +1794,6 @@ function BudgetView({
           {budgetCorpDebtTotal > 0 && (
             <div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",fontSize:".8rem",color:"#2d5a8e",background:"#f0f6ff",borderRadius:5,marginTop:4}}>
               <span>Corp Paid Subtotal</span><strong>{fmt(budgetCorpDebtTotal)}</strong>
-            </div>
-          )}
-          {corpPersonalDebtDiag && (corpPersonalDebtDiag.foundCount === 0) && (corpPersonalDebtDiag.scanned > 0 || (corpPersonalDebtDiag.skippedReasons||[]).length > 0) && (
-            <div style={{marginTop:8,padding:'8px 10px',background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,fontSize:'.72rem',color:'#78350f',lineHeight:1.45}}>
-              <div style={{fontWeight:700,marginBottom:4}}>Personal-debt scan found nothing for this corp.</div>
-              <div>Looking for: <code>{corpPersonalDebtDiag.me}</code></div>
-              <div>Sheets scanned: {corpPersonalDebtDiag.scanned} · Linked to this corp: {corpPersonalDebtDiag.linkedHits} · Rows checked: {corpPersonalDebtDiag.candidateRows} · Routed-to-me matches: {corpPersonalDebtDiag.matched}</div>
-              {corpPersonalDebtDiag.notLinkedCount > 0 && (
-                <div style={{fontSize:'.68rem',color:'#92400e',marginTop:2}}>{corpPersonalDebtDiag.notLinkedCount} other personal sheet(s) scanned but not linked to this corp — ignored.</div>
-              )}
-              {(corpPersonalDebtDiag.skippedReasons||[]).length > 0 && (
-                <details style={{marginTop:4}} open>
-                  <summary style={{cursor:'pointer',fontWeight:600}}>Rows on linked personal sheet(s) — {corpPersonalDebtDiag.skippedReasons.length} total</summary>
-                  <ul style={{margin:'4px 0 0 18px',padding:0,fontSize:'.68rem',fontFamily:'ui-monospace, Menlo, monospace'}}>
-                    {corpPersonalDebtDiag.skippedReasons.slice(0,30).map((s,i)=>(
-                      <li key={i}><strong>{s.client||'?'}</strong> [{s.section||'?'}]: {s.reason}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              <div style={{marginTop:6,fontStyle:'italic'}}>
-                If the personal sheet's "Paid by" dropdown shows this corp but no row appears here, make sure the personal sheet was <strong>saved</strong> after you set it — the scan reads only saved sheets.
-              </div>
             </div>
           )}
           {corpPersonalDebt && corpPersonalDebt.length > 0 && (
@@ -9179,7 +9156,6 @@ export default function BalanceSheet() {
   const qaBookCache = React.useRef(null);                 // cached book summary so repeat asks are instant
   const [saveValidation, setSaveValidation] = useState(null); // { issues, proceed: fn, cancel: fn }
   const [corpPersonalDebt, setCorpPersonalDebt] = useState([]); // debt items paid by this entity on behalf of personal clients
-  const [corpPersonalDebtDiag, setCorpPersonalDebtDiag] = useState(null); // scan diagnostics for on-screen debug
   const [saveStatus, setSaveStatus] = useState(null);
   // Autosave state — distinct from the manual save button's status so clicks
   // and auto-pushes can coexist without stepping on each other's labels.
@@ -13334,13 +13310,12 @@ Rules:
   };
 
   const loadCorpPersonalDebt = async () => {
-    console.log('[corp-debt] loadCorpPersonalDebt() called, clientName=', data.clientName, 'role=', profile?.role, 'caOpenShare=', !!caOpenShare, 'savedSheets.length=', (savedSheets||[]).length);
-    if (!data.clientName) { console.warn('[corp-debt] aborting — no clientName set yet'); return; }
+    if (!data.clientName) return;
     // CA viewers see only the sheet the lender shared with them — the shared
     // snapshot already includes any corp-paid personal debt aggregated by the
     // lender at share time. Running the cross-sheet scan here would return
     // empty and wipe out that snapshot. Skip.
-    if (profile?.role === 'ca' || caOpenShare) { console.warn('[corp-debt] aborting — CA viewer'); return; }
+    if (profile?.role === 'ca' || caOpenShare) return;
     try {
       const corpDebts = [];
       // Normalize aggressively — punctuation differences between the corp's
@@ -13349,8 +13324,6 @@ Rules:
       // so the match is tolerant to commas, periods, and extra whitespace.
       const norm = s => (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,'');
       const me = norm(data.clientName);
-      const diag = { me: data.clientName, scanned: 0, linkedHits: 0, candidateRows: 0, matched: 0, skippedReasons: [] };
-      console.log('[corp-debt] scanning for corp =', data.clientName, '(normalized:', me, ')');
       // ── Use ONLY the latest saved sheet per personal client. Older sheets
       // may reference loans that have since been paid off — we don't want
       // last year's balance flowing back into this year's corp budget.
@@ -13367,51 +13340,36 @@ Rules:
       // took long enough with 100+ sheets that the user hit the "no logs"
       // state because the scan still hadn't finished.
       const candidates = Array.from(latestByClient.values());
-      console.log('[corp-debt] fetching', candidates.length, 'personal sheets in parallel');
       const fetched = await Promise.all(candidates.map(async s => {
         try { const it = await storage.get(s.key); return it ? { s, p: JSON.parse(it.value) } : null; }
-        catch (e) { console.warn('[corp-debt] storage.get failed for', s.key, e); return null; }
+        catch { return null; }
       }));
       for (const row of fetched) {
         if (!row) continue;
-        const { s, p } = row;
+        const { p } = row;
         try {
-          diag.scanned++;
           const linkedArr = Array.isArray(p.linkedEntities) ? p.linkedEntities : (p.linkedEntity ? [p.linkedEntity] : []);
           const linkedNames = linkedArr.map(e => (typeof e === 'string' ? e : (e && e.name) || '')).map(norm);
-          if (!linkedNames.includes(me)) {
-            // Don't flood skippedReasons with the 60+ sheets that aren't
-            // linked — those aren't useful. Keep a small counter instead
-            // so the diagnostic panel shows a clean per-row explanation
-            // of what IS linked.
-            diag.notLinkedCount = (diag.notLinkedCount || 0) + 1;
-            continue;
-          }
-          diag.linkedHits++;
+          if (!linkedNames.includes(me)) continue;
           const ownerName = p.clientName || "Unknown";
           const routedToMe = r => {
             if (r.corpPaidBy) return norm(r.corpPaidBy) === me;
             return !!r.corpPaid;
           };
           const tryRow = (r, nameField, type) => {
-            diag.candidateRows++;
-            const name = r[nameField] || r.creditor || r.lienHolder;
+            // Try every possible name field so a routed row with blank
+            // creditor/lienHolder still carries into the corp budget.
+            const rawName = r[nameField] || r.creditor || r.lienHolder || r.security;
             const routed = routedToMe(r);
             const amt = numVal(r.annualPmt);
-            if (routed && name && amt > 0) {
-              diag.matched++;
+            // Accept any routed row with a payment amount — even if the
+            // name is blank. The inline warning on the personal sheet now
+            // catches the "Paid by Corp without a creditor" case at entry
+            // time, but we still want the dollars to flow through if the
+            // user hasn't fixed the name yet.
+            if (routed && amt > 0) {
+              const name = rawName || `(unnamed ${type} debt — ${ownerName} sheet)`;
               corpDebts.push({ creditor: name, security: r.security || '', annualPmt: r.annualPmt, owner: ownerName, type, sourceAsOfDate: p.asOfDate });
-            } else {
-              // Log EVERY row on a linked personal sheet so we can see why
-              // nothing matched. Previously we only logged rows that had
-              // corpPaidBy set, which hides the common failure mode where
-              // the user thought they'd marked a row paid-by-corp but the
-              // field actually saved blank.
-              diag.skippedReasons.push({
-                client: p.clientName,
-                section: type,
-                reason: `${nameField}="${name||'(blank)'}" annualPmt="${r.annualPmt||'(blank)'}" (${amt}) corpPaidBy="${r.corpPaidBy||'(blank)'}" corpPaid=${!!r.corpPaid} → routed=${routed}`
-              });
             }
           };
           (p.intermediatDebt || []).forEach(r => tryRow(r, 'creditor', 'term'));
@@ -13420,13 +13378,8 @@ Rules:
           (p.reMortgages    || []).forEach(r => tryRow(r, 'lienHolder', 're'));
         } catch {}
       }
-      console.log('[corp-debt] result:', diag, 'rows:', corpDebts);
-      if (corpDebts.length === 0 && diag.skippedReasons.length) {
-        console.warn('[corp-debt] nothing matched — skipped:', diag.skippedReasons);
-      }
       setCorpPersonalDebt(corpDebts);
-      setCorpPersonalDebtDiag({ ...diag, foundCount: corpDebts.length });
-    } catch (e) { console.error('[corp-debt] scan failed', e); setCorpPersonalDebt([]); setCorpPersonalDebtDiag({ error: String(e) }); }
+    } catch { setCorpPersonalDebt([]); }
   };
 
   const generateLenderPackage = async () => {
@@ -15421,6 +15374,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
             // Backward compat: legacy r.corpPaid=true → default to first linked corp when picking.
             const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            const missingCreditor = !!currentPayer && !String(r.creditor||'').trim();
             return (
             <div key={i} className="row-entry" data-rowkey={`intermediatDebt-${i}`}>
               <span className="row-num">{i+1}</span>
@@ -15428,6 +15382,11 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   so the two $-columns have room without wrapping. */}
               <div style={{flex:'2 1 160px',minWidth:140}}>
                 <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("intermediatDebt",i,"creditor",v)} placeholder="Lender" />
+                {missingCreditor && (
+                  <div style={{fontSize:'.65rem',color:'#b45309',marginTop:2,fontWeight:600}}>
+                    ⚠ Paid by {currentPayer} but no creditor — fill this in so it flows to the corp budget.
+                  </div>
+                )}
               </div>
               <div style={{flex:'2 1 140px',minWidth:120}}>
                 <TxtInp label="Security" value={r.security} onChange={v=>setArr("intermediatDebt",i,"security",v)} placeholder="Collateral" />
@@ -15474,6 +15433,10 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           {(data.reDebt||[]).map((r,i) => {
             const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
             const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            // A row routed to a corp but with no lien-holder name will disappear
+            // from the corp budget — flag it inline so the lender can see the
+            // gap at a glance.
+            const missingLH = !!currentPayer && !String(r.lienHolder||'').trim();
             // Accrued interest = unpaid interest owed as of the as-of date.
             // Next payment covers interest first, then reduces principal:
             //   principalPmt = max(0, annualPmt − accruedInt)
@@ -15489,6 +15452,11 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <span className="row-num">{i+1}</span>
               <div style={{flex:'2 1 160px',minWidth:140}}>
                 <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reDebt",i,"lienHolder",v)} placeholder="Bank / lender" />
+                {missingLH && (
+                  <div style={{fontSize:'.65rem',color:'#b45309',marginTop:2,fontWeight:600}}>
+                    ⚠ Paid by {currentPayer} but no lien holder — fill this in so it flows to the corp budget.
+                  </div>
+                )}
               </div>
               <div style={{flex:'0 1 90px',minWidth:80}}>
                 <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr" />
@@ -15663,10 +15631,18 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           {data.reMortgages.map((r,i) => {
             const linkedCorpNames = normalizeLinked(data.linkedEntities || []).map(e=>e.name).filter(Boolean);
             const currentPayer = r.corpPaidBy || (r.corpPaid && linkedCorpNames[0]) || '';
+            const missingLH = !!currentPayer && !String(r.lienHolder||'').trim();
             return (
             <div key={i} className="row-entry" data-rowkey={`reMortgages-${i}`}>
               <span className="row-num">{i+1}</span>
-              <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
+              <div style={{display:'flex',flexDirection:'column',flex:'2 1 160px',minWidth:140}}>
+                <TxtInp label="Lien Holder" value={r.lienHolder} onChange={v=>setArr("reMortgages",i,"lienHolder",v)} placeholder="Bank / lender" />
+                {missingLH && (
+                  <div style={{fontSize:'.65rem',color:'#b45309',marginTop:2,fontWeight:600}}>
+                    ⚠ Paid by {currentPayer} but no lien holder — fill this in so it flows to the corp budget.
+                  </div>
+                )}
+              </div>
               <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reMortgages",i,"terms",v)} placeholder="e.g., 20yr" />
               <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reMortgages",i,"rate",v)} />
               <Inp label="Principal (beyond 12 mo)" prefix="$" value={r.principal} onChange={v=>setArr("reMortgages",i,"principal",v)} />
@@ -18774,7 +18750,6 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               budgetProposedDebtTotal={budgetProposedDebtTotal}
               corpPersonalDebt={corpPersonalDebt}
               corpPersonalDebtTotal={corpPersonalDebt.filter(r=>r.annualPmt&&numVal(r.annualPmt)>0).reduce((s,r)=>s+numVal(r.annualPmt),0)}
-              corpPersonalDebtDiag={corpPersonalDebtDiag}
               budgetTotalExpenses={budgetTotalExpenses}
               budgetNetIncome={budgetNetIncome}
               set={set}
