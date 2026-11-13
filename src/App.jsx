@@ -5253,7 +5253,7 @@ const storage = {
     const uidFilter = uids.length === 1
       ? '&user_id=eq.' + encodeURIComponent(uids[0])
       : '&user_id=in.(' + uids.map(encodeURIComponent).join(',') + ')';
-    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date'
+    let url = window.SUPABASE_URL + '/rest/v1/balance_sheets?select=client_name,as_of_date,user_id'
       + uidFilter
       + '&order=as_of_date.desc';
     if (clientPart) url += '&client_name=eq.' + encodeURIComponent(clientPart);
@@ -5264,7 +5264,11 @@ const storage = {
       return { keys: [] };
     }
     const rows = await resp.json();
-    return { keys: rows.map(r => makeKey(r.client_name, r.as_of_date)) };
+    // Include owner uid per key so the UI can filter by lender when a CA
+    // has access to more than one lender's tree.
+    const ownerByKey = {};
+    rows.forEach(r => { ownerByKey[makeKey(r.client_name, r.as_of_date)] = r.user_id; });
+    return { keys: rows.map(r => makeKey(r.client_name, r.as_of_date)), ownerByKey };
   },
   async get(key) {
     if (!isConfigured()) return null;
@@ -8849,15 +8853,35 @@ export default function BalanceSheet() {
   // tree instead of the old per-sheet CA Portal. Fetch that count whenever
   // the profile or session changes; `caHasFileAccess` controls routing below.
   const [caHasFileAccess, setCaHasFileAccess] = useState(false);
+  // Lenders this session can see (own + any ca_access grants), resolved to
+  // {id, name, email} rows so the file-tree header can offer a per-lender
+  // filter dropdown. Everyone has at least their own row.
+  const [accessibleLenders, setAccessibleLenders] = useState([]);
+  const [selectedLenderFilter, setSelectedLenderFilter] = useState('all'); // 'all' or a lender_user_id
   React.useEffect(() => {
-    if (!profile || profile.role !== 'ca' || !session?.access_token) { setCaHasFileAccess(false); return; }
+    if (!profile || !session?.access_token) {
+      setCaHasFileAccess(false); setAccessibleLenders([]); return;
+    }
     (async () => {
       try {
         clearAccessibleUidsCache();
         const uids = await accessibleLenderUids();
-        // uids always includes the CA's own id, so "has access" means > 1.
-        setCaHasFileAccess(Array.isArray(uids) && uids.length > 1);
-      } catch { setCaHasFileAccess(false); }
+        if (profile.role === 'ca') setCaHasFileAccess(Array.isArray(uids) && uids.length > 1);
+        // Resolve uid → {id, name, email} for the dropdown.
+        if (uids.length) {
+          const inList = uids.map(encodeURIComponent).join(',');
+          const r = await fetch(window.SUPABASE_URL + '/rest/v1/profiles?id=in.(' + inList + ')&select=id,full_name,email,role', { headers: supaHeaders() });
+          if (r.ok) {
+            const rows = await r.json();
+            setAccessibleLenders((Array.isArray(rows) ? rows : []).map(p => ({
+              id: p.id,
+              name: p.full_name || p.email || 'Unknown',
+              email: p.email || '',
+              isMe: p.id === session.user.id,
+            })).sort((a,b) => (a.isMe?-1:0) - (b.isMe?-1:0) || a.name.localeCompare(b.name)));
+          }
+        }
+      } catch { setCaHasFileAccess(false); setAccessibleLenders([]); }
     })();
   }, [profile?.id, session?.access_token]);
   const [loginEmail, setLoginEmail] = useState("");
@@ -9887,6 +9911,7 @@ Question: ${q}`,
       const result = await storage.list(STORAGE_PREFIX);
       if (result && result.keys) {
         const sheets = [];
+        const ownerByKey = result.ownerByKey || {};
         for (const key of result.keys) {
           try {
             const item = await storage.get(key);
@@ -9895,6 +9920,7 @@ Question: ${q}`,
               sheets.push({
                 key, clientName: p.clientName, asOfDate: p.asOfDate, savedAt: p._savedAt,
                 folderPath: p.folderPath || [],
+                ownerUserId:      ownerByKey[key] || null,
                 lastEditedBy:     p._lastEditedBy     || null,
                 lastEditedByName: p._lastEditedByName || null,
                 lastEditedByRole: p._lastEditedByRole || null,
@@ -16343,6 +16369,17 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   style={{border:'none',outline:'none',fontSize:12,background:'transparent',width:'100%',fontFamily:'inherit',color:'#111'}}/>
                 {homeSearch && <button onClick={()=>setHomeSearch('')} style={{background:'transparent',border:'none',color:'#9ca3af',cursor:'pointer',padding:0,fontSize:14,lineHeight:1}}>×</button>}
               </div>
+              {accessibleLenders.length > 1 && (
+                <select value={selectedLenderFilter}
+                  onChange={e=>setSelectedLenderFilter(e.target.value)}
+                  title="Filter the file tree by lender. Admins + CAs with grants to multiple lenders see this."
+                  style={{background:'white',border:'0.5px solid #e5e7eb',color:'#374151',fontSize:12,padding:'6px 10px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
+                  <option value="all">All lenders ({accessibleLenders.length})</option>
+                  {accessibleLenders.map(l => (
+                    <option key={l.id} value={l.id}>{l.isMe ? 'My files' : l.name}</option>
+                  ))}
+                </select>
+              )}
               <button onClick={()=>setShowQaPanel(v=>!v)}
                 title="Ask a natural-language question about your book"
                 style={{background: showQaPanel ? '#6B0E1E' : 'white',border:'0.5px solid ' + (showQaPanel ? '#6B0E1E' : '#e5e7eb'),color: showQaPanel ? 'white' : '#374151',fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}}>
@@ -17202,7 +17239,12 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               </button>
             </div>
           ) : (() => {
-            const allPaths = getAllFolderPaths(savedSheets);
+            // Recompute folder tree from the lender-filtered sheet set so
+            // empty folders don't show for lenders the viewer isn't filtering to.
+            const filteredSheetsForTree = savedSheets.filter(
+              s => selectedLenderFilter === 'all' || s.ownerUserId === selectedLenderFilter
+            );
+            const allPaths = getAllFolderPaths(filteredSheetsForTree);
 
             // 4-column grid template used by every row so the columns line up perfectly.
             // Renewal needs room for "Aug 16 · 12d overdue"; actions need to fit
@@ -17225,6 +17267,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   p.slice(0, pathPrefix.length).join("|") === pathPrefix.join("|"))
                 .sort((a,b) => a[a.length-1].localeCompare(b[b.length-1]));
               const sheetsHere = savedSheets
+                .filter(s => selectedLenderFilter === 'all' || s.ownerUserId === selectedLenderFilter)
                 .filter(s => {
                   const fp = s.folderPath || [];
                   return fp.length === pathPrefix.length &&
@@ -17341,15 +17384,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                         <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft: (depth * 16) + 18, minWidth:0}}>
                           <div style={{minWidth:0,flex:1}}>
                             <div style={{fontSize:13,color:'#111',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.clientName}</div>
-                            <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>
-                              Balance sheet · as of {s.asOfDate}
-                              {s.lastEditedByName && (
-                                <span style={{marginLeft:8,color:'#4b5563'}}>
-                                  · last edited by {s.lastEditedByName}
-                                  {s.lastEditedAt && ' on ' + new Date(s.lastEditedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-                                </span>
-                              )}
-                            </div>
+                            <div style={{fontSize:11,color:'#6b7280',marginTop:2}}>Balance sheet · as of {s.asOfDate}</div>
+                            {s.lastEditedByName && (
+                              <div style={{fontSize:11,color:'#4b5563',marginTop:2}}>
+                                ✏ {s.lastEditedByName}
+                                {s.lastEditedByRole && <span style={{color:'#9ca3af'}}> ({s.lastEditedByRole})</span>}
+                                {s.lastEditedAt && ' · ' + new Date(s.lastEditedAt).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div style={{textAlign:'right',fontSize:12,color:'#6b7280'}}>
