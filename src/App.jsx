@@ -19501,6 +19501,81 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         );
       })()}
 
+      {/* Budget vs Actual — line-item view of every budget expense with
+          an editable Actual column and a variance. Actuals save back onto
+          each expense row (`.actual`) so they persist with the sheet and
+          snapshot year-over-year. Red = overspent, green = under. */}
+      {(() => {
+        const rows = (data.budgetExpenses||[]).filter(r => r.description || r.amount);
+        if (rows.length === 0) return null;
+        const budgetSum = rows.reduce((s,r)=>s+n(r.amount),0);
+        const actualSum = rows.reduce((s,r)=>s+n(r.actual),0);
+        const varSum = actualSum - budgetSum;
+        const updateRow = (i, field, val) => {
+          const next = (data.budgetExpenses||[]).map((r,j) => j===i ? {...r, [field]: val} : r);
+          setData({...data, budgetExpenses: next});
+        };
+        // Map filtered-row index back to the original budgetExpenses array
+        // index, so edits land on the right row even when some rows are
+        // blank placeholders.
+        const originalIdx = rows.map(r => (data.budgetExpenses||[]).indexOf(r));
+        return (
+          <div style={{marginTop:18,padding:'14px 16px',background:'white',border:'1px solid #e5e7eb',borderRadius:8}}>
+            <div style={{fontSize:'.85rem',fontWeight:700,color:'#6B0E1E',marginBottom:8}}>
+              Budget vs Actual — Line-Item Expenses
+              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(type the actual spent amount next to each line)</span>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <thead>
+                <tr style={{borderBottom:'1.5px solid #6B0E1E',color:'#6B0E1E'}}>
+                  <th style={{textAlign:'left',padding:'6px 10px',fontSize:'.72rem'}}>Expense</th>
+                  <th style={{textAlign:'right',padding:'6px 10px',fontSize:'.72rem',width:120}}>Budget</th>
+                  <th style={{textAlign:'right',padding:'6px 10px',fontSize:'.72rem',width:140}}>Actual</th>
+                  <th style={{textAlign:'right',padding:'6px 10px',fontSize:'.72rem',width:120}}>Over / (Under)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i) => {
+                  const b = n(r.amount);
+                  const a = n(r.actual);
+                  const v = a - b;
+                  const idx = originalIdx[i];
+                  return (
+                    <tr key={idx} style={{borderBottom:'1px solid #f0f0f0'}}>
+                      <td style={{padding:'6px 10px'}}>{r.description || <span style={{color:'#888'}}>(unlabeled)</span>}{r.prepaid ? <span style={{marginLeft:6,fontSize:'.65rem',color:'#2d5a8e'}}>prepaid</span> : null}</td>
+                      <td style={{padding:'6px 10px',textAlign:'right'}}>{fmtMoney(b)}</td>
+                      <td style={{padding:'6px 10px',textAlign:'right'}}>
+                        <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                          <span style={{color:'#888'}}>$</span>
+                          <input type="text" value={r.actual||''}
+                            onChange={e => updateRow(idx, 'actual', e.target.value.replace(/[^0-9.]/g,''))}
+                            placeholder="0"
+                            style={{width:90,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+                        </div>
+                      </td>
+                      <td style={{padding:'6px 10px',textAlign:'right',fontWeight:600,color: a===0 ? '#aaa' : (v > 0 ? '#991b1b' : (v < 0 ? '#15803d' : '#111'))}}>
+                        {a === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{borderTop:'2px solid #6B0E1E',fontWeight:800}}>
+                  <td style={{padding:'8px 10px'}}>Totals</td>
+                  <td style={{padding:'8px 10px',textAlign:'right'}}>{fmtMoney(budgetSum)}</td>
+                  <td style={{padding:'8px 10px',textAlign:'right'}}>{fmtMoney(actualSum)}</td>
+                  <td style={{padding:'8px 10px',textAlign:'right',color: varSum > 0 ? '#991b1b' : (varSum < 0 ? '#15803d' : '#111')}}>
+                    {varSum >= 0 ? fmtMoney(varSum) : '(' + fmtMoney(Math.abs(varSum)) + ')'}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{fontSize:'.68rem',color:'#666',marginTop:6,lineHeight:1.5}}>
+              Red = overspent vs budget. Green = under budget. Leave Actual blank on lines where there's no spend yet — those don't count toward the variance total. Actuals save on the sheet and roll into the year-over-year snapshot.
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Debt-service summary — principal is NOT in the accrual bridge
           (it's a BS movement, not an expense) so we surface it separately
           as a coverage check. Totals pull straight from the sheet's debt
