@@ -19506,8 +19506,11 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
           each expense row (`.actual`) so they persist with the sheet and
           snapshot year-over-year. Red = overspent, green = under. */}
       {(() => {
-        const rows = (data.budgetExpenses||[]).filter(r => r.description || r.amount);
-        if (rows.length === 0) return null;
+        // Show every row — including newly-added blanks — so the user can
+        // type into a line they just created from this panel without
+        // having to jump back to the Budget tab to label it.
+        const rows = (data.budgetExpenses||[]);
+        if (rows.length === 0 && !(data.budgetExpenses||[]).length) return null;
         const budgetSum = rows.reduce((s,r)=>s+n(r.amount),0);
         const actualSum = rows.reduce((s,r)=>s+n(r.actual),0);
         const varSum = actualSum - budgetSum;
@@ -19542,8 +19545,30 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                   const idx = originalIdx[i];
                   return (
                     <tr key={idx} style={{borderBottom:'1px solid #f0f0f0'}}>
-                      <td style={{padding:'6px 10px'}}>{r.description || <span style={{color:'#888'}}>(unlabeled)</span>}{r.prepaid ? <span style={{marginLeft:6,fontSize:'.65rem',color:'#2d5a8e'}}>prepaid</span> : null}</td>
-                      <td style={{padding:'6px 10px',textAlign:'right'}}>{fmtMoney(b)}</td>
+                      <td style={{padding:'6px 10px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <input type="text" value={r.description||''}
+                            onChange={e => updateRow(idx, 'description', e.target.value)}
+                            placeholder="Expense description"
+                            style={{flex:1,minWidth:160,border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit',background:r.description?'transparent':'#fffdf5'}} />
+                          {r.prepaid ? <span style={{fontSize:'.65rem',color:'#2d5a8e'}}>prepaid</span> : null}
+                          <button onClick={() => {
+                              const next = (data.budgetExpenses||[]).filter((_,j) => j!==idx);
+                              setData({...data, budgetExpenses: next.length ? next : [{description:'',amount:'',prepaid:false}]});
+                            }}
+                            title="Remove this expense line"
+                            style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer',fontSize:'.85rem',padding:'0 4px'}}>×</button>
+                        </div>
+                      </td>
+                      <td style={{padding:'6px 10px',textAlign:'right'}}>
+                        <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                          <span style={{color:'#888'}}>$</span>
+                          <input type="text" value={r.amount||''}
+                            onChange={e => updateRow(idx, 'amount', e.target.value.replace(/[^0-9.]/g,''))}
+                            placeholder="0"
+                            style={{width:90,textAlign:'right',border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+                        </div>
+                      </td>
                       <td style={{padding:'6px 10px',textAlign:'right'}}>
                         <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
                           <span style={{color:'#888'}}>$</span>
@@ -19569,6 +19594,15 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                 </tr>
               </tbody>
             </table>
+            <div style={{display:'flex',gap:10,alignItems:'center',marginTop:8,flexWrap:'wrap'}}>
+              <button onClick={() => setData({...data, budgetExpenses: [...(data.budgetExpenses||[]), {description:'',amount:'',actual:'',prepaid:false}]})}
+                style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:5,padding:'5px 12px',fontSize:'.75rem',fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                + Add missing expense line
+              </button>
+              <span style={{fontSize:'.68rem',color:'#666'}}>
+                Adds a new row to the budget itself — type a description, budgeted amount (if you want to backfill), and actual. The new line flows into the Budget tab too.
+              </span>
+            </div>
             <div style={{fontSize:'.68rem',color:'#666',marginTop:6,lineHeight:1.5}}>
               Red = overspent vs budget. Green = under budget. Leave Actual blank on lines where there's no spend yet — those don't count toward the variance total. Actuals save on the sheet and roll into the year-over-year snapshot.
             </div>
