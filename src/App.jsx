@@ -19415,17 +19415,23 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
               Year-End Cash Settlement
               <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(ties budget to balance sheet; principal IS included here)</span>
             </div>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
-              <tbody>
-                <tr><td style={{padding:'4px 0'}}>Cash farm income (budget)</td><td style={{padding:'4px 0',textAlign:'right'}}>{fmtMoney(n(budgetTotalIncome))}</td></tr>
-                <tr><td style={{padding:'4px 0'}}>Less: Cash operating expenses (budget)</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(n(budgetTotalExpenses))}</td></tr>
-                <tr><td style={{padding:'4px 0'}}>Less: Principal payments on term / RE debt</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(totalDebtSvc)}</td></tr>
-                <tr><td style={{padding:'4px 0'}}>Less: Owner draws / family living</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(draws)}</td></tr>
-                <tr><td style={{padding:'6px 0',borderTop:'1px solid #e0c5a0',fontWeight:700}}>Projected change in cash</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #e0c5a0',fontWeight:700,color:projectedCashFlow<0?'#991b1b':'#15803d'}}>{fmtMoney(projectedCashFlow)}</td></tr>
-                <tr><td style={{padding:'4px 0',fontSize:'.78rem',color:'#555'}}>Actual change in Cash & Bank (BS: {fmtMoney(priorCash)} → {fmtMoney(curCash)})</td><td style={{padding:'4px 0',textAlign:'right',color:actualChange<0?'#991b1b':'#15803d'}}>{fmtMoney(actualChange)}</td></tr>
-                <tr><td style={{padding:'6px 0',borderTop:'2px solid #92400e',fontWeight:800,color:'#92400e'}}>Unexplained variance</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'2px solid #92400e',fontWeight:800,color: Math.abs(variance) < 2000 ? '#15803d' : '#92400e'}}>{fmtMoney(variance)}</td></tr>
-              </tbody>
-            </table>
+            {(() => {
+              const projEnd = priorCash + projectedCashFlow;
+              return (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+                  <tbody>
+                    <tr><td style={{padding:'4px 0',fontWeight:700}}>Cash on hand — beginning of period {priorSheet?.asOfDate ? `(${priorSheet.asOfDate})` : ''}</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:700}}>{fmtMoney(priorCash)}</td></tr>
+                    <tr><td style={{padding:'4px 0'}}>+ Cash farm income (budget)</td><td style={{padding:'4px 0',textAlign:'right',color:'#15803d'}}>+{fmtMoney(n(budgetTotalIncome))}</td></tr>
+                    <tr><td style={{padding:'4px 0'}}>− Cash operating expenses (budget)</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(n(budgetTotalExpenses))}</td></tr>
+                    <tr><td style={{padding:'4px 0'}}>− Principal payments on term / RE debt</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(totalDebtSvc)}</td></tr>
+                    <tr><td style={{padding:'4px 0'}}>− Owner draws / family living</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(draws)}</td></tr>
+                    <tr><td style={{padding:'6px 0',borderTop:'1px solid #e0c5a0',fontWeight:700}}>= Projected cash on hand — end of period</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #e0c5a0',fontWeight:700,color:projEnd<0?'#991b1b':'#15803d'}}>{fmtMoney(projEnd)}</td></tr>
+                    <tr><td style={{padding:'4px 0',fontSize:'.78rem',color:'#555'}}>Actual cash on hand — end of period ({data.asOfDate||'current'})</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:600,color:'#111'}}>{fmtMoney(curCash)}</td></tr>
+                    <tr><td style={{padding:'6px 0',borderTop:'2px solid #92400e',fontWeight:800,color:'#92400e'}}>Unexplained variance (actual − projected)</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'2px solid #92400e',fontWeight:800,color: Math.abs(variance) < 2000 ? '#15803d' : '#92400e'}}>{fmtMoney(variance)}</td></tr>
+                  </tbody>
+                </table>
+              );
+            })()}
             <div style={{fontSize:'.68rem',color:'#666',marginTop:6,lineHeight:1.5}}>
               {Math.abs(variance) < 2000
                 ? '✓ Within $2,000 — the year ties out cleanly.'
