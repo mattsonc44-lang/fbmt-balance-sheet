@@ -10108,14 +10108,14 @@ Question: ${q}`,
   // switch from Bowman's 2026 sheet to Smith's 2025 sheet, click Compare,
   // and momentarily see Bowman's insight text next to Smith's balance sheet.
   useEffect(() => {
-    const isCA = profile?.role === 'ca' || caOpenShare;
-    // Comparison state — for CAs, the snapshot is the source of truth so
-    // don't wipe it on identity change. For the lender, wipe so the live
-    // loader repopulates for the newly-open sheet.
-    if (!isCA) setCompSheets([]);
+    // Only share-link CAs hold snapshotted state that's the source of truth
+    // for them — don't wipe those on identity change. File-tree-access CAs
+    // fetch live like lenders and want the fresh-sheet reset.
+    const isSnapshotCA = !!caOpenShare;
+    if (!isSnapshotCA) setCompSheets([]);
     setCompInsight("");
-    if (!isCA) setCorpPersonalDebt([]);
-    if (!isCA) setLinkedEntityNWMap({});
+    if (!isSnapshotCA) setCorpPersonalDebt([]);
+    if (!isSnapshotCA) setLinkedEntityNWMap({});
     if (qaBookCache && qaBookCache.current) qaBookCache.current = null;
     // Reload the counterparty change log for the newly-active sheet.
     const sk = caOpenShare?.sheet_key
@@ -10256,7 +10256,10 @@ Question: ${q}`,
   const autoSaveNow = async () => {
     if (!data.clientName || !data.asOfDate) return;
     if (!originalKey) return;              // Never auto-create a new sheet
-    if (profile?.role === 'ca' || caOpenShare) return;
+    // Share-link CAs save through ca-save.js on explicit Save, not here.
+    // File-tree-access CAs write the lender's sheet directly and should
+    // autosave like a lender.
+    if (caOpenShare) return;
     setAutoSaveState('saving');
     try {
       const key = STORAGE_PREFIX + data.clientName.replace(/\s+/g,"_") + ":" + data.asOfDate;
@@ -10284,7 +10287,7 @@ Question: ${q}`,
   useEffect(() => {
     // Skip the very first render (no edits yet).
     if (!data.clientName || !originalKey) return;
-    if (profile?.role === 'ca' || caOpenShare) return;
+    if (caOpenShare) return;
     setAutoSaveState(prev => (prev === 'saving' ? prev : 'dirty'));
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -11817,10 +11820,12 @@ Question: ${q}`,
   // Load linked entity net worths using sheetTotals (must be after sheetTotals is defined)
   useEffect(() => {
     async function fetchAllLinkedNW() {
-      // CA viewers see snapshotted linked-entity net worths from the share
-      // payload — the live scan across savedSheets returns nothing for them
-      // and would overwrite the seeded snapshot. Skip.
-      if (profile?.role === 'ca' || caOpenShare) return;
+      // Only share-link CAs (caOpenShare set) see snapshotted linked-entity
+      // net worths from the share payload — they can't read the lender's
+      // other sheets, so the live scan would overwrite the seeded snapshot
+      // with zeroes. File-tree-access CAs DO have read access to every
+      // granted lender's sheets, so they run the live scan like a lender.
+      if (caOpenShare) return;
       const entities = normalizeLinked(data.linkedEntities);
       if (!entities.length) { setLinkedEntityNWMap({}); return; }
       const newMap = {};
@@ -11863,10 +11868,11 @@ Question: ${q}`,
       const results = [];
       const anchor = data.asOfDate || '';
 
-      // CA path — no access to the lender's storage. Use the baked-in
-      // linkedEntitySnapshots the lender packs into the share payload.
-      const isCA = profile?.role === 'ca' || caOpenShare;
-      if (isCA) {
+      // Share-link CA path — no access to the lender's storage. Use the
+      // baked-in linkedEntitySnapshots the lender packs into the share
+      // payload. File-tree-access CAs fall through to the live scan.
+      const isShareLinkCA = !!caOpenShare;
+      if (isShareLinkCA) {
         const snaps = data.linkedEntitySnapshots || {};
         for (const {name, ownership} of entities) {
           const snap = snaps[name];
@@ -11918,10 +11924,9 @@ Question: ${q}`,
   // outside the folder that DO share the exact client name, for backwards compat.
   const loadComparisonSheets = async () => {
     if (!data.clientName && (!data.folderPath || !data.folderPath.length)) return;
-    // CAs use the snapshot the lender baked into the share — the live scan
-    // across savedSheets returns nothing for them and would overwrite the
-    // hydrated compSheets with an empty array.
-    if (profile?.role === 'ca' || caOpenShare) return;
+    // Share-link CAs use the snapshot the lender baked into the share;
+    // file-tree-access CAs have real storage access and run this live.
+    if (caOpenShare) return;
     setCompLoading(true); setCompInsight("");
     try {
       const currentFolderKey = JSON.stringify(data.folderPath || []);
@@ -13320,11 +13325,10 @@ Rules:
 
   const loadCorpPersonalDebt = async () => {
     if (!data.clientName) return;
-    // CA viewers see only the sheet the lender shared with them — the shared
-    // snapshot already includes any corp-paid personal debt aggregated by the
-    // lender at share time. Running the cross-sheet scan here would return
-    // empty and wipe out that snapshot. Skip.
-    if (profile?.role === 'ca' || caOpenShare) return;
+    // Share-link CAs see the lender's baked snapshot of corp-paid personal
+    // debt. File-tree-access CAs have real read access and run the scan
+    // live so they get the same numbers the lender sees.
+    if (caOpenShare) return;
     try {
       const corpDebts = [];
       // Normalize aggressively — punctuation differences between the corp's
@@ -18823,7 +18827,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               BOLD_ROWS={BOLD_ROWS}
               onDeleteSheet={deleteComparisonSheet}
               currentFolderPath={data.folderPath || []}
-              nwExplainerEnabled={!!profile?.features?.nwExplainer && profile?.role !== 'ca' && !caOpenShare}
+              nwExplainerEnabled={!!profile?.features?.nwExplainer && !caOpenShare}
             />
           </div>
         </div>
