@@ -19232,10 +19232,20 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
     { label: 'Δ Crop Investment (prepaid inputs)', amt: n(curTotals['Crop Investment']) - n(priTotals['Crop Investment']),      kind:'add', prior: n(priTotals['Crop Investment']),      curr: n(curTotals['Crop Investment']) },
     { label: 'Δ Supplies on hand',                 amt: n(curTotals['Supplies']) - n(priTotals['Supplies']),                    kind:'add', prior: n(priTotals['Supplies']),            curr: n(curTotals['Supplies']) },
     { label: 'Cash operating expenses (budget)',   amt: -n(budgetTotalExpenses), kind:'base' },
-    { label: 'Δ Accounts Payable',                 amt: -(n(curTotals['Accounts Due']) - n(priTotals['Accounts Due'])),         kind:'sub', prior: n(priTotals['Accounts Due']),        curr: n(curTotals['Accounts Due']) },
+    { label: 'Δ Accounts Due (payables)',          amt: -(n(curTotals['Accounts Due']) - n(priTotals['Accounts Due'])),         kind:'sub', prior: n(priTotals['Accounts Due']),        curr: n(curTotals['Accounts Due']) },
     { label: 'Δ Operating Note balance',           amt: -(n(curTotals['Operating Notes']) - n(priTotals['Operating Notes'])),   kind:'sub', prior: n(priTotals['Operating Notes']),     curr: n(curTotals['Operating Notes']) },
     { label: 'Δ Other Current Liabilities',        amt: -(n(curTotals['Other Current Liab']) - n(priTotals['Other Current Liab'])), kind:'sub', prior: n(priTotals['Other Current Liab']), curr: n(curTotals['Other Current Liab']) },
     { label: 'Δ Income Taxes Due',                 amt: -(n(curTotals['Income Taxes Due']) - n(priTotals['Income Taxes Due'])), kind:'sub', prior: n(priTotals['Income Taxes Due']),    curr: n(curTotals['Income Taxes Due']) },
+    // Accrued interest on all debt — current period's interest expense
+    // the client hasn't yet paid in cash. Sum across reDebt (both current
+    // and prior) and intermediatDebt if accruedInterest is populated there.
+    (() => {
+      const curAccrInt = (data.reDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0)
+                       + (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0);
+      const priAccrInt = (priorSheet?.data?.reDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0)
+                       + (priorSheet?.data?.intermediatDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0);
+      return { label: 'Δ Accrued Interest (RE + term debt)', amt: -(curAccrInt - priAccrInt), kind:'sub', prior: priAccrInt, curr: curAccrInt };
+    })(),
   ];
   const draws = n(data.accrualOwnerDraws);
   const subtotal = bridge.reduce((s,r)=>s+r.amt, 0);
@@ -19383,8 +19393,88 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         </tbody>
       </table>
 
+      {/* Year-end cash settlement — closes out the year by walking the
+          projected cash from budget income all the way through debt
+          principal and owner draws, then compares the resulting
+          projected change in cash to the ACTUAL change in cash on the
+          balance sheet. Any variance means the budget missed something
+          or a BS line moved for a non-operating reason. */}
+      {(() => {
+        const termPrin = (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+        const reDebtPmt = (data.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+        const reCurPmt  = (data.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+        const totalDebtSvc = termPrin + reDebtPmt + reCurPmt;
+        const projectedCashFlow = n(budgetTotalIncome) - n(budgetTotalExpenses) - totalDebtSvc - draws;
+        const priorCash = n(priTotals['Cash & Bank']);
+        const curCash   = n(curTotals['Cash & Bank']);
+        const actualChange = curCash - priorCash;
+        const variance = actualChange - projectedCashFlow;
+        return (
+          <div style={{marginTop:18,padding:'14px 16px',background:'#fef9f0',border:'1px solid #f0d9b8',borderRadius:8}}>
+            <div style={{fontSize:'.85rem',fontWeight:700,color:'#92400e',marginBottom:8}}>
+              Year-End Cash Settlement
+              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(ties budget to balance sheet; principal IS included here)</span>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <tbody>
+                <tr><td style={{padding:'4px 0'}}>Cash farm income (budget)</td><td style={{padding:'4px 0',textAlign:'right'}}>{fmtMoney(n(budgetTotalIncome))}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>Less: Cash operating expenses (budget)</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(n(budgetTotalExpenses))}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>Less: Principal payments on term / RE debt</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(totalDebtSvc)}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>Less: Owner draws / family living</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(draws)}</td></tr>
+                <tr><td style={{padding:'6px 0',borderTop:'1px solid #e0c5a0',fontWeight:700}}>Projected change in cash</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #e0c5a0',fontWeight:700,color:projectedCashFlow<0?'#991b1b':'#15803d'}}>{fmtMoney(projectedCashFlow)}</td></tr>
+                <tr><td style={{padding:'4px 0',fontSize:'.78rem',color:'#555'}}>Actual change in Cash & Bank (BS: {fmtMoney(priorCash)} → {fmtMoney(curCash)})</td><td style={{padding:'4px 0',textAlign:'right',color:actualChange<0?'#991b1b':'#15803d'}}>{fmtMoney(actualChange)}</td></tr>
+                <tr><td style={{padding:'6px 0',borderTop:'2px solid #92400e',fontWeight:800,color:'#92400e'}}>Unexplained variance</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'2px solid #92400e',fontWeight:800,color: Math.abs(variance) < 2000 ? '#15803d' : '#92400e'}}>{fmtMoney(variance)}</td></tr>
+              </tbody>
+            </table>
+            <div style={{fontSize:'.68rem',color:'#666',marginTop:6,lineHeight:1.5}}>
+              {Math.abs(variance) < 2000
+                ? '✓ Within $2,000 — the year ties out cleanly.'
+                : 'A variance means something moved cash that wasn\'t in the budget: new borrowings, asset sales, capital contributions or purchases, prior-year receivables collected, etc. Walk through each with the client before signing off.'}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Debt-service summary — principal is NOT in the accrual bridge
+          (it's a BS movement, not an expense) so we surface it separately
+          as a coverage check. Totals pull straight from the sheet's debt
+          sections. */}
+      {(() => {
+        const termPrin = (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+        const reDebtPmt = (data.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+        const reCurPmt  = (data.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+        const totalDebtSvc = termPrin + reDebtPmt + reCurPmt;
+        // Rough DSCR using accrual NFI + accrued interest (interest is
+        // already included in the budget expense line, so add it back to
+        // get income BEFORE interest for the coverage ratio).
+        const curAccrInt = (data.reDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0)
+                         + (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.accruedInterest),0);
+        const coverageNumer = accrualNet + curAccrInt;
+        const dscr = totalDebtSvc > 0 ? coverageNumer / totalDebtSvc : null;
+        return (
+          <div style={{marginTop:18,padding:'14px 16px',background:'#f7f3f0',border:'1px solid #e5d9d1',borderRadius:8}}>
+            <div style={{fontSize:'.85rem',fontWeight:700,color:'#6B0E1E',marginBottom:8}}>
+              Debt Service Summary
+              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(shown separately — principal is NOT an accrual expense)</span>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <tbody>
+                <tr><td style={{padding:'4px 0'}}>Term / intermediate debt — annual payments</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:600}}>{fmtMoney(termPrin)}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>RE debt — annual payments (unified)</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:600}}>{fmtMoney(reDebtPmt)}</td></tr>
+                {reCurPmt > 0 && <tr><td style={{padding:'4px 0',color:'#888'}}>RE debt — legacy current-portion rows</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:600,color:'#888'}}>{fmtMoney(reCurPmt)}</td></tr>}
+                <tr><td style={{padding:'6px 0',borderTop:'1px solid #d4c4b8',fontWeight:700}}>Total annual debt service</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #d4c4b8',fontWeight:700,color:'#6B0E1E'}}>{fmtMoney(totalDebtSvc)}</td></tr>
+                <tr><td style={{padding:'4px 0',fontSize:'.78rem',color:'#555'}}>Coverage (Accrual NFI + accrued interest) ÷ debt service</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:700,color: dscr && dscr >= 1.25 ? '#15803d' : (dscr && dscr >= 1 ? '#b45309' : '#991b1b')}}>{dscr === null ? '—' : dscr.toFixed(2) + 'x'}</td></tr>
+              </tbody>
+            </table>
+            <div style={{fontSize:'.68rem',color:'#666',marginTop:6,lineHeight:1.5}}>
+              Coverage benchmarks: {'≥'} 1.25× is typical FSA-safe; 1.00–1.24× is thin; below 1.00× means operating income doesn't cover debt service and the client has to draw down working capital or new borrowings.
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{marginTop:14,fontSize:'.72rem',color:'#666',lineHeight:1.5}}>
-        <strong>How this works:</strong> Positive deltas on current assets (inventory, receivables, prepaid inputs) ADD to accrual income — the client produced value they haven't yet received cash for. Positive deltas on current liabilities (payables, operating note, accrued taxes) SUBTRACT — cash the client hasn't yet paid for expenses already incurred. Owner draws are not an expense; they reduce net income only for family-living analysis. Save the sheet after changing owner draws to persist the figure.
+        <strong>How this works:</strong> Positive deltas on current assets (inventory, receivables, prepaid inputs) ADD to accrual income — the client produced value they haven't yet received cash for. Positive deltas on current liabilities (payables, operating note, accrued interest, accrued taxes) SUBTRACT — cash the client hasn't yet paid for expenses already incurred. Debt principal is shown separately as a coverage check, not folded into the bridge. Owner draws are not an expense; they reduce net income only for family-living analysis. Save the sheet after changing owner draws to persist the figure.
       </div>
     </div>
   );
