@@ -6038,7 +6038,7 @@ function ClientDashboard({
             const p = JSON.parse(item.value);
             const totals = sheetTotals(p);
             const issues = validateSheet(p).filter(i => i.severity === 'warning');
-            summaries.push({ key:s.key, asOfDate:s.asOfDate, totals, issues, savedAt:s.savedAt });
+            summaries.push({ key:s.key, asOfDate:s.asOfDate, totals, issues, savedAt:s.savedAt, accrual: p.accrualSnapshot || null });
           }
         } catch {}
       }
@@ -6910,6 +6910,56 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             })}
           </div>
         </div>
+
+        {/* FSA accrual YoY trend — only renders when at least one sheet has
+            a baked accrualSnapshot (i.e., the feature flag is on for the
+            lender and they've opened the Accrual tab at least once on that
+            sheet). */}
+        {sheetSummaries.some(s => s.accrual) && (
+          <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
+            {cardHeader('Accrual income trend', 'FSA reconciliation · year over year')}
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead>
+                  <tr style={{color:TEXT_SEC,textAlign:'right'}}>
+                    <th style={{textAlign:'left',padding:'6px 10px',fontWeight:500,fontSize:11}}>As of</th>
+                    <th style={{padding:'6px 10px',fontWeight:500,fontSize:11}}>Cash income</th>
+                    <th style={{padding:'6px 10px',fontWeight:500,fontSize:11}}>Cash expenses</th>
+                    <th style={{padding:'6px 10px',fontWeight:500,fontSize:11}}>Accrual adj.</th>
+                    <th style={{padding:'6px 10px',fontWeight:500,fontSize:11}}>Owner draws</th>
+                    <th style={{padding:'6px 10px',fontWeight:700,fontSize:11,color:ACCENT}}>Accrual NFI</th>
+                    <th style={{padding:'6px 10px',fontWeight:500,fontSize:11}}>Δ YoY</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sheetSummaries.filter(s=>s.accrual).map((s,i,arr) => {
+                    const a = s.accrual;
+                    const dateFmt = new Date(s.asOfDate + 'T00:00:00Z').toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
+                    const adj = (a.subtotal||0) - (a.cashIncome||0) - (-(a.cashExpenses||0));
+                    const prev = arr[i-1]?.accrual?.accrualNet;
+                    const delta = (typeof prev === 'number') ? ((a.accrualNet||0) - prev) : null;
+                    return (
+                      <tr key={s.key} style={{borderTop:'0.5px solid #f0f0f0',textAlign:'right'}}>
+                        <td style={{textAlign:'left',padding:'8px 10px',color:TEXT_PRI}}>{dateFmt}</td>
+                        <td style={{padding:'8px 10px',color:TEXT_PRI}}>{fmtBig(a.cashIncome||0)}</td>
+                        <td style={{padding:'8px 10px',color:TEXT_PRI}}>{fmtBig(a.cashExpenses||0)}</td>
+                        <td style={{padding:'8px 10px',color: adj<0?'#991b1b':TEXT_PRI}}>{fmtBig(adj)}</td>
+                        <td style={{padding:'8px 10px',color:TEXT_PRI}}>{fmtBig(a.ownerDraws||0)}</td>
+                        <td style={{padding:'8px 10px',fontWeight:700,color:(a.accrualNet||0)<0?'#991b1b':'#15803d'}}>{fmtBig(a.accrualNet||0)}</td>
+                        <td style={{padding:'8px 10px',color: delta===null ? TEXT_MUTED : (delta<0?'#991b1b':'#15803d')}}>
+                          {delta===null ? '—' : (delta>=0?'+':'') + fmtBig(delta)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{fontSize:10,color:TEXT_MUTED,marginTop:8}}>
+              Snapshots update automatically when the FSA Accrual tab recomputes and the sheet is saved. Sheets without a snapshot (feature flag off, or tab never opened) are hidden from this trend.
+            </div>
+          </div>
+        )}
 
         {/* Linked entities — only render if we have any forward or reverse links */}
         {(linkedForward.length > 0 || linkedReverse.length > 0) && (
@@ -7789,6 +7839,15 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                             title="Credit Summary — upload the written Credit Analysis on the client dashboard and get a committee-ready brief"
                             style={{background:u.features?.creditSummary?'#dcfce7':'#f3f4f6',color:u.features?.creditSummary?'#15803d':'#6b7280',border:'1px solid '+(u.features?.creditSummary?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
                             {u.features?.creditSummary ? '✓ Credit Summary' : 'Credit Summary'}
+                          </button>
+                          <button
+                            onClick={()=>{
+                              const current = u.features || {};
+                              handleUpdateRole(u.id, { features: { ...current, accrualRecon: !current.accrualRecon } });
+                            }}
+                            title="FSA Accrual tab — cash-to-accrual farm income reconciliation for FSA packets"
+                            style={{background:u.features?.accrualRecon?'#dcfce7':'#f3f4f6',color:u.features?.accrualRecon?'#15803d':'#6b7280',border:'1px solid '+(u.features?.accrualRecon?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                            {u.features?.accrualRecon ? '✓ FSA Accrual' : 'FSA Accrual'}
                           </button>
                         </div>
                       )}
@@ -18473,6 +18532,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           onClick={()=>setActiveTab("inspection")}>
           🌾 Ag Inspection
         </button>
+        {/* FSA accrual-reconciliation tab — per-user feature flag so lenders
+            who don't do FSA reporting aren't cluttered with it. */}
+        {!!profile?.features?.accrualRecon && (
+          <button className={"tab-btn" + (activeTab === "accrual" ? " tab-active" : "")}
+            onClick={()=>setActiveTab("accrual")}>
+            📊 FSA Accrual
+          </button>
+        )}
       </div>
 
       {activeTab === "balance" && (
@@ -19082,6 +19149,243 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           <InspectionView data={data} setData={setData} />
         </div>
       )}
+
+      {activeTab === "accrual" && !!profile?.features?.accrualRecon && (
+        <AccrualReconTab
+          data={data} setData={setData}
+          savedSheets={savedSheets}
+          budgetTotalIncome={budgetTotalIncome}
+          budgetTotalExpenses={budgetTotalExpenses}
+          sheetTotals={sheetTotals}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── AccrualReconTab ─────────────────────────────────────────────────────────
+// Cash-to-accrual farm income reconciliation. Pulls the prior saved sheet
+// (same folder / client, nearest-prior as-of date), computes BS deltas on
+// current-asset and current-liability lines, and bridges the cash-basis
+// budget income down to accrual net farm income suitable for FSA packets.
+// Owner draws are entered right here on the tab — NOT read from the budget —
+// per the lender's spec.
+function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budgetTotalExpenses, sheetTotals }) {
+  const [priorSheet, setPriorSheet] = React.useState(null);
+  const [priorLoading, setPriorLoading] = React.useState(true);
+  const [priorError, setPriorError] = React.useState('');
+
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmtMoney = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+
+  // Load the nearest prior sheet for this client. Match by folder when
+  // available (same policy as the comparison tab), fall back to exact
+  // client-name match. Prior = most recent sheet with asOfDate STRICTLY
+  // less than this sheet's asOfDate.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPriorLoading(true); setPriorError('');
+      try {
+        const anchor = data.asOfDate;
+        if (!anchor) { setPriorSheet(null); setPriorLoading(false); return; }
+        const folderKey = JSON.stringify(data.folderPath || []);
+        const candidates = (savedSheets||[]).filter(s => {
+          if (!s.asOfDate || s.asOfDate >= anchor) return false;
+          const sameFolder = (data.folderPath && data.folderPath.length > 0)
+            && JSON.stringify(s.folderPath || []) === folderKey;
+          const sameClient = s.clientName === data.clientName;
+          return sameFolder || sameClient;
+        }).sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+        const pick = candidates[0];
+        if (!pick) {
+          if (!cancelled) { setPriorSheet(null); setPriorError('No prior sheet found for this client.'); setPriorLoading(false); }
+          return;
+        }
+        const item = await storage.get(pick.key);
+        if (!item) { if (!cancelled) { setPriorSheet(null); setPriorError('Prior sheet could not be loaded.'); setPriorLoading(false); } return; }
+        const p = JSON.parse(item.value);
+        if (!cancelled) { setPriorSheet({ data: p, asOfDate: pick.asOfDate }); setPriorLoading(false); }
+      } catch (e) {
+        if (!cancelled) { setPriorError(String(e.message||e)); setPriorLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [data.clientName, data.asOfDate, JSON.stringify(data.folderPath||[]), (savedSheets||[]).map(s=>`${s.key}@${s.savedAt||''}`).join('|')]);
+
+  // ── Compute each BS line on both the prior and current sheet. These are
+  //     the same formulas sheetTotals uses, but we need them per-line rather
+  //     than rolled up so we can show the deltas on the accrual bridge.
+  const curTotals  = sheetTotals(data) || {};
+  const priTotals  = priorSheet ? (sheetTotals(priorSheet.data) || {}) : {};
+
+  // Accrual adjustments (source line keys match sheetTotals output). A
+  // positive delta on an asset = more value tied up at year-end than at
+  // year-start → ADDS to accrual income (crop you grew but didn't sell).
+  // A positive delta on a liability = more owed at year-end → REDUCES
+  // accrual income (expense incurred but not yet paid in cash).
+  const bridge = [
+    { label: 'Cash farm income (budget)',          amt: n(budgetTotalIncome), kind:'base' },
+    { label: 'Δ Accounts Receivable',              amt: n(curTotals['Receivables']) - n(priTotals['Receivables']),              kind:'add', prior: n(priTotals['Receivables']),              curr: n(curTotals['Receivables']) },
+    { label: 'Δ Crop & Farm Products inventory',   amt: n(curTotals['Farm Products']) - n(priTotals['Farm Products']),          kind:'add', prior: n(priTotals['Farm Products']),          curr: n(curTotals['Farm Products']) },
+    { label: 'Δ Market Livestock inventory',       amt: n(curTotals['Market Livestock']) - n(priTotals['Market Livestock']),    kind:'add', prior: n(priTotals['Market Livestock']),    curr: n(curTotals['Market Livestock']) },
+    { label: 'Δ Crop Investment (prepaid inputs)', amt: n(curTotals['Crop Investment']) - n(priTotals['Crop Investment']),      kind:'add', prior: n(priTotals['Crop Investment']),      curr: n(curTotals['Crop Investment']) },
+    { label: 'Δ Supplies on hand',                 amt: n(curTotals['Supplies']) - n(priTotals['Supplies']),                    kind:'add', prior: n(priTotals['Supplies']),            curr: n(curTotals['Supplies']) },
+    { label: 'Cash operating expenses (budget)',   amt: -n(budgetTotalExpenses), kind:'base' },
+    { label: 'Δ Accounts Payable',                 amt: -(n(curTotals['Accounts Due']) - n(priTotals['Accounts Due'])),         kind:'sub', prior: n(priTotals['Accounts Due']),        curr: n(curTotals['Accounts Due']) },
+    { label: 'Δ Operating Note balance',           amt: -(n(curTotals['Operating Notes']) - n(priTotals['Operating Notes'])),   kind:'sub', prior: n(priTotals['Operating Notes']),     curr: n(curTotals['Operating Notes']) },
+    { label: 'Δ Other Current Liabilities',        amt: -(n(curTotals['Other Current Liab']) - n(priTotals['Other Current Liab'])), kind:'sub', prior: n(priTotals['Other Current Liab']), curr: n(curTotals['Other Current Liab']) },
+    { label: 'Δ Income Taxes Due',                 amt: -(n(curTotals['Income Taxes Due']) - n(priTotals['Income Taxes Due'])), kind:'sub', prior: n(priTotals['Income Taxes Due']),    curr: n(curTotals['Income Taxes Due']) },
+  ];
+  const draws = n(data.accrualOwnerDraws);
+  const subtotal = bridge.reduce((s,r)=>s+r.amt, 0);
+  const accrualNet = subtotal - draws;
+
+  // Persist the computed accrual bridge to the sheet so the dashboard
+  // can show year-over-year trend lines without re-running the scan.
+  // Only write when something materially changed, to avoid a feedback
+  // loop. Snapshot shape kept small — totals + the bridge rows.
+  React.useEffect(() => {
+    if (priorLoading) return;             // wait for prior to resolve first
+    if (!data.clientName || !data.asOfDate) return;
+    const snap = {
+      asOfDate: data.asOfDate,
+      priorAsOfDate: priorSheet?.asOfDate || null,
+      cashIncome: n(budgetTotalIncome),
+      cashExpenses: n(budgetTotalExpenses),
+      subtotal,
+      ownerDraws: draws,
+      accrualNet,
+      bridge: bridge.map(b => ({ label: b.label, amt: b.amt, prior: b.prior||0, curr: b.curr||0, kind: b.kind })),
+      computedAt: new Date().toISOString(),
+    };
+    const existing = data.accrualSnapshot;
+    const same = existing
+      && existing.subtotal === snap.subtotal
+      && existing.ownerDraws === snap.ownerDraws
+      && existing.accrualNet === snap.accrualNet
+      && existing.priorAsOfDate === snap.priorAsOfDate;
+    if (same) return;
+    setData({ ...data, accrualSnapshot: snap });
+  // Deps: numeric inputs that would change the bridge.
+  // eslint-disable-next-line
+  }, [subtotal, draws, accrualNet, priorSheet?.asOfDate, priorLoading]);
+
+  const printPage = () => {
+    const rows = bridge.map(b => {
+      const detail = b.kind === 'base'
+        ? ''
+        : `<span style="color:#666;font-size:10px;">(${fmtMoney(b.prior)} → ${fmtMoney(b.curr)})</span>`;
+      return `<tr>
+        <td style="padding:4px 8px;border-bottom:1px solid #eee;">${b.label} ${detail}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;${b.amt<0?'color:#991b1b;':''}">${fmtMoney(b.amt)}</td>
+      </tr>`;
+    }).join('');
+    const W = window.open('','_blank','width=800,height=1000');
+    if (!W) { alert('Please allow popups to print.'); return; }
+    W.document.write(`<!doctype html><html><head><title>FSA Accrual — ${data.clientName}</title>
+      <style>
+        @page { size: letter; margin: 0.6in; }
+        body { font-family: Arial, sans-serif; font-size:12px; color:#111; }
+        h1 { font-size:18px; margin:0 0 4px; }
+        .sub { font-size:11px; color:#555; margin-bottom:14px; }
+        table { width:100%; border-collapse:collapse; margin-bottom:14px; }
+        th { text-align:left; padding:4px 8px; background:#f5f5f5; border-bottom:2px solid #333; font-size:11px; }
+        .totals-row td { font-weight:700; border-top:2px solid #333; padding-top:6px; }
+        .final td { font-weight:800; font-size:14px; border-top:3px double #333; padding-top:8px; }
+        .sig { margin-top:30px; display:flex; gap:40px; font-size:11px; }
+        .sig .line { flex:1; border-top:1px solid #333; padding-top:3px; }
+      </style></head><body>
+      <h1>Cash-to-Accrual Reconciliation</h1>
+      <div class="sub"><strong>${data.clientName||''}</strong> · For the period ending ${data.asOfDate||''} · Prior-period reference: ${priorSheet?.asOfDate||'(no prior sheet)'}</div>
+      <table>
+        <thead><tr><th>Line</th><th style="text-align:right;">Amount</th></tr></thead>
+        <tbody>
+          ${rows}
+          <tr class="totals-row"><td>Subtotal</td><td style="text-align:right;">${fmtMoney(subtotal)}</td></tr>
+          <tr><td>Less: Owner draws / family living</td><td style="text-align:right;color:#991b1b;">-${fmtMoney(draws)}</td></tr>
+          <tr class="final"><td>Accrual Net Farm Income</td><td style="text-align:right;">${fmtMoney(accrualNet)}</td></tr>
+        </tbody>
+      </table>
+      <div class="sig">
+        <div class="line">Borrower signature / date</div>
+        <div class="line">Lender signature / date</div>
+      </div>
+      <script>window.onload=function(){window.print();}</script>
+      </body></html>`);
+    W.document.close();
+  };
+
+  return (
+    <div style={{padding:'18px 22px',maxWidth:960,margin:'0 auto'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <div>
+          <div style={{fontSize:'1.15rem',fontWeight:800,color:'#6B0E1E'}}>📊 FSA Accrual Reconciliation</div>
+          <div style={{fontSize:'.78rem',color:'#555'}}>
+            Bridges cash-basis budget income to accrual net farm income using balance-sheet deltas.
+            {priorSheet ? ` Comparing ${priorSheet.asOfDate} → ${data.asOfDate}.` : ''}
+          </div>
+        </div>
+        <button onClick={printPage}
+          style={{background:'#1B4332',color:'white',border:'none',borderRadius:6,padding:'7px 16px',fontSize:'.85rem',fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+          🖨 Print / Save PDF
+        </button>
+      </div>
+
+      {priorLoading && <div style={{color:'#555',fontStyle:'italic'}}>Loading prior sheet…</div>}
+      {!priorLoading && priorError && (
+        <div style={{background:'#fef3c7',border:'1px solid #fcd34d',padding:'10px 14px',borderRadius:6,color:'#78350f',fontSize:'.8rem',marginBottom:12}}>
+          ⚠ {priorError} All deltas are being computed against a zero baseline — figures will overstate the accrual swing until a prior sheet exists.
+        </div>
+      )}
+
+      <table style={{width:'100%',borderCollapse:'collapse',background:'white',borderRadius:8,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
+        <thead>
+          <tr style={{background:'#f7f3f0'}}>
+            <th style={{textAlign:'left',padding:'8px 12px',fontSize:'.75rem',color:'#6B0E1E',borderBottom:'2px solid #6B0E1E'}}>Line</th>
+            <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.75rem',color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',width:140}}>Prior</th>
+            <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.75rem',color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',width:140}}>Current</th>
+            <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.75rem',color:'#6B0E1E',borderBottom:'2px solid #6B0E1E',width:140}}>Adjustment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bridge.map((b,i) => (
+            <tr key={i} style={{background: b.kind==='base' ? '#fafaf7' : 'white'}}>
+              <td style={{padding:'6px 12px',fontSize:'.82rem',borderBottom:'1px solid #f0f0f0',fontWeight: b.kind==='base'?600:400}}>{b.label}</td>
+              <td style={{padding:'6px 12px',textAlign:'right',fontSize:'.78rem',color:'#888',borderBottom:'1px solid #f0f0f0'}}>{b.kind==='base' ? '—' : fmtMoney(b.prior||0)}</td>
+              <td style={{padding:'6px 12px',textAlign:'right',fontSize:'.78rem',color:'#888',borderBottom:'1px solid #f0f0f0'}}>{b.kind==='base' ? '—' : fmtMoney(b.curr||0)}</td>
+              <td style={{padding:'6px 12px',textAlign:'right',fontSize:'.85rem',fontWeight:600,color: b.amt<0?'#991b1b':'#111',borderBottom:'1px solid #f0f0f0'}}>{fmtMoney(b.amt)}</td>
+            </tr>
+          ))}
+          <tr>
+            <td style={{padding:'10px 12px',fontWeight:700,fontSize:'.85rem',borderTop:'2px solid #333'}}>Subtotal</td>
+            <td colSpan={2}></td>
+            <td style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:'.9rem',borderTop:'2px solid #333'}}>{fmtMoney(subtotal)}</td>
+          </tr>
+          <tr>
+            <td style={{padding:'10px 12px',fontSize:'.82rem'}}>Less: Owner draws / family living</td>
+            <td colSpan={2}></td>
+            <td style={{padding:'10px 12px',textAlign:'right'}}>
+              <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                <span>$</span>
+                <input type="text" value={data.accrualOwnerDraws||''}
+                  onChange={e => setData({...data, accrualOwnerDraws: e.target.value.replace(/[^0-9.]/g,'')})}
+                  placeholder="0"
+                  style={{width:100,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'4px 6px',fontSize:'.85rem',fontFamily:'inherit'}} />
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style={{padding:'14px 12px',fontWeight:800,fontSize:'1rem',borderTop:'3px double #333',color:'#6B0E1E'}}>Accrual Net Farm Income</td>
+            <td colSpan={2}></td>
+            <td style={{padding:'14px 12px',textAlign:'right',fontWeight:800,fontSize:'1.05rem',borderTop:'3px double #333',color: accrualNet<0?'#991b1b':'#15803d'}}>{fmtMoney(accrualNet)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={{marginTop:14,fontSize:'.72rem',color:'#666',lineHeight:1.5}}>
+        <strong>How this works:</strong> Positive deltas on current assets (inventory, receivables, prepaid inputs) ADD to accrual income — the client produced value they haven't yet received cash for. Positive deltas on current liabilities (payables, operating note, accrued taxes) SUBTRACT — cash the client hasn't yet paid for expenses already incurred. Owner draws are not an expense; they reduce net income only for family-living analysis. Save the sheet after changing owner draws to persist the figure.
+      </div>
     </div>
   );
 }
