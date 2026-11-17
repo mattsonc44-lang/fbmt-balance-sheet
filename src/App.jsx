@@ -19404,98 +19404,102 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         const reDebtPmt = (data.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
         const reCurPmt  = (data.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
         const totalDebtSvc = termPrin + reDebtPmt + reCurPmt;
-        // Budgeted expenses still owed — expenses the budget planned for
-        // but the client hasn't paid in cash yet. Added back to projected
-        // cash because that cash never left the account.
-        const stillOwed = n(data.accrualBudgetedExpensesOwed);
-        const customAddBacks = Array.isArray(data.accrualCustomAddBacks) ? data.accrualCustomAddBacks : [];
-        const customAddBackTotal = customAddBacks.reduce((s,r)=>s+n(r.amount),0);
-        const projectedCashFlow = n(budgetTotalIncome) - n(budgetTotalExpenses) + stillOwed + customAddBackTotal - totalDebtSvc - draws;
-        const priorCash = n(priTotals['Cash & Bank']);
-        const curCash   = n(curTotals['Cash & Bank']);
-        const actualChange = curCash - priorCash;
-        const variance = actualChange - projectedCashFlow;
+        // Post-harvest settlement model: the lender isn't projecting a full
+        // year any more — the crop is in the bin (or sold), harvest cash
+        // has already landed, and what's left is to figure out whether the
+        // resources on hand will cover the obligations still to pay. So
+        // start with current cash + saleable inventory, then deduct what's
+        // still owed.
+        const curCash          = n(curTotals['Cash & Bank']);
+        const farmProducts     = n(curTotals['Farm Products']);
+        const mktLivestock     = n(curTotals['Market Livestock']);
+        const totalResources   = curCash + farmProducts + mktLivestock;
+        const stillOwed        = n(data.accrualBudgetedExpensesOwed);
+        const customAddBacks   = Array.isArray(data.accrualCustomAddBacks) ? data.accrualCustomAddBacks : [];
+        const customOwedTotal  = customAddBacks.reduce((s,r)=>s+n(r.amount),0);
+        const totalObligations = stillOwed + customOwedTotal + totalDebtSvc + draws;
+        const projectedEnd     = totalResources - totalObligations;
         return (
           <div style={{marginTop:18,padding:'14px 16px',background:'#fef9f0',border:'1px solid #f0d9b8',borderRadius:8}}>
             <div style={{fontSize:'.85rem',fontWeight:700,color:'#92400e',marginBottom:8}}>
               Year-End Cash Settlement
-              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(ties budget to balance sheet; principal IS included here)</span>
+              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(post-harvest: resources on hand − obligations still to pay)</span>
             </div>
-            {(() => {
-              const projEnd = priorCash + projectedCashFlow;
-              return (
-                <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
-                  <tbody>
-                    <tr><td style={{padding:'4px 0',fontWeight:700}}>Cash on hand — beginning of period {priorSheet?.asOfDate ? `(${priorSheet.asOfDate})` : ''}</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:700}}>{fmtMoney(priorCash)}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>+ Cash farm income (budget)</td><td style={{padding:'4px 0',textAlign:'right',color:'#15803d'}}>+{fmtMoney(n(budgetTotalIncome))}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>− Cash operating expenses (budget)</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(n(budgetTotalExpenses))}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>
-                      + Budgeted expenses still owed (not yet paid in cash)
-                    </td><td style={{padding:'4px 0',textAlign:'right'}}>
-                      <div style={{display:'inline-flex',alignItems:'center',gap:4,color:'#15803d',fontWeight:600}}>
-                        +$
-                        <input type="text" value={data.accrualBudgetedExpensesOwed||''}
-                          onChange={e => setData({...data, accrualBudgetedExpensesOwed: e.target.value.replace(/[^0-9.]/g,'')})}
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <tbody>
+                <tr><td colSpan={2} style={{padding:'6px 0 2px',fontSize:'.72rem',textTransform:'uppercase',letterSpacing:'.05em',color:'#6B0E1E',fontWeight:700}}>Resources on hand ({data.asOfDate||'current'})</td></tr>
+                <tr><td style={{padding:'4px 0'}}>Cash &amp; Bank</td><td style={{padding:'4px 0',textAlign:'right'}}>{fmtMoney(curCash)}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>+ Farm products on hand</td><td style={{padding:'4px 0',textAlign:'right',color:'#15803d'}}>+{fmtMoney(farmProducts)}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>+ Market livestock on hand</td><td style={{padding:'4px 0',textAlign:'right',color:'#15803d'}}>+{fmtMoney(mktLivestock)}</td></tr>
+                <tr><td style={{padding:'6px 0',borderTop:'1px solid #e0c5a0',fontWeight:700}}>= Total resources available</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #e0c5a0',fontWeight:700}}>{fmtMoney(totalResources)}</td></tr>
+
+                <tr><td colSpan={2} style={{padding:'10px 0 2px',fontSize:'.72rem',textTransform:'uppercase',letterSpacing:'.05em',color:'#6B0E1E',fontWeight:700}}>Obligations still to pay</td></tr>
+                <tr><td style={{padding:'4px 0'}}>
+                  Budgeted expenses still to pay
+                </td><td style={{padding:'4px 0',textAlign:'right'}}>
+                  <div style={{display:'inline-flex',alignItems:'center',gap:4,color:'#991b1b',fontWeight:600}}>
+                    -$
+                    <input type="text" value={data.accrualBudgetedExpensesOwed||''}
+                      onChange={e => setData({...data, accrualBudgetedExpensesOwed: e.target.value.replace(/[^0-9.]/g,'')})}
+                      placeholder="0"
+                      style={{width:90,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+                  </div>
+                </td></tr>
+                {customAddBacks.map((row, i) => (
+                  <tr key={i}>
+                    <td style={{padding:'4px 0'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{color:'#991b1b',fontWeight:600}}>−</span>
+                        <input type="text" value={row.label||''}
+                          onChange={e => {
+                            const next = customAddBacks.map((r,j) => j===i ? {...r, label: e.target.value} : r);
+                            setData({...data, accrualCustomAddBacks: next});
+                          }}
+                          placeholder="e.g. Lease / rent, Crop insurance premium"
+                          style={{flex:1,minWidth:180,border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+                        <button onClick={() => {
+                            const next = customAddBacks.filter((_,j) => j!==i);
+                            setData({...data, accrualCustomAddBacks: next});
+                          }}
+                          title="Remove this line"
+                          style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer',fontSize:'.9rem',padding:'0 4px'}}>×</button>
+                      </div>
+                    </td>
+                    <td style={{padding:'4px 0',textAlign:'right'}}>
+                      <div style={{display:'inline-flex',alignItems:'center',gap:4,color:'#991b1b',fontWeight:600}}>
+                        -$
+                        <input type="text" value={row.amount||''}
+                          onChange={e => {
+                            const v = e.target.value.replace(/[^0-9.]/g,'');
+                            const next = customAddBacks.map((r,j) => j===i ? {...r, amount: v} : r);
+                            setData({...data, accrualCustomAddBacks: next});
+                          }}
                           placeholder="0"
                           style={{width:90,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
                       </div>
-                    </td></tr>
-                    {customAddBacks.map((row, i) => (
-                      <tr key={i}>
-                        <td style={{padding:'4px 0'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:6}}>
-                            <span style={{color:'#15803d',fontWeight:600}}>+</span>
-                            <input type="text" value={row.label||''}
-                              onChange={e => {
-                                const next = customAddBacks.map((r,j) => j===i ? {...r, label: e.target.value} : r);
-                                setData({...data, accrualCustomAddBacks: next});
-                              }}
-                              placeholder="e.g. Lease / rent, Crop insurance premium"
-                              style={{flex:1,minWidth:180,border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
-                            <button onClick={() => {
-                                const next = customAddBacks.filter((_,j) => j!==i);
-                                setData({...data, accrualCustomAddBacks: next});
-                              }}
-                              title="Remove this line"
-                              style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer',fontSize:'.9rem',padding:'0 4px'}}>×</button>
-                          </div>
-                        </td>
-                        <td style={{padding:'4px 0',textAlign:'right'}}>
-                          <div style={{display:'inline-flex',alignItems:'center',gap:4,color:'#15803d',fontWeight:600}}>
-                            +$
-                            <input type="text" value={row.amount||''}
-                              onChange={e => {
-                                const v = e.target.value.replace(/[^0-9.]/g,'');
-                                const next = customAddBacks.map((r,j) => j===i ? {...r, amount: v} : r);
-                                setData({...data, accrualCustomAddBacks: next});
-                              }}
-                              placeholder="0"
-                              style={{width:90,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td colSpan={2} style={{padding:'4px 0'}}>
-                        <button onClick={() => setData({...data, accrualCustomAddBacks: [...customAddBacks, {label:'',amount:''}]})}
-                          style={{background:'transparent',color:'#15803d',border:'1px dashed #15803d',borderRadius:5,padding:'3px 10px',fontSize:'.72rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-                          + Add line (lease/rent, crop insurance, etc.)
-                        </button>
-                      </td>
-                    </tr>
-                    <tr><td style={{padding:'4px 0'}}>− Principal payments on term / RE debt</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(totalDebtSvc)}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>− Owner draws / family living</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(draws)}</td></tr>
-                    <tr><td style={{padding:'6px 0',borderTop:'1px solid #e0c5a0',fontWeight:700}}>= Projected cash on hand — end of period</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #e0c5a0',fontWeight:700,color:projEnd<0?'#991b1b':'#15803d'}}>{fmtMoney(projEnd)}</td></tr>
-                    <tr><td style={{padding:'4px 0',fontSize:'.78rem',color:'#555'}}>Actual cash on hand — end of period ({data.asOfDate||'current'})</td><td style={{padding:'4px 0',textAlign:'right',fontWeight:600,color:'#111'}}>{fmtMoney(curCash)}</td></tr>
-                    <tr><td style={{padding:'6px 0',borderTop:'2px solid #92400e',fontWeight:800,color:'#92400e'}}>Unexplained variance (actual − projected)</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'2px solid #92400e',fontWeight:800,color: Math.abs(variance) < 2000 ? '#15803d' : '#92400e'}}>{fmtMoney(variance)}</td></tr>
-                  </tbody>
-                </table>
-              );
-            })()}
+                    </td>
+                  </tr>
+                ))}
+                <tr>
+                  <td colSpan={2} style={{padding:'4px 0'}}>
+                    <button onClick={() => setData({...data, accrualCustomAddBacks: [...customAddBacks, {label:'',amount:''}]})}
+                      style={{background:'transparent',color:'#991b1b',border:'1px dashed #991b1b',borderRadius:5,padding:'3px 10px',fontSize:'.72rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                      + Add line (lease/rent, crop insurance, etc.)
+                    </button>
+                  </td>
+                </tr>
+                <tr><td style={{padding:'4px 0'}}>Principal payments remaining (term + RE debt)</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(totalDebtSvc)}</td></tr>
+                <tr><td style={{padding:'4px 0'}}>Owner draws / family living remaining</td><td style={{padding:'4px 0',textAlign:'right',color:'#991b1b'}}>-{fmtMoney(draws)}</td></tr>
+                <tr><td style={{padding:'6px 0',borderTop:'1px solid #e0c5a0',fontWeight:700}}>= Total obligations</td><td style={{padding:'6px 0',textAlign:'right',borderTop:'1px solid #e0c5a0',fontWeight:700,color:'#991b1b'}}>-{fmtMoney(totalObligations)}</td></tr>
+
+                <tr><td style={{padding:'10px 0',borderTop:'2px solid #92400e',fontWeight:800,color:'#92400e',fontSize:'.9rem'}}>Projected year-end cash position</td><td style={{padding:'10px 0',textAlign:'right',borderTop:'2px solid #92400e',fontWeight:800,color: projectedEnd<0?'#991b1b':'#15803d',fontSize:'.95rem'}}>{fmtMoney(projectedEnd)}</td></tr>
+              </tbody>
+            </table>
             <div style={{fontSize:'.68rem',color:'#666',marginTop:6,lineHeight:1.5}}>
-              {Math.abs(variance) < 2000
-                ? '✓ Within $2,000 — the year ties out cleanly.'
-                : 'A variance means something moved cash that wasn\'t in the budget: new borrowings, asset sales, capital contributions or purchases, prior-year receivables collected, etc. Walk through each with the client before signing off.'}
+              {projectedEnd >= 0
+                ? '✓ Resources on hand cover remaining obligations — the client will finish the year with a positive cash position.'
+                : '⚠ Resources on hand do NOT cover remaining obligations — the client needs to either sell more inventory, draw on operating credit, or defer payments to close the year.'}
+              {' '}Farm products and market livestock are counted at book value; adjust the valuations on the balance sheet if current market prices differ materially.
             </div>
           </div>
         );
