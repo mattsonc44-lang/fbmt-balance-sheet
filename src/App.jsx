@@ -6917,7 +6917,7 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
             sheet). */}
         {sheetSummaries.some(s => s.accrual) && (
           <div style={{background:CARD_BG,border:CARD_BORDER,borderRadius:8,padding:'18px',marginBottom:12}}>
-            {cardHeader('Accrual income trend', 'FSA reconciliation · year over year')}
+            {cardHeader('Accrual income trend', 'Year reconciliation · year over year')}
             <div style={{overflowX:'auto'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                 <thead>
@@ -6956,7 +6956,7 @@ Rules: Cite dollar amounts and ratios. Reference year-over-year changes only if 
               </table>
             </div>
             <div style={{fontSize:10,color:TEXT_MUTED,marginTop:8}}>
-              Snapshots update automatically when the FSA Accrual tab recomputes and the sheet is saved. Sheets without a snapshot (feature flag off, or tab never opened) are hidden from this trend.
+              Snapshots update automatically when the Year Reconciliations tab recomputes and the sheet is saved. Sheets without a snapshot (feature flag off, or tab never opened) are hidden from this trend.
             </div>
           </div>
         )}
@@ -7845,9 +7845,9 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                               const current = u.features || {};
                               handleUpdateRole(u.id, { features: { ...current, accrualRecon: !current.accrualRecon } });
                             }}
-                            title="FSA Accrual tab — cash-to-accrual farm income reconciliation for FSA packets"
+                            title="Year Reconciliations tab — cash-to-accrual farm income reconciliation, year-end cash settlement, and budget vs actual"
                             style={{background:u.features?.accrualRecon?'#dcfce7':'#f3f4f6',color:u.features?.accrualRecon?'#15803d':'#6b7280',border:'1px solid '+(u.features?.accrualRecon?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
-                            {u.features?.accrualRecon ? '✓ FSA Accrual' : 'FSA Accrual'}
+                            {u.features?.accrualRecon ? '✓ Year Reconciliations' : 'Year Reconciliations'}
                           </button>
                         </div>
                       )}
@@ -18532,12 +18532,12 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           onClick={()=>setActiveTab("inspection")}>
           🌾 Ag Inspection
         </button>
-        {/* FSA accrual-reconciliation tab — per-user feature flag so lenders
-            who don't do FSA reporting aren't cluttered with it. */}
+        {/* Year reconciliation tab — per-user feature flag so lenders who
+            don't run year-end tie-outs aren't cluttered with it. */}
         {!!profile?.features?.accrualRecon && (
           <button className={"tab-btn" + (activeTab === "accrual" ? " tab-active" : "")}
             onClick={()=>setActiveTab("accrual")}>
-            📊 FSA Accrual
+            📊 Year Reconciliations
           </button>
         )}
       </div>
@@ -19293,7 +19293,7 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
     }).join('');
     const W = window.open('','_blank','width=800,height=1000');
     if (!W) { alert('Please allow popups to print.'); return; }
-    W.document.write(`<!doctype html><html><head><title>FSA Accrual — ${data.clientName}</title>
+    W.document.write(`<!doctype html><html><head><title>Year Reconciliation — ${data.clientName}</title>
       <style>
         @page { size: letter; margin: 0.6in; }
         body { font-family: Arial, sans-serif; font-size:12px; color:#111; }
@@ -19306,7 +19306,7 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         .sig { margin-top:30px; display:flex; gap:40px; font-size:11px; }
         .sig .line { flex:1; border-top:1px solid #333; padding-top:3px; }
       </style></head><body>
-      <h1>Cash-to-Accrual Reconciliation</h1>
+      <h1>Year Reconciliation</h1>
       <div class="sub"><strong>${data.clientName||''}</strong> · For the period ending ${data.asOfDate||''} · Prior-period reference: ${priorSheet?.asOfDate||'(no prior sheet)'}</div>
       <table>
         <thead><tr><th>Line</th><th style="text-align:right;">Amount</th></tr></thead>
@@ -19330,9 +19330,9 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
     <div style={{padding:'18px 22px',maxWidth:960,margin:'0 auto'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
         <div>
-          <div style={{fontSize:'1.15rem',fontWeight:800,color:'#6B0E1E'}}>📊 FSA Accrual Reconciliation</div>
+          <div style={{fontSize:'1.15rem',fontWeight:800,color:'#6B0E1E'}}>📊 Year Reconciliations</div>
           <div style={{fontSize:'.78rem',color:'#555'}}>
-            Bridges cash-basis budget income to accrual net farm income using balance-sheet deltas.
+            Cash-to-accrual bridge, post-harvest cash settlement, and budget vs actual expenses — all in one place.
             {priorSheet ? ` Comparing ${priorSheet.asOfDate} → ${data.asOfDate}.` : ''}
           </div>
         </div>
