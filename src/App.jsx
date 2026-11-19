@@ -19677,22 +19677,42 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
               </tbody>
             </table>
 
-            {/* Projected position */}
-            <table style={{width:'100%',borderCollapse:'collapse',marginTop:14}}>
-              <tbody>
-                <tr>
-                  <td style={{padding:'10px 10px',fontSize:'.82rem',color:'#555'}}>Remaining obligations (Budget − Actual, if still to pay)</td>
-                  <td style={{padding:'10px 10px',textAlign:'right',fontWeight:600}}>-{fmtMoney(stillToPay)}</td>
-                </tr>
-                <tr style={{borderTop:'3px double #92400e'}}>
-                  <td style={{padding:'10px 10px',fontWeight:800,fontSize:'.95rem',color:'#92400e'}}>Projected year-end cash position</td>
-                  <td style={{padding:'10px 10px',textAlign:'right',fontWeight:800,fontSize:'1rem',color: projectedEnd<0?'#991b1b':'#15803d'}}>{fmtMoney(projectedEnd)}</td>
-                </tr>
-              </tbody>
-            </table>
+            {/* Shake-out: compute ending cash both ways — once using the
+                Budgeted column (what the plan said would happen) and
+                once using the Actual column (what's actually gone out
+                the door). Last column is the over/(under) variance. */}
+            {(() => {
+              const budgetedShake = totalResources - expBudget;
+              const actualShake   = totalResources - expActual;
+              const shakeVar      = actualShake - budgetedShake; // = expBudget − expActual
+              return (
+                <table style={{width:'100%',borderCollapse:'collapse',marginTop:16,background:'#fdf0d8',borderRadius:6,overflow:'hidden'}}>
+                  <thead>
+                    <tr style={{borderBottom:'2px solid #92400e'}}>
+                      <th style={{...colHeader,textAlign:'left'}}>Year-end shake-out</th>
+                      <th style={colHeader}>Budgeted</th>
+                      <th style={colHeader}>Actual</th>
+                      <th style={colHeader}>Over / (Under)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td style={td}>Total resources available</td><td style={tdRightMoney}>{fmtMoney(totalResources)}</td><td style={tdRightMoney}>{fmtMoney(totalResources)}</td><td style={{...tdRightMoney,color:'#aaa'}}>—</td></tr>
+                    <tr><td style={td}>Total expenses &amp; obligations</td><td style={{...tdRightMoney,color:'#991b1b'}}>-{fmtMoney(expBudget)}</td><td style={{...tdRightMoney,color:'#991b1b'}}>-{fmtMoney(expActual)}</td><td style={{...tdRightMoney,fontWeight:600,color: varTotal > 0 ? '#991b1b' : (varTotal < 0 ? '#15803d' : '#111')}}>{varTotal >= 0 ? fmtMoney(varTotal) : '(' + fmtMoney(Math.abs(varTotal)) + ')'}</td></tr>
+                    <tr style={{borderTop:'3px double #92400e'}}>
+                      <td style={{...td,fontWeight:800,fontSize:'.95rem',color:'#92400e'}}>Projected year-end cash position</td>
+                      <td style={{...tdRightMoney,fontWeight:800,fontSize:'.95rem',color: budgetedShake<0?'#991b1b':'#15803d'}}>{fmtMoney(budgetedShake)}</td>
+                      <td style={{...tdRightMoney,fontWeight:800,fontSize:'.95rem',color: actualShake<0?'#991b1b':'#15803d'}}>{fmtMoney(actualShake)}</td>
+                      <td style={{...tdRightMoney,fontWeight:800,fontSize:'.95rem',color: shakeVar === 0 ? '#111' : (shakeVar > 0 ? '#15803d' : '#991b1b')}}>
+                        {shakeVar === 0 ? '—' : (shakeVar > 0 ? '+' + fmtMoney(shakeVar) : '(' + fmtMoney(Math.abs(shakeVar)) + ')')}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
 
             <div style={{fontSize:'.68rem',color:'#666',marginTop:8,lineHeight:1.5}}>
-              <strong>How to read this:</strong> Resources at the top are the client's "payable" assets as of this balance sheet. Expenses below show what was planned (Budgeted) vs what's already been paid (Actual). Red = overspent, green = under. The projected position subtracts anything still unpaid from the resources on hand — if negative, the client needs more income, inventory sales, or operating credit before year-end.
+              <strong>How to read this:</strong> Resources at the top are the client's "payable" assets as of this balance sheet. Expenses below show what was planned (Budgeted) vs what's already been paid (Actual) — red = overspent, green = under. The shake-out at the bottom computes the ending cash position two ways: what the budget said would happen, and what's actually shaking out so far. Last column shows whether the client is coming in better or worse than planned.
             </div>
           </div>
         );
