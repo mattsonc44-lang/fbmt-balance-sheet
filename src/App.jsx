@@ -19420,14 +19420,43 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
           setData({...data, budgetExpenses: next});
         };
 
-        // Debt payments as their own expense lines. Annual = budgeted;
-        // paid-YTD is stored on data.accrualTermDebtPaid / reDebtPaid so
-        // the lender tracks what the client has already cut a check for.
-        const termAnnual = (data.intermediatDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
-        const reDebtAnn  = (data.reDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0)
-                         + (data.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
-        const termPaid   = n2(data.accrualTermDebtPaid);
-        const reDebtPaid = n2(data.accrualReDebtPaid);
+        // Debt payments line-itemed — one row per creditor, matching the
+        // way the budget's Debt Service section displays them. Each row
+        // carries its own "actual paid" value on the debt row itself
+        // (`.accrualPaid`) so the lender can tick each loan off as the
+        // client makes a payment.
+        const termDebtRows = (data.intermediatDebt||[]).map((r,i) => ({
+          section:'intermediatDebt', idx:i,
+          label: r.creditor || '(term debt — no creditor)',
+          sublabel: r.security || '',
+          annual: n2(r.annualPmt),
+          paid:   n2(r.accrualPaid),
+        })).filter(r => r.annual > 0 || r.paid > 0 || r.label !== '(term debt — no creditor)');
+        const reDebtRows = [
+          ...((data.reDebt||[]).map((r,i) => ({
+            section:'reDebt', idx:i,
+            label: r.lienHolder || '(RE debt — no lien holder)',
+            sublabel: r.terms ? `${r.terms}` : '',
+            annual: n2(r.annualPmt),
+            paid:   n2(r.accrualPaid),
+          }))),
+          ...((data.reCurrent||[]).map((r,i) => ({
+            section:'reCurrent', idx:i,
+            label: r.creditor || '(RE current — no creditor)',
+            sublabel: 'legacy current-portion',
+            annual: n2(r.annualPmt),
+            paid:   n2(r.accrualPaid),
+          }))),
+        ].filter(r => r.annual > 0 || r.paid > 0 || !r.label.startsWith('('));
+        // Helper to write .accrualPaid back onto the original debt row.
+        const setDebtPaid = (section, idx, v) => {
+          const arr = (data[section]||[]).map((r,j) => j===idx ? {...r, accrualPaid: v} : r);
+          setData({...data, [section]: arr});
+        };
+        const termAnnual = termDebtRows.reduce((s,r)=>s+r.annual,0);
+        const termPaid   = termDebtRows.reduce((s,r)=>s+r.paid,0);
+        const reDebtAnn  = reDebtRows.reduce((s,r)=>s+r.annual,0);
+        const reDebtPaid = reDebtRows.reduce((s,r)=>s+r.paid,0);
         const drawsBudget = n2(data.accrualOwnerDrawsBudget);
         const drawsPaid   = n2(data.accrualOwnerDraws);  // reuse existing field as "actual"
 
@@ -19537,24 +19566,52 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                   );
                 })}
 
-                {/* Debt + draws rows — the budget side auto-fills from
-                    sheet totals; actual is editable. */}
-                <tr style={{background:'#fff8ea'}}>
-                  <td style={{...td,fontStyle:'italic'}}>Term / intermediate debt — annual payments</td>
-                  <td style={tdRightMoney}>{fmtMoney(termAnnual)}</td>
-                  <td style={tdRightMoney}>{renderActual(data.accrualTermDebtPaid, v => setData({...data, accrualTermDebtPaid: v}))}</td>
-                  <td style={{...tdRightMoney,fontWeight:600,color: termPaid===0?'#aaa':(termPaid-termAnnual>0?'#991b1b':(termPaid-termAnnual<0?'#15803d':'#111'))}}>
-                    {termPaid === 0 ? '—' : (termPaid-termAnnual >= 0 ? fmtMoney(termPaid-termAnnual) : '(' + fmtMoney(Math.abs(termPaid-termAnnual)) + ')')}
-                  </td>
-                </tr>
-                <tr style={{background:'#fff8ea'}}>
-                  <td style={{...td,fontStyle:'italic'}}>RE debt — annual payments</td>
-                  <td style={tdRightMoney}>{fmtMoney(reDebtAnn)}</td>
-                  <td style={tdRightMoney}>{renderActual(data.accrualReDebtPaid, v => setData({...data, accrualReDebtPaid: v}))}</td>
-                  <td style={{...tdRightMoney,fontWeight:600,color: reDebtPaid===0?'#aaa':(reDebtPaid-reDebtAnn>0?'#991b1b':(reDebtPaid-reDebtAnn<0?'#15803d':'#111'))}}>
-                    {reDebtPaid === 0 ? '—' : (reDebtPaid-reDebtAnn >= 0 ? fmtMoney(reDebtPaid-reDebtAnn) : '(' + fmtMoney(Math.abs(reDebtPaid-reDebtAnn)) + ')')}
-                  </td>
-                </tr>
+                {/* Debt rows — one line per loan, matching the Budget tab's
+                    Debt Service section. Each row's "Actual paid" saves
+                    back onto the debt row itself (`.accrualPaid`) so the
+                    lender can check each loan off as the client pays. */}
+                {termDebtRows.length > 0 && (
+                  <tr style={{background:'#fef3e2'}}>
+                    <td colSpan={4} style={{...td,fontSize:'.68rem',textTransform:'uppercase',letterSpacing:'.05em',color:'#92400e',fontWeight:700,borderBottom:'1px solid #e0c5a0'}}>Term / intermediate debt</td>
+                  </tr>
+                )}
+                {termDebtRows.map((row, i) => {
+                  const v = row.paid - row.annual;
+                  return (
+                    <tr key={'term-'+i} style={{background:'#fff8ea'}}>
+                      <td style={{...td,fontStyle:'italic'}}>
+                        {row.label}
+                        {row.sublabel && <span style={{marginLeft:6,fontSize:'.7rem',color:'#999',fontStyle:'normal'}}>· {row.sublabel}</span>}
+                      </td>
+                      <td style={tdRightMoney}>{fmtMoney(row.annual)}</td>
+                      <td style={tdRightMoney}>{renderActual(((data[row.section]||[])[row.idx]||{}).accrualPaid, val => setDebtPaid(row.section, row.idx, val))}</td>
+                      <td style={{...tdRightMoney,fontWeight:600,color: row.paid===0?'#aaa':(v>0?'#991b1b':(v<0?'#15803d':'#111'))}}>
+                        {row.paid === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {reDebtRows.length > 0 && (
+                  <tr style={{background:'#fef3e2'}}>
+                    <td colSpan={4} style={{...td,fontSize:'.68rem',textTransform:'uppercase',letterSpacing:'.05em',color:'#92400e',fontWeight:700,borderBottom:'1px solid #e0c5a0'}}>Real estate debt</td>
+                  </tr>
+                )}
+                {reDebtRows.map((row, i) => {
+                  const v = row.paid - row.annual;
+                  return (
+                    <tr key={'re-'+i} style={{background:'#fff8ea'}}>
+                      <td style={{...td,fontStyle:'italic'}}>
+                        {row.label}
+                        {row.sublabel && <span style={{marginLeft:6,fontSize:'.7rem',color:'#999',fontStyle:'normal'}}>· {row.sublabel}</span>}
+                      </td>
+                      <td style={tdRightMoney}>{fmtMoney(row.annual)}</td>
+                      <td style={tdRightMoney}>{renderActual(((data[row.section]||[])[row.idx]||{}).accrualPaid, val => setDebtPaid(row.section, row.idx, val))}</td>
+                      <td style={{...tdRightMoney,fontWeight:600,color: row.paid===0?'#aaa':(v>0?'#991b1b':(v<0?'#15803d':'#111'))}}>
+                        {row.paid === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
+                      </td>
+                    </tr>
+                  );
+                })}
                 <tr style={{background:'#fff8ea'}}>
                   <td style={{...td,fontStyle:'italic'}}>Owner draws / family living</td>
                   <td style={tdRightMoney}>{renderActual(data.accrualOwnerDrawsBudget, v => setData({...data, accrualOwnerDrawsBudget: v}))}</td>
