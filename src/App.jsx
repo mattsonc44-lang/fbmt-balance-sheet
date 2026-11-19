@@ -19335,8 +19335,8 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         <div>
           <div style={{fontSize:'1.15rem',fontWeight:800,color:'#6B0E1E'}}>📊 Year Reconciliations</div>
           <div style={{fontSize:'.78rem',color:'#555'}}>
-            Cash-to-accrual bridge, post-harvest cash settlement, and budget vs actual expenses — all in one place.
-            {priorSheet ? ` Comparing ${priorSheet.asOfDate} → ${data.asOfDate}.` : ''}
+            Previous-year budget vs this-year actuals, with post-harvest cash shake-out.
+            {priorSheet ? ` Budget from ${priorSheet.asOfDate}, actuals from ${data.asOfDate}.` : ' No prior-year sheet found — Budgeted column will be empty.'}
           </div>
         </div>
         <button onClick={printPage}
@@ -19413,59 +19413,82 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         const mktLivestock     = n2(curTotals['Market Livestock']);
         const totalResources   = curCash + receivables + fedPayments + farmProducts + mktLivestock;
 
-        // Budget expense rows — editable in place, as before.
-        const rows = (data.budgetExpenses||[]);
-        const updateRow = (i, field, val) => {
-          const next = (data.budgetExpenses||[]).map((r,j) => j===i ? {...r, [field]: val} : r);
-          setData({...data, budgetExpenses: next});
+        // Expense rows: BUDGETED comes from the prior-year sheet's budget
+        // (read-only here — edit it on that sheet's Budget tab). ACTUAL is
+        // an entirely separate manual entry per line, stored on the current
+        // sheet under `data.accrualActuals` keyed by description. Nothing
+        // auto-populates — every actual has to be typed in by the lender.
+        const priorExp = Array.isArray(priorSheet?.data?.budgetExpenses) ? priorSheet.data.budgetExpenses : [];
+        const normKey = s => String(s||'').trim().toLowerCase();
+        const actualsMap = (data.accrualActuals && typeof data.accrualActuals === 'object') ? data.accrualActuals : {};
+        const rows = priorExp
+          .filter(pr => pr.description || pr.amount)
+          .map((pr, i) => {
+            const k = normKey(pr.description) || `__unlabeled_${i}`;
+            return {
+              key: k,
+              description: pr.description || '',
+              prepaid: !!pr.prepaid,
+              budget: pr.amount || '',
+              actual: actualsMap[k] || '',
+            };
+          });
+        const updateActual = (row, val) => {
+          const next = { ...actualsMap, [row.key]: val };
+          if (!val) delete next[row.key];
+          setData({...data, accrualActuals: next});
         };
 
-        // Debt payments line-itemed — one row per creditor, matching the
-        // way the budget's Debt Service section displays them. Each row
-        // carries its own "actual paid" value on the debt row itself
-        // (`.accrualPaid`) so the lender can tick each loan off as the
-        // client makes a payment.
-        const termDebtRows = (data.intermediatDebt||[]).map((r,i) => ({
-          section:'intermediatDebt', idx:i,
+        // Debt payments line-itemed from the PRIOR YEAR sheet — those are
+        // the obligations that were scheduled for the current period.
+        // "Paid" is a manual map on the current sheet keyed by
+        // "section:idx" so no current-sheet data bleeds into these rows.
+        const paidMap = (data.accrualDebtPaid && typeof data.accrualDebtPaid === 'object') ? data.accrualDebtPaid : {};
+        const pd = priorSheet?.data || {};
+        const termDebtRows = (pd.intermediatDebt||[]).map((r,i) => ({
+          key:   `intermediatDebt:${i}`,
           label: r.creditor || '(term debt — no creditor)',
           sublabel: r.security || '',
           annual: n2(r.annualPmt),
-          paid:   n2(r.accrualPaid),
+          paid:   n2(paidMap[`intermediatDebt:${i}`]),
         })).filter(r => r.annual > 0 || r.paid > 0 || r.label !== '(term debt — no creditor)');
         const reDebtRows = [
-          ...((data.reDebt||[]).map((r,i) => ({
-            section:'reDebt', idx:i,
+          ...((pd.reDebt||[]).map((r,i) => ({
+            key:   `reDebt:${i}`,
             label: r.lienHolder || '(RE debt — no lien holder)',
             sublabel: r.terms ? `${r.terms}` : '',
             annual: n2(r.annualPmt),
-            paid:   n2(r.accrualPaid),
+            paid:   n2(paidMap[`reDebt:${i}`]),
           }))),
-          ...((data.reCurrent||[]).map((r,i) => ({
-            section:'reCurrent', idx:i,
+          ...((pd.reCurrent||[]).map((r,i) => ({
+            key:   `reCurrent:${i}`,
             label: r.creditor || '(RE current — no creditor)',
             sublabel: 'legacy current-portion',
             annual: n2(r.annualPmt),
-            paid:   n2(r.accrualPaid),
+            paid:   n2(paidMap[`reCurrent:${i}`]),
           }))),
         ].filter(r => r.annual > 0 || r.paid > 0 || !r.label.startsWith('('));
-        // Helper to write .accrualPaid back onto the original debt row.
-        const setDebtPaid = (section, idx, v) => {
-          const arr = (data[section]||[]).map((r,j) => j===idx ? {...r, accrualPaid: v} : r);
-          setData({...data, [section]: arr});
+        const setDebtPaid = (key, v) => {
+          const next = { ...paidMap, [key]: v };
+          if (!v) delete next[key];
+          setData({...data, accrualDebtPaid: next});
         };
         const termAnnual = termDebtRows.reduce((s,r)=>s+r.annual,0);
         const termPaid   = termDebtRows.reduce((s,r)=>s+r.paid,0);
         const reDebtAnn  = reDebtRows.reduce((s,r)=>s+r.annual,0);
         const reDebtPaid = reDebtRows.reduce((s,r)=>s+r.paid,0);
-        const drawsBudget = n2(data.accrualOwnerDrawsBudget);
-        const drawsPaid   = n2(data.accrualOwnerDraws);  // reuse existing field as "actual"
+        // Owner draws budget comes from the prior-year sheet's own setting;
+        // actual (what's been drawn to date) is manual on the current sheet.
+        const drawsBudget = n2(pd.accrualOwnerDrawsBudget);
+        const drawsPaid   = n2(data.accrualOwnerDraws);
 
         // Custom extra rows — "Add line". Each has label / budget / actual.
         const extras = Array.isArray(data.accrualExtraLines) ? data.accrualExtraLines : [];
 
-        // Totals (budget side uses planned amounts; actual side uses what
-        // the lender has entered). Debt + draws budget pulled from sheet.
-        const expBudget = rows.reduce((s,r)=>s+n2(r.amount),0) + termAnnual + reDebtAnn + drawsBudget + extras.reduce((s,r)=>s+n2(r.budget),0);
+        // Totals (budget side uses prior-year amounts for expenses; actual
+        // side uses current-sheet entries). Debt + draws budget still
+        // pulled from the current sheet since debt schedules live there.
+        const expBudget = rows.reduce((s,r)=>s+n2(r.budget),0) + termAnnual + reDebtAnn + drawsBudget + extras.reduce((s,r)=>s+n2(r.budget),0);
         const expActual = rows.reduce((s,r)=>s+n2(r.actual),0) + termPaid + reDebtPaid + drawsPaid + extras.reduce((s,r)=>s+n2(r.actual),0);
         const varTotal  = expActual - expBudget;
 
@@ -19493,8 +19516,10 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         return (
           <div style={{marginTop:18,padding:'14px 16px',background:'#fef9f0',border:'1px solid #f0d9b8',borderRadius:8}}>
             <div style={{fontSize:'.85rem',fontWeight:700,color:'#92400e',marginBottom:10}}>
-              Year-End Cash Settlement
-              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(post-harvest: resources on hand vs. planned and actual outflows)</span>
+              Previous-Year Shake-Out
+              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>
+                (Budgeted pulled from {priorSheet?.asOfDate ? `the ${priorSheet.asOfDate} sheet` : 'the prior-year sheet'} · Actual = this sheet{data.asOfDate ? ` (${data.asOfDate})` : ''})
+              </span>
             </div>
 
             {/* ── Resources (income side) ─────────────────────────── */}
@@ -19529,36 +19554,24 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                 </tr>
               </thead>
               <tbody>
-                {/* Budgeted expense rows — inline-editable */}
+                {/* Budgeted expense rows — Budget pulls from prior-year
+                    sheet (read-only here; edit it on the 2025 sheet's
+                    Budget tab). Actual stays editable and writes back
+                    onto the current sheet. */}
                 {rows.map((r,i) => {
-                  const b = n2(r.amount); const a = n2(r.actual); const v = a - b;
+                  const b = n2(r.budget); const a = n2(r.actual); const v = a - b;
                   return (
-                    <tr key={i}>
+                    <tr key={r.key+'-'+i}>
                       <td style={td}>
                         <div style={{display:'flex',alignItems:'center',gap:6}}>
-                          <input type="text" value={r.description||''}
-                            onChange={e => updateRow(i,'description',e.target.value)}
-                            placeholder="Expense description"
-                            style={{flex:1,minWidth:160,border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit',background:r.description?'transparent':'#fffdf5'}} />
+                          <span style={{flex:1,minWidth:160,fontSize:'.82rem',color:r.description?'#111':'#aaa'}}>
+                            {r.description || '(no description)'}
+                          </span>
                           {r.prepaid ? <span style={{fontSize:'.65rem',color:'#2d5a8e'}}>prepaid</span> : null}
-                          <button onClick={() => {
-                              const next = (data.budgetExpenses||[]).filter((_,j) => j!==i);
-                              setData({...data, budgetExpenses: next.length ? next : [{description:'',amount:'',prepaid:false}]});
-                            }}
-                            title="Remove this expense line"
-                            style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer',fontSize:'.85rem',padding:'0 4px'}}>×</button>
                         </div>
                       </td>
-                      <td style={tdRightMoney}>
-                        <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
-                          <span style={{color:'#888'}}>$</span>
-                          <input type="text" value={r.amount||''}
-                            onChange={e => updateRow(i,'amount',e.target.value.replace(/[^0-9.]/g,''))}
-                            placeholder="0"
-                            style={{width:90,textAlign:'right',border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
-                        </div>
-                      </td>
-                      <td style={tdRightMoney}>{renderActual(r.actual, v => updateRow(i,'actual',v))}</td>
+                      <td style={tdRightMoney}>{b > 0 ? fmtMoney(b) : <span style={{color:'#aaa'}}>—</span>}</td>
+                      <td style={tdRightMoney}>{renderActual(r.actual, val => updateActual(r, val))}</td>
                       <td style={{...tdRightMoney,fontWeight:600,color: a===0 ? '#aaa' : (v > 0 ? '#991b1b' : (v < 0 ? '#15803d' : '#111'))}}>
                         {a === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
                       </td>
@@ -19584,7 +19597,7 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                         {row.sublabel && <span style={{marginLeft:6,fontSize:'.7rem',color:'#999',fontStyle:'normal'}}>· {row.sublabel}</span>}
                       </td>
                       <td style={tdRightMoney}>{fmtMoney(row.annual)}</td>
-                      <td style={tdRightMoney}>{renderActual(((data[row.section]||[])[row.idx]||{}).accrualPaid, val => setDebtPaid(row.section, row.idx, val))}</td>
+                      <td style={tdRightMoney}>{renderActual(paidMap[row.key], val => setDebtPaid(row.key, val))}</td>
                       <td style={{...tdRightMoney,fontWeight:600,color: row.paid===0?'#aaa':(v>0?'#991b1b':(v<0?'#15803d':'#111'))}}>
                         {row.paid === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
                       </td>
@@ -19605,7 +19618,7 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                         {row.sublabel && <span style={{marginLeft:6,fontSize:'.7rem',color:'#999',fontStyle:'normal'}}>· {row.sublabel}</span>}
                       </td>
                       <td style={tdRightMoney}>{fmtMoney(row.annual)}</td>
-                      <td style={tdRightMoney}>{renderActual(((data[row.section]||[])[row.idx]||{}).accrualPaid, val => setDebtPaid(row.section, row.idx, val))}</td>
+                      <td style={tdRightMoney}>{renderActual(paidMap[row.key], val => setDebtPaid(row.key, val))}</td>
                       <td style={{...tdRightMoney,fontWeight:600,color: row.paid===0?'#aaa':(v>0?'#991b1b':(v<0?'#15803d':'#111'))}}>
                         {row.paid === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
                       </td>
@@ -19614,7 +19627,7 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                 })}
                 <tr style={{background:'#fff8ea'}}>
                   <td style={{...td,fontStyle:'italic'}}>Owner draws / family living</td>
-                  <td style={tdRightMoney}>{renderActual(data.accrualOwnerDrawsBudget, v => setData({...data, accrualOwnerDrawsBudget: v}))}</td>
+                  <td style={tdRightMoney}>{drawsBudget > 0 ? fmtMoney(drawsBudget) : <span style={{color:'#aaa'}}>—</span>}</td>
                   <td style={tdRightMoney}>{renderActual(data.accrualOwnerDraws, v => setData({...data, accrualOwnerDraws: v}))}</td>
                   <td style={{...tdRightMoney,fontWeight:600,color: drawsPaid===0?'#aaa':(drawsPaid-drawsBudget>0?'#991b1b':(drawsPaid-drawsBudget<0?'#15803d':'#111'))}}>
                     {drawsPaid === 0 ? '—' : (drawsPaid-drawsBudget >= 0 ? fmtMoney(drawsPaid-drawsBudget) : '(' + fmtMoney(Math.abs(drawsPaid-drawsBudget)) + ')')}
@@ -19655,14 +19668,13 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
 
                 <tr>
                   <td colSpan={4} style={{padding:'6px 10px'}}>
-                    <button onClick={() => setData({...data, budgetExpenses: [...(data.budgetExpenses||[]), {description:'',amount:'',actual:'',prepaid:false}]})}
-                      style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:5,padding:'5px 12px',fontSize:'.72rem',fontWeight:700,cursor:'pointer',fontFamily:'inherit',marginRight:8}}>
-                      + Add expense line
-                    </button>
                     <button onClick={() => setData({...data, accrualExtraLines: [...extras, {label:'',budget:'',actual:''}]})}
                       style={{background:'transparent',color:'#6B0E1E',border:'1px dashed #6B0E1E',borderRadius:5,padding:'4px 10px',fontSize:'.72rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-                      + Add custom line (lease/rent, crop insurance, etc.)
+                      + Add line (for items not on the prior budget)
                     </button>
+                    <span style={{marginLeft:10,fontSize:'.68rem',color:'#888'}}>
+                      To change a Budgeted amount, edit the prior-year sheet's Budget tab.
+                    </span>
                   </td>
                 </tr>
 
@@ -19689,9 +19701,9 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
                 <table style={{width:'100%',borderCollapse:'collapse',marginTop:16,background:'#fdf0d8',borderRadius:6,overflow:'hidden'}}>
                   <thead>
                     <tr style={{borderBottom:'2px solid #92400e'}}>
-                      <th style={{...colHeader,textAlign:'left'}}>Year-end shake-out</th>
-                      <th style={colHeader}>Budgeted</th>
-                      <th style={colHeader}>Actual</th>
+                      <th style={{...colHeader,textAlign:'left'}}>Previous-year shake-out</th>
+                      <th style={colHeader}>Budgeted ({priorSheet?.asOfDate || 'prior'})</th>
+                      <th style={colHeader}>Actual ({data.asOfDate || 'current'})</th>
                       <th style={colHeader}>Over / (Under)</th>
                     </tr>
                   </thead>
@@ -19712,7 +19724,7 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
             })()}
 
             <div style={{fontSize:'.68rem',color:'#666',marginTop:8,lineHeight:1.5}}>
-              <strong>How to read this:</strong> Resources at the top are the client's "payable" assets as of this balance sheet. Expenses below show what was planned (Budgeted) vs what's already been paid (Actual) — red = overspent, green = under. The shake-out at the bottom computes the ending cash position two ways: what the budget said would happen, and what's actually shaking out so far. Last column shows whether the client is coming in better or worse than planned.
+              <strong>How to read this:</strong> Resources at the top are the client's "payable" assets as of this balance sheet. Budgeted comes from the <strong>{priorSheet?.asOfDate || 'prior-year'}</strong> sheet (that's where the plan for this year was set — edit it on that sheet's Budget tab). Actual comes from this sheet. Red = overspent, green = under. The shake-out at the bottom computes the ending cash position two ways: what the plan said would happen, and what's actually shaking out so far. Last column shows whether the client is coming in better or worse than planned.
             </div>
           </div>
         );
