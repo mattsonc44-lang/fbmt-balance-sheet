@@ -10892,9 +10892,25 @@ Question: ${q}`,
         if (a0.includes('livestock')||a0==='number') { if(a0!=='total livestock'){inLivestock=true;inCrops=false;} continue; }
         if (a0.includes('miscellaneous')||a0==='total grain') { if(!a0.includes('total')){inMisc=true;inCrops=false;inLivestock=false;} continue; }
         if (a0.includes('total livestock')||a0.includes('total income')||a0.includes('less :')) { inCrops=false;inLivestock=false;inMisc=false; }
-        // Expenses (right side, col 6)
-        const expDesc=col(r,6), expAmt=num(r,7)||num(r,8);
-        if (expDesc && expAmt && !expDesc.toLowerCase().includes('total') && !expDesc.toLowerCase().includes('interest') && !expDesc.toLowerCase().includes('debt service') && !expDesc.toLowerCase().includes('real-estate') && !expDesc.toLowerCase().includes('chattel') && !expDesc.toLowerCase().includes('ann.')) {
+        // Expenses (right side, col 6). Guards against:
+        //  - totals / subtotals / interest / debt-service / chattel rows
+        //  - the sheet's own "Date" / "As of Date" / "Period" header row,
+        //    whose col 7 value is often an Excel date serial (a positive
+        //    number) that otherwise flows into expenses as a bogus amount.
+        const expDesc = col(r,6);
+        const expDescLc = expDesc.toLowerCase();
+        const isDateLabel = /^(date|as.of.?date|period(.ending)?|year|dated|date:)\s*:?$/i.test(expDesc.trim());
+        // Raw cell at col 7/8 — if either was a JS Date instance in the
+        // workbook, it slipped through as a number. Skip those outright.
+        const rawAmtCell = (r[7] instanceof Date) ? null : (r[8] instanceof Date ? null : (r[7] ?? r[8]));
+        const expAmt = (rawAmtCell != null) ? (num(r,7)||num(r,8)) : '';
+        if (expDesc && expAmt && !isDateLabel
+            && !expDescLc.includes('total')
+            && !expDescLc.includes('interest')
+            && !expDescLc.includes('debt service')
+            && !expDescLc.includes('real-estate')
+            && !expDescLc.includes('chattel')
+            && !expDescLc.includes('ann.')) {
           budgetExpenses.push({description:expDesc.trim(),amount:expAmt});
         }
         // Crop rows: col 0=acres(num), col 1=variety, col 2=yield, col 3=price, col 4=value
