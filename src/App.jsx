@@ -1136,7 +1136,7 @@ function emptyData() {
     // the Current-Portion section and the (principal − annual pmt) in the
     // Long-Term section. Older sheets with reCurrent/reMortgages continue to
     // work; totals combine both sources.
-    reDebt:[{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",maturityDate:"",corpPaidBy:"",corpPaid:false}],
+    reDebt:[{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",dueDate:"",maturityDate:"",corpPaidBy:"",corpPaid:false}],
     // ── Collateral valuation (lender-side analysis) ─────────────────────────
     // Everything else on the sheet is the borrower's financial picture.
     // `collateral` is the BANK's view of what the pledged assets would really
@@ -15533,6 +15533,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <div style={{flex:'0 1 90px',minWidth:80}}>
                 <TxtInp label="Terms" value={r.terms} onChange={v=>setArr("reDebt",i,"terms",v)} placeholder="e.g., 20yr" />
               </div>
+              <div style={{flex:'0 1 115px',minWidth:100}}>
+                <TxtInp label="Due Date" value={r.dueDate||''} onChange={v=>setArr("reDebt",i,"dueDate",v)} placeholder="mm/dd" />
+              </div>
               <div style={{flex:'0 1 85px',minWidth:75}}>
                 <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("reDebt",i,"rate",v)} />
               </div>
@@ -15583,7 +15586,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
             );
           })}
-          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",maturityDate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
+          <button className="add-btn" onClick={()=>addRow("reDebt",{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",dueDate:"",maturityDate:"",corpPaidBy:"",corpPaid:false})}>+ Add Mortgage</button>
           <div className="subtotal-row">
             <span>Current-portion total</span><strong className="red">{fmt(reDebtCurrentPortion)}</strong>
           </div>
@@ -18693,7 +18696,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                           otherCurrentLiab:{description:"",amount:""},
                           otherLiabilities:{description:"",balance:""},
                           reContracts:{description:"",amount:""},
-                          reDebt:{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",maturityDate:"",corpPaidBy:"",corpPaid:false},
+                          reDebt:{lienHolder:"",annualPmt:"",accruedInterest:"",principal:"",rate:"",terms:"",dueDate:"",maturityDate:"",corpPaidBy:"",corpPaid:false},
                           reMortgages:{lienHolder:"",terms:"",principal:"",rate:"",maturityDate:"",corpPaidBy:"",corpPaid:false},
                           realEstate:{acres:"",reType:"",description:"",valuePerAcre:""},
                           receivables:{description:"",amount:""},
@@ -19393,13 +19396,257 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         </tbody>
       </table>
 
-      {/* Year-end cash settlement — closes out the year by walking the
-          projected cash from budget income all the way through debt
-          principal and owner draws, then compares the resulting
-          projected change in cash to the ACTUAL change in cash on the
-          balance sheet. Any variance means the budget missed something
-          or a BS line moved for a non-operating reason. */}
+      {/* Year-End Cash Settlement + Budget vs Actual — combined into one
+          panel per lender request. Top block = resources on hand pulled
+          straight from the BS. Bottom block = every budget expense row
+          with Budget + Actual + variance columns, plus debt payments and
+          owner draws as their own rows (also editable Actual). Totals
+          at the bottom roll up into the ending cash position. */}
       {(() => {
+        const n2 = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+        // Resources from the CURRENT balance sheet — the practical
+        // "what's in the till + what's saleable" number at as-of date.
+        const curCash          = n2(curTotals['Cash & Bank']);
+        const receivables      = n2(curTotals['Receivables']);
+        const fedPayments      = n2(curTotals['Federal Payments']);
+        const farmProducts     = n2(curTotals['Farm Products']);
+        const mktLivestock     = n2(curTotals['Market Livestock']);
+        const totalResources   = curCash + receivables + fedPayments + farmProducts + mktLivestock;
+
+        // Budget expense rows — editable in place, as before.
+        const rows = (data.budgetExpenses||[]);
+        const updateRow = (i, field, val) => {
+          const next = (data.budgetExpenses||[]).map((r,j) => j===i ? {...r, [field]: val} : r);
+          setData({...data, budgetExpenses: next});
+        };
+
+        // Debt payments as their own expense lines. Annual = budgeted;
+        // paid-YTD is stored on data.accrualTermDebtPaid / reDebtPaid so
+        // the lender tracks what the client has already cut a check for.
+        const termAnnual = (data.intermediatDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
+        const reDebtAnn  = (data.reDebt||[]).reduce((s,r)=>s+n2(r.annualPmt),0)
+                         + (data.reCurrent||[]).reduce((s,r)=>s+n2(r.annualPmt),0);
+        const termPaid   = n2(data.accrualTermDebtPaid);
+        const reDebtPaid = n2(data.accrualReDebtPaid);
+        const drawsBudget = n2(data.accrualOwnerDrawsBudget);
+        const drawsPaid   = n2(data.accrualOwnerDraws);  // reuse existing field as "actual"
+
+        // Custom extra rows — "Add line". Each has label / budget / actual.
+        const extras = Array.isArray(data.accrualExtraLines) ? data.accrualExtraLines : [];
+
+        // Totals (budget side uses planned amounts; actual side uses what
+        // the lender has entered). Debt + draws budget pulled from sheet.
+        const expBudget = rows.reduce((s,r)=>s+n2(r.amount),0) + termAnnual + reDebtAnn + drawsBudget + extras.reduce((s,r)=>s+n2(r.budget),0);
+        const expActual = rows.reduce((s,r)=>s+n2(r.actual),0) + termPaid + reDebtPaid + drawsPaid + extras.reduce((s,r)=>s+n2(r.actual),0);
+        const varTotal  = expActual - expBudget;
+
+        // Ending position = resources minus whatever the client has
+        // actually paid so far. The remaining-budget column tells them
+        // what's still coming — projected cash = resources − remaining.
+        const stillToPay = Math.max(0, expBudget - expActual);
+        const projectedEnd = totalResources - stillToPay;
+
+        const colHeader = { textAlign:'right',padding:'6px 10px',fontSize:'.72rem',color:'#6B0E1E',fontWeight:700 };
+        const td = { padding:'6px 10px',fontSize:'.82rem',borderBottom:'1px solid #f0f0f0' };
+
+        const tdRightMoney = { ...td, textAlign:'right' };
+
+        const renderActual = (val, onChange, color='#15803d') => (
+          <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
+            <span style={{color:'#888'}}>$</span>
+            <input type="text" value={val||''}
+              onChange={e => onChange(e.target.value.replace(/[^0-9.]/g,''))}
+              placeholder="0"
+              style={{width:90,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+          </div>
+        );
+
+        return (
+          <div style={{marginTop:18,padding:'14px 16px',background:'#fef9f0',border:'1px solid #f0d9b8',borderRadius:8}}>
+            <div style={{fontSize:'.85rem',fontWeight:700,color:'#92400e',marginBottom:10}}>
+              Year-End Cash Settlement
+              <span style={{fontSize:'.7rem',color:'#666',fontWeight:400,marginLeft:8}}>(post-harvest: resources on hand vs. planned and actual outflows)</span>
+            </div>
+
+            {/* ── Resources (income side) ─────────────────────────── */}
+            <table style={{width:'100%',borderCollapse:'collapse',marginBottom:14}}>
+              <thead>
+                <tr style={{borderBottom:'1.5px solid #92400e'}}>
+                  <th style={{...colHeader,textAlign:'left'}}>Resources on hand ({data.asOfDate||'current'})</th>
+                  <th style={colHeader}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td style={td}>Cash &amp; Bank</td><td style={tdRightMoney}>{fmtMoney(curCash)}</td></tr>
+                <tr><td style={td}>+ Accounts Receivable</td><td style={tdRightMoney}>+{fmtMoney(receivables)}</td></tr>
+                <tr><td style={td}>+ Federal / Government payments</td><td style={tdRightMoney}>+{fmtMoney(fedPayments)}</td></tr>
+                <tr><td style={td}>+ Farm products on hand</td><td style={tdRightMoney}>+{fmtMoney(farmProducts)}</td></tr>
+                <tr><td style={td}>+ Market livestock on hand</td><td style={tdRightMoney}>+{fmtMoney(mktLivestock)}</td></tr>
+                <tr style={{background:'#fdf0d8',fontWeight:800}}>
+                  <td style={{...td,borderBottom:'2px solid #92400e'}}>= Total resources available</td>
+                  <td style={{...tdRightMoney,borderBottom:'2px solid #92400e'}}>{fmtMoney(totalResources)}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* ── Expenses (budget vs actual) ──────────────────────── */}
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{borderBottom:'1.5px solid #92400e'}}>
+                  <th style={{...colHeader,textAlign:'left'}}>Expenses &amp; obligations</th>
+                  <th style={{...colHeader,width:120}}>Budgeted</th>
+                  <th style={{...colHeader,width:140}}>Actual (paid)</th>
+                  <th style={{...colHeader,width:120}}>Over / (Under)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Budgeted expense rows — inline-editable */}
+                {rows.map((r,i) => {
+                  const b = n2(r.amount); const a = n2(r.actual); const v = a - b;
+                  return (
+                    <tr key={i}>
+                      <td style={td}>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <input type="text" value={r.description||''}
+                            onChange={e => updateRow(i,'description',e.target.value)}
+                            placeholder="Expense description"
+                            style={{flex:1,minWidth:160,border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit',background:r.description?'transparent':'#fffdf5'}} />
+                          {r.prepaid ? <span style={{fontSize:'.65rem',color:'#2d5a8e'}}>prepaid</span> : null}
+                          <button onClick={() => {
+                              const next = (data.budgetExpenses||[]).filter((_,j) => j!==i);
+                              setData({...data, budgetExpenses: next.length ? next : [{description:'',amount:'',prepaid:false}]});
+                            }}
+                            title="Remove this expense line"
+                            style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer',fontSize:'.85rem',padding:'0 4px'}}>×</button>
+                        </div>
+                      </td>
+                      <td style={tdRightMoney}>
+                        <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                          <span style={{color:'#888'}}>$</span>
+                          <input type="text" value={r.amount||''}
+                            onChange={e => updateRow(i,'amount',e.target.value.replace(/[^0-9.]/g,''))}
+                            placeholder="0"
+                            style={{width:90,textAlign:'right',border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+                        </div>
+                      </td>
+                      <td style={tdRightMoney}>{renderActual(r.actual, v => updateRow(i,'actual',v))}</td>
+                      <td style={{...tdRightMoney,fontWeight:600,color: a===0 ? '#aaa' : (v > 0 ? '#991b1b' : (v < 0 ? '#15803d' : '#111'))}}>
+                        {a === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* Debt + draws rows — the budget side auto-fills from
+                    sheet totals; actual is editable. */}
+                <tr style={{background:'#fff8ea'}}>
+                  <td style={{...td,fontStyle:'italic'}}>Term / intermediate debt — annual payments</td>
+                  <td style={tdRightMoney}>{fmtMoney(termAnnual)}</td>
+                  <td style={tdRightMoney}>{renderActual(data.accrualTermDebtPaid, v => setData({...data, accrualTermDebtPaid: v}))}</td>
+                  <td style={{...tdRightMoney,fontWeight:600,color: termPaid===0?'#aaa':(termPaid-termAnnual>0?'#991b1b':(termPaid-termAnnual<0?'#15803d':'#111'))}}>
+                    {termPaid === 0 ? '—' : (termPaid-termAnnual >= 0 ? fmtMoney(termPaid-termAnnual) : '(' + fmtMoney(Math.abs(termPaid-termAnnual)) + ')')}
+                  </td>
+                </tr>
+                <tr style={{background:'#fff8ea'}}>
+                  <td style={{...td,fontStyle:'italic'}}>RE debt — annual payments</td>
+                  <td style={tdRightMoney}>{fmtMoney(reDebtAnn)}</td>
+                  <td style={tdRightMoney}>{renderActual(data.accrualReDebtPaid, v => setData({...data, accrualReDebtPaid: v}))}</td>
+                  <td style={{...tdRightMoney,fontWeight:600,color: reDebtPaid===0?'#aaa':(reDebtPaid-reDebtAnn>0?'#991b1b':(reDebtPaid-reDebtAnn<0?'#15803d':'#111'))}}>
+                    {reDebtPaid === 0 ? '—' : (reDebtPaid-reDebtAnn >= 0 ? fmtMoney(reDebtPaid-reDebtAnn) : '(' + fmtMoney(Math.abs(reDebtPaid-reDebtAnn)) + ')')}
+                  </td>
+                </tr>
+                <tr style={{background:'#fff8ea'}}>
+                  <td style={{...td,fontStyle:'italic'}}>Owner draws / family living</td>
+                  <td style={tdRightMoney}>{renderActual(data.accrualOwnerDrawsBudget, v => setData({...data, accrualOwnerDrawsBudget: v}))}</td>
+                  <td style={tdRightMoney}>{renderActual(data.accrualOwnerDraws, v => setData({...data, accrualOwnerDraws: v}))}</td>
+                  <td style={{...tdRightMoney,fontWeight:600,color: drawsPaid===0?'#aaa':(drawsPaid-drawsBudget>0?'#991b1b':(drawsPaid-drawsBudget<0?'#15803d':'#111'))}}>
+                    {drawsPaid === 0 ? '—' : (drawsPaid-drawsBudget >= 0 ? fmtMoney(drawsPaid-drawsBudget) : '(' + fmtMoney(Math.abs(drawsPaid-drawsBudget)) + ')')}
+                  </td>
+                </tr>
+
+                {/* Custom extra lines — lease/rent, crop insurance, etc. */}
+                {extras.map((row, i) => {
+                  const b = n2(row.budget); const a = n2(row.actual); const v = a - b;
+                  const update = (field, val) => {
+                    const next = extras.map((r,j) => j===i ? {...r, [field]: val} : r);
+                    setData({...data, accrualExtraLines: next});
+                  };
+                  return (
+                    <tr key={'extra-'+i}>
+                      <td style={td}>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <input type="text" value={row.label||''}
+                            onChange={e => update('label', e.target.value)}
+                            placeholder="e.g. Lease / rent, Crop insurance premium"
+                            style={{flex:1,minWidth:180,border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit',background:row.label?'transparent':'#fffdf5'}} />
+                          <button onClick={() => {
+                              const next = extras.filter((_,j) => j!==i);
+                              setData({...data, accrualExtraLines: next});
+                            }}
+                            title="Remove this line"
+                            style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer',fontSize:'.85rem',padding:'0 4px'}}>×</button>
+                        </div>
+                      </td>
+                      <td style={tdRightMoney}>{renderActual(row.budget, val => update('budget', val))}</td>
+                      <td style={tdRightMoney}>{renderActual(row.actual, val => update('actual', val))}</td>
+                      <td style={{...tdRightMoney,fontWeight:600,color: a===0?'#aaa':(v>0?'#991b1b':(v<0?'#15803d':'#111'))}}>
+                        {a === 0 ? '—' : (v >= 0 ? fmtMoney(v) : '(' + fmtMoney(Math.abs(v)) + ')')}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                <tr>
+                  <td colSpan={4} style={{padding:'6px 10px'}}>
+                    <button onClick={() => setData({...data, budgetExpenses: [...(data.budgetExpenses||[]), {description:'',amount:'',actual:'',prepaid:false}]})}
+                      style={{background:'#6B0E1E',color:'white',border:'none',borderRadius:5,padding:'5px 12px',fontSize:'.72rem',fontWeight:700,cursor:'pointer',fontFamily:'inherit',marginRight:8}}>
+                      + Add expense line
+                    </button>
+                    <button onClick={() => setData({...data, accrualExtraLines: [...extras, {label:'',budget:'',actual:''}]})}
+                      style={{background:'transparent',color:'#6B0E1E',border:'1px dashed #6B0E1E',borderRadius:5,padding:'4px 10px',fontSize:'.72rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                      + Add custom line (lease/rent, crop insurance, etc.)
+                    </button>
+                  </td>
+                </tr>
+
+                <tr style={{borderTop:'2px solid #92400e',fontWeight:800,background:'#fdf0d8'}}>
+                  <td style={{padding:'8px 10px'}}>Totals</td>
+                  <td style={tdRightMoney}>{fmtMoney(expBudget)}</td>
+                  <td style={tdRightMoney}>{fmtMoney(expActual)}</td>
+                  <td style={{...tdRightMoney,color: varTotal > 0 ? '#991b1b' : (varTotal < 0 ? '#15803d' : '#111')}}>
+                    {varTotal >= 0 ? fmtMoney(varTotal) : '(' + fmtMoney(Math.abs(varTotal)) + ')'}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Projected position */}
+            <table style={{width:'100%',borderCollapse:'collapse',marginTop:14}}>
+              <tbody>
+                <tr>
+                  <td style={{padding:'10px 10px',fontSize:'.82rem',color:'#555'}}>Remaining obligations (Budget − Actual, if still to pay)</td>
+                  <td style={{padding:'10px 10px',textAlign:'right',fontWeight:600}}>-{fmtMoney(stillToPay)}</td>
+                </tr>
+                <tr style={{borderTop:'3px double #92400e'}}>
+                  <td style={{padding:'10px 10px',fontWeight:800,fontSize:'.95rem',color:'#92400e'}}>Projected year-end cash position</td>
+                  <td style={{padding:'10px 10px',textAlign:'right',fontWeight:800,fontSize:'1rem',color: projectedEnd<0?'#991b1b':'#15803d'}}>{fmtMoney(projectedEnd)}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style={{fontSize:'.68rem',color:'#666',marginTop:8,lineHeight:1.5}}>
+              <strong>How to read this:</strong> Resources at the top are the client's "payable" assets as of this balance sheet. Expenses below show what was planned (Budgeted) vs what's already been paid (Actual). Red = overspent, green = under. The projected position subtracts anything still unpaid from the resources on hand — if negative, the client needs more income, inventory sales, or operating credit before year-end.
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Old Year-End Cash Settlement and Budget vs Actual panels were
+          collapsed into the single combined panel above. The block below
+          this comment is dead on purpose — kept out of the DOM by the
+          `false &&` guard so the big legacy if-block can be deleted next
+          pass without risking a merge conflict. */}
+      {false && (() => {
         const termPrin = (data.intermediatDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
         const reDebtPmt = (data.reDebt||[]).reduce((s,r)=>s+n(r.annualPmt),0);
         const reCurPmt  = (data.reCurrent||[]).reduce((s,r)=>s+n(r.annualPmt),0);
@@ -19505,14 +19752,9 @@ function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budget
         );
       })()}
 
-      {/* Budget vs Actual — line-item view of every budget expense with
-          an editable Actual column and a variance. Actuals save back onto
-          each expense row (`.actual`) so they persist with the sheet and
-          snapshot year-over-year. Red = overspent, green = under. */}
-      {(() => {
-        // Show every row — including newly-added blanks — so the user can
-        // type into a line they just created from this panel without
-        // having to jump back to the Budget tab to label it.
+      {/* OLD stand-alone Budget vs Actual panel — collapsed into the
+          combined Year-End Cash Settlement panel above. Dead on purpose. */}
+      {false && (() => {
         const rows = (data.budgetExpenses||[]);
         if (rows.length === 0 && !(data.budgetExpenses||[]).length) return null;
         const budgetSum = rows.reduce((s,r)=>s+n(r.amount),0);
