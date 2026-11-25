@@ -884,7 +884,7 @@ const STEPS_COMMERCIAL = [
   "ap_aging","accrued_exp","line_of_credit","current_portion_ltd","other_current_liab_comm",
   "term_debt_comm","capital_leases","sub_debt",
   "equity",
-  "collateral","summary"
+  "summary_comm"
 ];
 // Default STEPS (ag) — kept for back-compat with any old references.
 const STEPS = STEPS_AG;
@@ -904,6 +904,7 @@ const STEP_LABELS = {
   other_current_liab:"Other Curr. Liab",
   other_liabilities:"Other Liabilities", collateral:"Collateral", summary:"Summary",
   // Commercial labels
+  summary_comm:"Summary",
   ar_aging:"A/R + Aging",
   inv_raw:"Inventory (Raw)", inv_wip:"Inventory (WIP)", inv_finished:"Inventory (Finished)",
   prepaid_exp:"Prepaid Expenses", other_current_assets_comm:"Other Current Assets",
@@ -14684,6 +14685,18 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
   // level STEPS inside the wizard component only — every STEPS reference
   // below is now type-aware.
   const STEPS = stepsForType(data.sheetType);
+
+  // If the user's current tab is ag-only but we just opened a commercial
+  // sheet, snap back to Balance Sheet so the user isn't staring at a
+  // stale ag tab rendering ag-shape data the commercial sheet doesn't
+  // carry. Same the other direction (commercial-only tabs when switching
+  // to ag — none exist today but this guards for Phase 3).
+  useEffect(() => {
+    const agOnlyTabs = ['budget','whatif','inspection','accrual'];
+    if (data.sheetType === 'commercial' && agOnlyTabs.includes(activeTab)) {
+      setActiveTab('balance');
+    }
+  }, [data.sheetType]); // eslint-disable-line
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => {
@@ -15150,6 +15163,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               numVal(data.commonStock) + numVal(data.preferredStock) + numVal(data.paidInCapital)
               + numVal(data.retainedEarningsPrior) + numVal(data.ytdNetIncome) - numVal(data.distributionsYtd)
             )}</strong>
+          </div>
+        </div>
+      );
+      case "summary_comm": return (
+        <div className="step-content">
+          <SecHdr icon="✅" title="Summary" subtitle="Commercial balance sheet complete — save to persist, print when ready." color="#2d5a8e" />
+          <div style={{padding:'14px 16px',background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:8,fontSize:'.85rem',color:'#2d5a8e',lineHeight:1.6}}>
+            You've walked through every commercial section. Click <strong>Save</strong> in the header to file this sheet. The commercial-specific Print, Budget, Covenant Ratios, and Reconciliation tabs land in Phase 3 — until then, Balance Sheet and Year Comparison are the two tabs available to a commercial sheet.
           </div>
         </div>
       );
@@ -19060,36 +19081,56 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         </div>
       </div>
 
-      <div className="tab-bar">
-        <button className={"tab-btn" + (activeTab === "balance" ? " tab-active" : "")}
-          onClick={()=>setActiveTab("balance")}>
-          Balance Sheet
-        </button>
-        <button className={"tab-btn" + (activeTab === "budget" ? " tab-active" : "")}
-          onClick={()=>{setActiveTab("budget");loadCorpPersonalDebt();}}>
-          Budget / Cash Flow
-        </button>
-        <button className={"tab-btn" + (activeTab === "compare" ? " tab-active" : "")}
-          onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
-          Year Comparison
-        </button>
-        <button className={"tab-btn" + (activeTab === "whatif" ? " tab-active" : "")}
-          onClick={()=>setActiveTab("whatif")}>
-          What-if
-        </button>
-        <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
-          onClick={()=>setActiveTab("inspection")}>
-          🌾 Ag Inspection
-        </button>
-        {/* Year reconciliation tab — per-user feature flag so lenders who
-            don't run year-end tie-outs aren't cluttered with it. */}
-        {!!profile?.features?.accrualRecon && (
-          <button className={"tab-btn" + (activeTab === "accrual" ? " tab-active" : "")}
-            onClick={()=>setActiveTab("accrual")}>
-            📊 Year Reconciliations
-          </button>
-        )}
-      </div>
+      {/* Tab bar is sheet-type aware — ag-only tabs (Budget, What-if, Ag
+          Inspection, Year Reconciliations) are hidden on commercial
+          sheets, and commercial-only tabs will land here in later phases.
+          Balance Sheet + Year Comparison are shared so they always show. */}
+      {(() => {
+        const isCommercial = data.sheetType === 'commercial';
+        return (
+          <div className="tab-bar">
+            <button className={"tab-btn" + (activeTab === "balance" ? " tab-active" : "")}
+              onClick={()=>setActiveTab("balance")}>
+              Balance Sheet
+            </button>
+            {!isCommercial && (
+              <button className={"tab-btn" + (activeTab === "budget" ? " tab-active" : "")}
+                onClick={()=>{setActiveTab("budget");loadCorpPersonalDebt();}}>
+                Budget / Cash Flow
+              </button>
+            )}
+            <button className={"tab-btn" + (activeTab === "compare" ? " tab-active" : "")}
+              onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
+              Year Comparison
+            </button>
+            {!isCommercial && (
+              <button className={"tab-btn" + (activeTab === "whatif" ? " tab-active" : "")}
+                onClick={()=>setActiveTab("whatif")}>
+                What-if
+              </button>
+            )}
+            {!isCommercial && (
+              <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
+                onClick={()=>setActiveTab("inspection")}>
+                🌾 Ag Inspection
+              </button>
+            )}
+            {/* Year reconciliation tab — per-user feature flag, ag only
+                until the commercial-flavored version lands in Phase 3. */}
+            {!isCommercial && !!profile?.features?.accrualRecon && (
+              <button className={"tab-btn" + (activeTab === "accrual" ? " tab-active" : "")}
+                onClick={()=>setActiveTab("accrual")}>
+                📊 Year Reconciliations
+              </button>
+            )}
+            {isCommercial && (
+              <span style={{alignSelf:'center',marginLeft:'auto',fontSize:'.72rem',color:'#2d5a8e',fontStyle:'italic',padding:'0 10px'}}>
+                Commercial-specific Budget, Covenant Ratios &amp; Reconciliation tabs land in Phase 3.
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {activeTab === "balance" && (
         <div>
