@@ -11837,7 +11837,26 @@ Question: ${q}`,
     const pct = numVal(e.ownership || '100') || 100;
     return s + nw * (pct / 100);
   }, 0);
-  const totalAssets = totalCurrentAssets + totalLTAssets + linkedEntityVal;
+  // For commercial sheets, override totals with the commercial-field
+  // sums so the sidebar RunningTotal (Assets / Liabilities / Net Worth)
+  // reflects the commercial data entry, not ag arrays that are empty.
+  const _commAssets = (data.sheetType === 'commercial') ? (
+      n(data.cashGlacier)
+    + (data.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.accountsReceivable||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0)
+    + (data.inventoryRaw||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.inventoryWip||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.inventoryFinished||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.prepaidExpenses||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.otherCurrentAssets||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.ffe||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.commercialVehicles||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.commercialRealEstate||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.leaseholdImprovements||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.intangibles||[]).reduce((s,r)=>s+n(r.value),0)
+    + linkedEntityVal
+  ) : null;
+  const totalAssets = _commAssets !== null ? _commAssets : (totalCurrentAssets + totalLTAssets + linkedEntityVal);
   const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
   const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
@@ -11859,7 +11878,18 @@ Question: ${q}`,
   const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
   const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0) + reDebtLTPortion;
   const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
-  const totalLiabilities = totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal;
+  // Commercial liabilities override — mirrors the asset override above.
+  const _commLiab = (data.sheetType === 'commercial') ? (
+      (data.accountsPayable||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0)
+    + (data.accruedExpenses||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.lineOfCredit||[]).reduce((s,r)=>s+n(r.balance),0)
+    + n(data.currentPortionLTD)
+    + (data.otherCurrentLiabilitiesComm||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.termDebtCommercial||[]).reduce((s,r)=>s+n(r.balance),0)
+    + (data.capitalLeases||[]).reduce((s,r)=>s+n(r.balance),0)
+    + (data.subordinatedDebt||[]).reduce((s,r)=>s+n(r.balance),0)
+  ) : null;
+  const totalLiabilities = _commLiab !== null ? _commLiab : (totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal);
   const netWorth = totalAssets - totalLiabilities;
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
@@ -19190,9 +19220,13 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           </div>
           <div className="main">
             <div className="sidebar">
+              {/* Sidebar sections filter to only the steps actually in the
+                  current STEPS array. On a commercial sheet, ag steps drop
+                  out of Assets / Liabilities and commercial steps take
+                  their place — no ag labels leak into the sidebar. */}
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Setup</div>
-                {["intro"].map(s => {
+                {["intro","intro_comm"].filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
@@ -19200,31 +19234,36 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               </div>
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Assets</div>
-                {ASSET_STEPS.map(s => {
+                {ASSET_STEPS.filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
               <div className="sidebar-section">
-                <div className="sidebar-section-label">Liabilities</div>
-                {["liab_intro",...LIAB_STEPS].map(s => {
+                <div className="sidebar-section-label">Liabilities{data.sheetType === 'commercial' ? ' & Equity' : ''}</div>
+                {["liab_intro",...LIAB_STEPS].filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
-              <div className="sidebar-section">
-                <div className="sidebar-section-label">Analysis</div>
-                {ANALYSIS_STEPS.map(s => {
-                  const idx = STEPS.indexOf(s);
-                  const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
-                  return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
-                })}
-              </div>
+              {/* Analysis section only renders when the current type has
+                  analysis steps (ag has Collateral; commercial has none
+                  until the Covenant Ratios step lands in Phase 3). */}
+              {ANALYSIS_STEPS.some(s => STEPS.indexOf(s) >= 0) && (
+                <div className="sidebar-section">
+                  <div className="sidebar-section-label">Analysis</div>
+                  {ANALYSIS_STEPS.filter(s => STEPS.indexOf(s) >= 0).map(s => {
+                    const idx = STEPS.indexOf(s);
+                    const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
+                    return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
+                  })}
+                </div>
+              )}
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Finish</div>
-                {["summary"].map(s => {
+                {["summary","summary_comm"].filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
@@ -19352,12 +19391,18 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   <span className="step-info">{step+1} / {STEPS.length}</span>
                   {step < STEPS.length - 1
                     ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next} tabIndex={0}>Next</button>
-                    : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
-                        <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}} tabIndex={0}>✂️ Split</button>
-                        <button className="btn btn-secondary" onClick={exportToExcel} style={{background:'#1B4332',color:'white'}} tabIndex={0}>📥 Excel</button>
-                        <button className="btn btn-secondary" onClick={generateLenderPackage} style={{background:'#2d5a8e',color:'white'}} tabIndex={0}>📦 Lender Package</button>
-                        <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint} tabIndex={0}>🖨 Print Balance Sheet</button>
-                      </div>
+                    : data.sheetType === 'commercial'
+                      ? <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                          <span style={{alignSelf:'center',fontSize:12,color:'#2d5a8e',fontStyle:'italic'}}>
+                            Print, Excel export &amp; Lender Package for commercial land in Phase 3 — use <strong>Save</strong> at the top to file this sheet.
+                          </span>
+                        </div>
+                      : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                          <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}} tabIndex={0}>✂️ Split</button>
+                          <button className="btn btn-secondary" onClick={exportToExcel} style={{background:'#1B4332',color:'white'}} tabIndex={0}>📥 Excel</button>
+                          <button className="btn btn-secondary" onClick={generateLenderPackage} style={{background:'#2d5a8e',color:'white'}} tabIndex={0}>📦 Lender Package</button>
+                          <button ref={nextBtnRef} className="btn btn-success" onClick={handlePrint} tabIndex={0}>🖨 Print Balance Sheet</button>
+                        </div>
                   }
                 </div>
               </div>
