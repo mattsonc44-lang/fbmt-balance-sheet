@@ -14140,6 +14140,101 @@ ${extraPages}
     return html;
   };
 
+  // Commercial balance sheet print — self-contained HTML. No ag fields
+  // appear; sections match the commercial wizard one-for-one.
+  const handlePrintCommercial = (d, tAssets, tLiab) => {
+    const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+    const agingRow = (r,nameField) => {
+      const t = n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus);
+      return `<tr><td>${r[nameField]||''}</td><td style="text-align:right;">${money(n(r.current))}</td><td style="text-align:right;">${money(n(r.d30))}</td><td style="text-align:right;">${money(n(r.d60))}</td><td style="text-align:right;">${money(n(r.d90plus))}</td><td style="text-align:right;font-weight:600;">${money(t)}</td></tr>`;
+    };
+    const simpleTable = (title, rows, cols) => rows.length === 0 ? '' : `
+      <h3>${title}</h3>
+      <table><thead><tr>${cols.map(c=>`<th style="text-align:${c.align||'left'};">${c.label}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${cols.map(c => `<td style="text-align:${c.align||'left'};">${c.fmt ? c.fmt(r) : (r[c.key]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    const equity = n(d.commonStock)+n(d.preferredStock)+n(d.paidInCapital)+n(d.retainedEarningsPrior)+n(d.ytdNetIncome)-n(d.distributionsYtd);
+    const W = window.open('','_blank','width=850,height=1100');
+    if (!W) { alert('Please allow popups to print.'); return; }
+    W.document.write(`<!doctype html><html><head><title>Commercial BS — ${d.clientName}</title>
+      <style>
+        @page { size: letter; margin: 0.6in; }
+        body { font-family: Arial, sans-serif; font-size: 11px; color: #111; }
+        h1 { font-size: 20px; margin: 0 0 4px; color: #2d5a8e; }
+        h2 { font-size: 14px; margin: 18px 0 6px; color: #2d5a8e; border-bottom: 2px solid #2d5a8e; padding-bottom: 3px; }
+        h3 { font-size: 12px; margin: 10px 0 4px; color: #333; }
+        .sub { font-size: 11px; color: #555; margin-bottom: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10.5px; }
+        th { text-align: left; padding: 3px 6px; background: #f0f6fb; border-bottom: 1px solid #333; font-size: 10px; }
+        td { padding: 2px 6px; border-bottom: 0.5px solid #eee; }
+        .total-row td { font-weight: 700; border-top: 1.5px solid #333; padding-top: 4px; background:#f7fbfe; }
+        .sig { margin-top: 30px; display: flex; gap: 40px; font-size: 11px; }
+        .sig .line { flex: 1; border-top: 1px solid #333; padding-top: 3px; }
+      </style></head><body>
+      <h1>Commercial Balance Sheet</h1>
+      <div class="sub"><strong>${d.clientName||''}</strong>
+        ${d.entityType ? ' · ' + d.entityType : ''}
+        ${d.einNumber ? ' · EIN ' + d.einNumber : ''}
+        ${d.naicsCode ? ' · NAICS ' + d.naicsCode : ''}
+        · As of ${d.asOfDate||''}
+      </div>
+
+      <h2>Assets</h2>
+      <table><tbody>
+        <tr><td>Cash — Glacier Bank</td><td style="text-align:right;">${money(n(d.cashGlacier))}</td></tr>
+        ${(d.cashOther||[]).filter(r=>r.institution||r.amount).map(r => `<tr><td>Cash — ${r.institution||''}</td><td style="text-align:right;">${money(n(r.amount))}</td></tr>`).join('')}
+      </tbody></table>
+      ${(d.accountsReceivable||[]).some(r=>r.customer||r.current) ? `
+        <h3>Accounts Receivable &amp; Aging</h3>
+        <table><thead><tr><th>Customer</th><th style="text-align:right;">Current</th><th style="text-align:right;">31-60</th><th style="text-align:right;">61-90</th><th style="text-align:right;">90+</th><th style="text-align:right;">Total</th></tr></thead>
+        <tbody>${(d.accountsReceivable||[]).filter(r=>r.customer||r.current).map(r=>agingRow(r,'customer')).join('')}</tbody></table>` : ''}
+      ${simpleTable('Inventory — Raw', (d.inventoryRaw||[]).filter(r=>r.description||r.value), [{label:'Description',key:'description'},{label:'Value',key:'value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Inventory — WIP', (d.inventoryWip||[]).filter(r=>r.description||r.value), [{label:'Description',key:'description'},{label:'Value',key:'value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Inventory — Finished', (d.inventoryFinished||[]).filter(r=>r.description||r.value), [{label:'Description',key:'description'},{label:'Value',key:'value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Prepaid Expenses', (d.prepaidExpenses||[]).filter(r=>r.description||r.amount), [{label:'Description',key:'description'},{label:'Amount',align:'right',fmt:r=>money(n(r.amount))}])}
+      ${simpleTable('Other Current Assets', (d.otherCurrentAssets||[]).filter(r=>r.description||r.amount), [{label:'Description',key:'description'},{label:'Amount',align:'right',fmt:r=>money(n(r.amount))}])}
+      ${simpleTable('Furniture, Fixtures &amp; Equipment', (d.ffe||[]).filter(r=>r.description||r.value), [{label:'Description',key:'description'},{label:'Cost',align:'right',fmt:r=>money(n(r.cost))},{label:'Depreciation',align:'right',fmt:r=>money(n(r.depreciation))},{label:'Book Value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Commercial Vehicles', (d.commercialVehicles||[]).filter(r=>r.year||r.make||r.value), [{label:'Year',key:'year'},{label:'Make/Model',key:'make'},{label:'Value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Commercial Real Estate', (d.commercialRealEstate||[]).filter(r=>r.address||r.value), [{label:'Address',key:'address'},{label:'Description',key:'description'},{label:'Value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Leasehold Improvements', (d.leaseholdImprovements||[]).filter(r=>r.description||r.value), [{label:'Description',key:'description'},{label:'Value',align:'right',fmt:r=>money(n(r.value))}])}
+      ${simpleTable('Intangibles &amp; Goodwill', (d.intangibles||[]).filter(r=>r.description||r.value), [{label:'Description',key:'description'},{label:'Type',key:'type'},{label:'Value',align:'right',fmt:r=>money(n(r.value))}])}
+      <table><tbody><tr class="total-row"><td>TOTAL ASSETS</td><td style="text-align:right;">${money(tAssets)}</td></tr></tbody></table>
+
+      <h2>Liabilities &amp; Equity</h2>
+      ${(d.accountsPayable||[]).some(r=>r.vendor||r.current) ? `
+        <h3>Accounts Payable &amp; Aging</h3>
+        <table><thead><tr><th>Vendor</th><th style="text-align:right;">Current</th><th style="text-align:right;">31-60</th><th style="text-align:right;">61-90</th><th style="text-align:right;">90+</th><th style="text-align:right;">Total</th></tr></thead>
+        <tbody>${(d.accountsPayable||[]).filter(r=>r.vendor||r.current).map(r=>agingRow(r,'vendor')).join('')}</tbody></table>` : ''}
+      ${simpleTable('Accrued Expenses', (d.accruedExpenses||[]).filter(r=>r.description||r.amount), [{label:'Description',key:'description'},{label:'Amount',align:'right',fmt:r=>money(n(r.amount))}])}
+      ${simpleTable('Line of Credit', (d.lineOfCredit||[]).filter(r=>r.lender||r.balance), [{label:'Lender',key:'lender'},{label:'Limit',align:'right',fmt:r=>money(n(r.limit))},{label:'Balance',align:'right',fmt:r=>money(n(r.balance))},{label:'Rate',align:'right',fmt:r=>r.rate?r.rate+'%':''},{label:'Maturity',key:'maturityDate'}])}
+      ${n(d.currentPortionLTD) > 0 ? `<table><tbody><tr><td>Current portion LTD</td><td style="text-align:right;">${money(n(d.currentPortionLTD))}</td></tr></tbody></table>` : ''}
+      ${simpleTable('Other Current Liabilities', (d.otherCurrentLiabilitiesComm||[]).filter(r=>r.description||r.amount), [{label:'Description',key:'description'},{label:'Amount',align:'right',fmt:r=>money(n(r.amount))}])}
+      ${simpleTable('Term Debt &amp; SBA', (d.termDebtCommercial||[]).filter(r=>r.lender||r.balance), [{label:'Lender',key:'lender'},{label:'Balance',align:'right',fmt:r=>money(n(r.balance))},{label:'Annual Pmt',align:'right',fmt:r=>money(n(r.annualPmt))},{label:'Rate',align:'right',fmt:r=>r.rate?r.rate+'%':''},{label:'Maturity',key:'maturityDate'},{label:'SBA',fmt:r=>r.sbaGuaranty?'✓':''}])}
+      ${simpleTable('Capital Leases', (d.capitalLeases||[]).filter(r=>r.lessor||r.balance), [{label:'Lessor',key:'lessor'},{label:'Asset',key:'asset'},{label:'Monthly',align:'right',fmt:r=>money(n(r.monthlyPmt))},{label:'Balance',align:'right',fmt:r=>money(n(r.balance))}])}
+      ${simpleTable('Subordinated Debt', (d.subordinatedDebt||[]).filter(r=>r.holder||r.balance), [{label:'Holder',key:'holder'},{label:'Balance',align:'right',fmt:r=>money(n(r.balance))},{label:'Rate',align:'right',fmt:r=>r.rate?r.rate+'%':''},{label:'Maturity',key:'maturityDate'}])}
+      <table><tbody><tr class="total-row"><td>TOTAL LIABILITIES</td><td style="text-align:right;">${money(tLiab)}</td></tr></tbody></table>
+
+      <h3>Equity</h3>
+      <table><tbody>
+        ${n(d.commonStock)?`<tr><td>Common Stock</td><td style="text-align:right;">${money(n(d.commonStock))}</td></tr>`:''}
+        ${n(d.preferredStock)?`<tr><td>Preferred Stock</td><td style="text-align:right;">${money(n(d.preferredStock))}</td></tr>`:''}
+        ${n(d.paidInCapital)?`<tr><td>Paid-In Capital</td><td style="text-align:right;">${money(n(d.paidInCapital))}</td></tr>`:''}
+        <tr><td>Retained Earnings (prior)</td><td style="text-align:right;">${money(n(d.retainedEarningsPrior))}</td></tr>
+        <tr><td>YTD Net Income</td><td style="text-align:right;">${money(n(d.ytdNetIncome))}</td></tr>
+        ${n(d.distributionsYtd)?`<tr><td>Less: Distributions YTD</td><td style="text-align:right;color:#991b1b;">-${money(n(d.distributionsYtd))}</td></tr>`:''}
+        <tr class="total-row"><td>TOTAL EQUITY</td><td style="text-align:right;">${money(equity)}</td></tr>
+        <tr class="total-row"><td>NET WORTH (Assets − Liabilities)</td><td style="text-align:right;">${money(tAssets - tLiab)}</td></tr>
+      </tbody></table>
+
+      <div class="sig">
+        <div class="line">Borrower signature / date</div>
+        <div class="line">Lender signature / date</div>
+      </div>
+      <script>window.onload=function(){window.print();}</script>
+      </body></html>`);
+    W.document.close();
+  };
+
   const handlePrint = (withCover=false, extraPages='') => {
     const W = window.open("","_blank","width=850,height=1100");
     if (!W) { alert('Print window was blocked — please allow popups for this site.'); return; }
@@ -14723,7 +14818,11 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
   // to ag — none exist today but this guards for Phase 3).
   useEffect(() => {
     const agOnlyTabs = ['budget','whatif','inspection','accrual'];
+    const commOnlyTabs = ['covenants','comm_budget','comm_recon'];
     if (data.sheetType === 'commercial' && agOnlyTabs.includes(activeTab)) {
+      setActiveTab('balance');
+    }
+    if (data.sheetType !== 'commercial' && commOnlyTabs.includes(activeTab)) {
       setActiveTab('balance');
     }
   }, [data.sheetType]); // eslint-disable-line
@@ -19154,9 +19253,22 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               </button>
             )}
             {isCommercial && (
-              <span style={{alignSelf:'center',marginLeft:'auto',fontSize:'.72rem',color:'#2d5a8e',fontStyle:'italic',padding:'0 10px'}}>
-                Commercial-specific Budget, Covenant Ratios &amp; Reconciliation tabs land in Phase 3.
-              </span>
+              <button className={"tab-btn" + (activeTab === "covenants" ? " tab-active" : "")}
+                onClick={()=>setActiveTab("covenants")}>
+                📊 Covenant Ratios
+              </button>
+            )}
+            {isCommercial && (
+              <button className={"tab-btn" + (activeTab === "comm_budget" ? " tab-active" : "")}
+                onClick={()=>setActiveTab("comm_budget")}>
+                💵 Budget / P&amp;L
+              </button>
+            )}
+            {isCommercial && (
+              <button className={"tab-btn" + (activeTab === "comm_recon" ? " tab-active" : "")}
+                onClick={()=>setActiveTab("comm_recon")}>
+                📑 Reconciliation
+              </button>
             )}
           </div>
         );
@@ -19393,9 +19505,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next} tabIndex={0}>Next</button>
                     : data.sheetType === 'commercial'
                       ? <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
-                          <span style={{alignSelf:'center',fontSize:12,color:'#2d5a8e',fontStyle:'italic'}}>
-                            Print, Excel export &amp; Lender Package for commercial land in Phase 3 — use <strong>Save</strong> at the top to file this sheet.
-                          </span>
+                          <button className="btn btn-success" onClick={()=>handlePrintCommercial(data, totalAssets, totalLiabilities)} tabIndex={0}>🖨 Print Commercial BS</button>
                         </div>
                       : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
                           <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}} tabIndex={0}>✂️ Split</button>
@@ -19785,6 +19895,21 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         </div>
       )}
 
+      {/* ───────── Commercial: Covenant Ratios ───────── */}
+      {activeTab === "covenants" && data.sheetType === 'commercial' && (
+        <CovenantRatiosTab data={data} setData={setData} totalAssets={totalAssets} totalLiabilities={totalLiabilities} />
+      )}
+
+      {/* ───────── Commercial: Budget / P&L ───────── */}
+      {activeTab === "comm_budget" && data.sheetType === 'commercial' && (
+        <CommercialBudgetTab data={data} setData={setData} />
+      )}
+
+      {/* ───────── Commercial: Reconciliation ───────── */}
+      {activeTab === "comm_recon" && data.sheetType === 'commercial' && (
+        <CommercialReconTab data={data} setData={setData} savedSheets={savedSheets} totalAssets={totalAssets} totalLiabilities={totalLiabilities} />
+      )}
+
       {activeTab === "accrual" && !!profile?.features?.accrualRecon && (
         <AccrualReconTab
           data={data} setData={setData}
@@ -19805,6 +19930,333 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
 // budget income down to accrual net farm income suitable for FSA packets.
 // Owner draws are entered right here on the tab — NOT read from the budget —
 // per the lender's spec.
+// ─── CovenantRatiosTab ────────────────────────────────────────────────────
+// Commercial-only. Computes the common loan covenants off the balance
+// sheet + a few editable P&L inputs, color-codes each against the
+// threshold the lender types in from the loan docs. All inputs persist
+// on data.commCovenantInputs so they survive save / reopen.
+function CovenantRatiosTab({ data, setData, totalAssets, totalLiabilities }) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmtMoney = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+  const inputs = data.commCovenantInputs || {};
+  const upd = (field, v) => setData({...data, commCovenantInputs: {...inputs, [field]: v}});
+
+  // BS-derived numerators / denominators.
+  const currentAssets =
+      n(data.cashGlacier)
+    + (data.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.accountsReceivable||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0)
+    + (data.inventoryRaw||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.inventoryWip||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.inventoryFinished||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.prepaidExpenses||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.otherCurrentAssets||[]).reduce((s,r)=>s+n(r.amount),0);
+  const currentLiab =
+      (data.accountsPayable||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0)
+    + (data.accruedExpenses||[]).reduce((s,r)=>s+n(r.amount),0)
+    + (data.lineOfCredit||[]).reduce((s,r)=>s+n(r.balance),0)
+    + n(data.currentPortionLTD)
+    + (data.otherCurrentLiabilitiesComm||[]).reduce((s,r)=>s+n(r.amount),0);
+  const inventory =
+      (data.inventoryRaw||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.inventoryWip||[]).reduce((s,r)=>s+n(r.value),0)
+    + (data.inventoryFinished||[]).reduce((s,r)=>s+n(r.value),0);
+  const intangibles = (data.intangibles||[]).reduce((s,r)=>s+n(r.value),0);
+  const equity =
+      n(data.commonStock) + n(data.preferredStock) + n(data.paidInCapital)
+    + n(data.retainedEarningsPrior) + n(data.ytdNetIncome) - n(data.distributionsYtd);
+  const tangibleNetWorth = equity - intangibles;
+  const termDebtAnnualPrin = (data.termDebtCommercial||[]).reduce((s,r)=>s+n(r.annualPmt),0);
+  const interestExpense = n(inputs.interestExpense);
+  const depreciation = n(inputs.depreciation);
+  const leaseExpense = n(inputs.leaseExpense);
+  const ebitda = n(inputs.ebitda);
+
+  // Ratios
+  const currentRatio = currentLiab > 0 ? currentAssets / currentLiab : null;
+  const quickRatio   = currentLiab > 0 ? (currentAssets - inventory) / currentLiab : null;
+  const dttnw        = tangibleNetWorth > 0 ? totalLiabilities / tangibleNetWorth : null;
+  const debtService  = termDebtAnnualPrin + interestExpense;
+  const dscr         = debtService > 0 ? (ebitda - n(inputs.distributions)) / debtService : null;
+  const fccr         = (debtService + leaseExpense) > 0 ? (ebitda + leaseExpense - n(inputs.distributions)) / (debtService + leaseExpense) : null;
+
+  const ratios = [
+    { label: 'Current ratio',          value: currentRatio, format: v => v.toFixed(2) + 'x', good: 1.25, warn: 1.0, formula: '(Current assets) ÷ (Current liabilities)' },
+    { label: 'Quick ratio',            value: quickRatio,   format: v => v.toFixed(2) + 'x', good: 1.0,  warn: 0.8, formula: '(Current assets − Inventory) ÷ (Current liabilities)' },
+    { label: 'Debt / Tangible NW',     value: dttnw,        format: v => v.toFixed(2) + 'x', good: 3.0,  warn: 4.0, inverted: true, formula: 'Total liabilities ÷ (Equity − Intangibles)' },
+    { label: 'DSCR',                   value: dscr,         format: v => v.toFixed(2) + 'x', good: 1.25, warn: 1.0, formula: '(EBITDA − Distributions) ÷ (Annual principal + Interest)' },
+    { label: 'Fixed-charge coverage',  value: fccr,         format: v => v.toFixed(2) + 'x', good: 1.25, warn: 1.0, formula: '(EBITDA + Lease − Distributions) ÷ (Debt service + Lease)' },
+  ];
+
+  const barColor = (r) => {
+    if (r.value === null || isNaN(r.value)) return '#aaa';
+    const covenantThreshold = n(inputs['threshold_' + r.label]);
+    if (covenantThreshold > 0) {
+      const breached = r.inverted ? r.value > covenantThreshold : r.value < covenantThreshold;
+      return breached ? '#991b1b' : '#15803d';
+    }
+    if (r.inverted) return r.value > r.warn ? '#991b1b' : r.value > r.good ? '#b45309' : '#15803d';
+    return r.value < r.warn ? '#991b1b' : r.value < r.good ? '#b45309' : '#15803d';
+  };
+
+  return (
+    <div style={{padding:'18px 22px',maxWidth:900,margin:'0 auto'}}>
+      <div style={{fontSize:'1.15rem',fontWeight:800,color:'#2d5a8e',marginBottom:4}}>📊 Covenant Ratios</div>
+      <div style={{fontSize:'.78rem',color:'#555',marginBottom:14}}>
+        Balance-sheet ratios compute automatically. Enter current-year EBITDA, interest, depreciation, lease expense, and distributions below to light up the coverage ratios. Threshold column reads the covenant from your loan docs — leave blank to use default benchmarks.
+      </div>
+
+      <div style={{background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:8,padding:14,marginBottom:16}}>
+        <div style={{fontSize:'.8rem',fontWeight:700,color:'#2d5a8e',marginBottom:8}}>P&L inputs (manual)</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+          {[['ebitda','EBITDA'],['interestExpense','Interest expense'],['depreciation','Depreciation'],['leaseExpense','Operating lease expense'],['distributions','Owner distributions']].map(([k,label])=>(
+            <div key={k} style={{display:'flex',flexDirection:'column',gap:3}}>
+              <label style={{fontSize:'.7rem',color:'#555',fontWeight:600}}>{label}</label>
+              <div style={{display:'flex',alignItems:'center',gap:4}}>
+                <span style={{color:'#888'}}>$</span>
+                <input type="text" value={inputs[k]||''}
+                  onChange={e=>upd(k, e.target.value.replace(/[^0-9.]/g,''))}
+                  placeholder="0"
+                  style={{flex:1,border:'1px solid #d1d5db',borderRadius:5,padding:'4px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <table style={{width:'100%',borderCollapse:'collapse',background:'white',borderRadius:8,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
+        <thead>
+          <tr style={{background:'#f0f6ff'}}>
+            <th style={{textAlign:'left',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e'}}>Ratio</th>
+            <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e',width:110}}>Value</th>
+            <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e',width:130}}>Covenant min</th>
+            <th style={{textAlign:'left',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e'}}>Formula</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ratios.map((r, i) => (
+            <tr key={i} style={{borderBottom:'1px solid #f0f0f0'}}>
+              <td style={{padding:'10px 12px',fontWeight:600,fontSize:'.85rem'}}>{r.label}</td>
+              <td style={{padding:'10px 12px',textAlign:'right',fontSize:'.95rem',fontWeight:800,color:barColor(r)}}>
+                {r.value === null || isNaN(r.value) ? '—' : r.format(r.value)}
+              </td>
+              <td style={{padding:'10px 12px',textAlign:'right'}}>
+                <input type="text" value={inputs['threshold_'+r.label]||''}
+                  onChange={e=>upd('threshold_'+r.label, e.target.value.replace(/[^0-9.]/g,''))}
+                  placeholder={(r.inverted?'≤ ':'≥ ')+r.good.toFixed(2)}
+                  style={{width:90,textAlign:'right',border:'1px solid #d1d5db',borderRadius:5,padding:'3px 6px',fontSize:'.78rem',fontFamily:'inherit'}} />
+              </td>
+              <td style={{padding:'10px 12px',fontSize:'.7rem',color:'#666',fontFamily:'ui-monospace, Menlo, monospace'}}>{r.formula}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{marginTop:14,fontSize:'.68rem',color:'#666',lineHeight:1.5}}>
+        Green = passing (or above the typed covenant). Amber = thin against default benchmark. Red = breached (below the typed covenant, or below critical benchmark). Default benchmarks: Current ≥ 1.25, Quick ≥ 1.0, D/TNW ≤ 3.0, DSCR ≥ 1.25, FCCR ≥ 1.25.
+      </div>
+    </div>
+  );
+}
+
+// ─── CommercialBudgetTab ───────────────────────────────────────────────────
+// Phase-3 revenue / COGS / opex grid. Persists to data.commBudget so year-
+// over-year comparisons line up.
+function CommercialBudgetTab({ data, setData }) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmtMoney = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+  const b = data.commBudget || {};
+  const upd = (key, v) => setData({...data, commBudget: {...b, [key]: v}});
+  const rev   = Array.isArray(b.revenueLines) ? b.revenueLines : [];
+  const cogs  = Array.isArray(b.cogsLines) ? b.cogsLines : [];
+  const opex  = Array.isArray(b.opexLines) ? b.opexLines : [];
+  const updArr = (key, i, field, v) => {
+    const arr = (b[key]||[]).map((r,j)=> j===i ? {...r, [field]: v} : r);
+    upd(key, arr);
+  };
+  const addRow = (key, row) => upd(key, [...(b[key]||[]), row]);
+  const rmRow  = (key, i) => upd(key, (b[key]||[]).filter((_,j)=>j!==i));
+
+  const revTotal  = rev.reduce((s,r)=>s+n(r.amount),0);
+  const cogsTotal = cogs.reduce((s,r)=>s+n(r.amount),0);
+  const opexTotal = opex.reduce((s,r)=>s+n(r.amount),0);
+  const grossProfit = revTotal - cogsTotal;
+  const opIncome   = grossProfit - opexTotal;
+
+  const Row = ({section, row, i}) => (
+    <tr>
+      <td style={{padding:'4px 8px'}}>
+        <input type="text" value={row.description||''}
+          onChange={e=>updArr(section, i, 'description', e.target.value)}
+          placeholder="Description"
+          style={{width:'100%',border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+      </td>
+      <td style={{padding:'4px 8px',textAlign:'right'}}>
+        <div style={{display:'inline-flex',alignItems:'center',gap:4}}>
+          <span style={{color:'#888'}}>$</span>
+          <input type="text" value={row.amount||''}
+            onChange={e=>updArr(section, i, 'amount', e.target.value.replace(/[^0-9.]/g,''))}
+            placeholder="0"
+            style={{width:100,textAlign:'right',border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 6px',fontSize:'.82rem',fontFamily:'inherit'}} />
+        </div>
+      </td>
+      <td style={{padding:'4px 8px',textAlign:'center'}}>
+        <button onClick={()=>rmRow(section,i)} title="Remove"
+          style={{background:'transparent',border:'none',color:'#991b1b',cursor:'pointer'}}>×</button>
+      </td>
+    </tr>
+  );
+
+  const Section = ({title, section, color, total}) => (
+    <div style={{marginBottom:16}}>
+      <div style={{fontSize:'.8rem',fontWeight:700,color,marginBottom:6}}>{title}</div>
+      <table style={{width:'100%',borderCollapse:'collapse',background:'white',borderRadius:6,overflow:'hidden'}}>
+        <tbody>
+          {(b[section]||[]).map((row,i) => <Row key={i} section={section} row={row} i={i} />)}
+          <tr>
+            <td colSpan={3} style={{padding:'4px 8px'}}>
+              <button onClick={()=>addRow(section,{description:'',amount:''})}
+                style={{background:'transparent',color,border:'1px dashed '+color,borderRadius:5,padding:'3px 10px',fontSize:'.7rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                + Add line
+              </button>
+            </td>
+          </tr>
+          <tr style={{background:'#fafafa',borderTop:'2px solid #e5e7eb',fontWeight:700}}>
+            <td style={{padding:'6px 8px'}}>Subtotal</td>
+            <td style={{padding:'6px 8px',textAlign:'right'}}>{fmtMoney(total)}</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div style={{padding:'18px 22px',maxWidth:900,margin:'0 auto'}}>
+      <div style={{fontSize:'1.15rem',fontWeight:800,color:'#2d5a8e',marginBottom:4}}>💵 Budget / P&amp;L</div>
+      <div style={{fontSize:'.78rem',color:'#555',marginBottom:14}}>
+        Projected income statement for this period — revenue by line, cost of goods, operating expenses. Rolls into the covenant-ratio EBITDA calc and the year-over-year reconciliation.
+      </div>
+
+      <Section title="Revenue" section="revenueLines" color="#15803d" total={revTotal} />
+      <Section title="Cost of Goods Sold" section="cogsLines" color="#b45309" total={cogsTotal} />
+
+      <div style={{background:'#f7f3f0',border:'1px solid #e5d9d1',borderRadius:6,padding:'10px 14px',marginBottom:16,display:'flex',justifyContent:'space-between'}}>
+        <span style={{fontWeight:700}}>Gross Profit</span>
+        <strong style={{color: grossProfit>=0?'#15803d':'#991b1b'}}>{fmtMoney(grossProfit)}</strong>
+      </div>
+
+      <Section title="Operating Expenses" section="opexLines" color="#991b1b" total={opexTotal} />
+
+      <div style={{background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:6,padding:'12px 14px',display:'flex',justifyContent:'space-between'}}>
+        <span style={{fontWeight:800,fontSize:'.95rem',color:'#2d5a8e'}}>Operating Income (approx. EBITDA)</span>
+        <strong style={{fontSize:'1rem',color: opIncome>=0?'#15803d':'#991b1b'}}>{fmtMoney(opIncome)}</strong>
+      </div>
+    </div>
+  );
+}
+
+// ─── CommercialReconTab ───────────────────────────────────────────────────
+// Phase-3 commercial reconciliation. Shows prior-year vs this-year balance
+// sheet line swings so the lender can see where the business grew / shrunk.
+function CommercialReconTab({ data, setData, savedSheets, totalAssets, totalLiabilities }) {
+  const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const fmtMoney = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
+  const [priorSheet, setPriorSheet] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const anchor = data.asOfDate;
+        if (!anchor) { setPriorSheet(null); setLoading(false); return; }
+        const folderKey = JSON.stringify(data.folderPath || []);
+        const cands = (savedSheets||[]).filter(s => {
+          if (!s.asOfDate || s.asOfDate >= anchor) return false;
+          const sameFolder = (data.folderPath && data.folderPath.length > 0)
+            && JSON.stringify(s.folderPath || []) === folderKey;
+          const sameClient = s.clientName === data.clientName;
+          return sameFolder || sameClient;
+        }).sort((a,b) => (b.asOfDate||'').localeCompare(a.asOfDate||''));
+        const pick = cands[0];
+        if (!pick) { if (!cancelled) { setPriorSheet(null); setLoading(false); } return; }
+        const item = await storage.get(pick.key);
+        if (!item) { if (!cancelled) { setPriorSheet(null); setLoading(false); } return; }
+        const p = JSON.parse(item.value);
+        if (!cancelled) { setPriorSheet({ data: p, asOfDate: pick.asOfDate }); setLoading(false); }
+      } catch { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [data.clientName, data.asOfDate, JSON.stringify(data.folderPath||[]), (savedSheets||[]).map(s=>`${s.key}@${s.savedAt||''}`).join('|')]);
+
+  const sumSection = (sheet, section, field='amount') =>
+    (sheet?.[section]||[]).reduce((s,r)=>s+n(r[field]),0);
+  const agingTotal = (sheet, section) =>
+    (sheet?.[section]||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0);
+
+  const prior = priorSheet?.data;
+  const lines = prior ? [
+    { label:'Cash & Bank', cur: n(data.cashGlacier)+sumSection(data,'cashOther'), prior: n(prior.cashGlacier)+sumSection(prior,'cashOther') },
+    { label:'A/R', cur: agingTotal(data,'accountsReceivable'), prior: agingTotal(prior,'accountsReceivable') },
+    { label:'Inventory', cur: sumSection(data,'inventoryRaw','value')+sumSection(data,'inventoryWip','value')+sumSection(data,'inventoryFinished','value'),
+                         prior: sumSection(prior,'inventoryRaw','value')+sumSection(prior,'inventoryWip','value')+sumSection(prior,'inventoryFinished','value') },
+    { label:'Prepaid', cur: sumSection(data,'prepaidExpenses'), prior: sumSection(prior,'prepaidExpenses') },
+    { label:'FF&E', cur: sumSection(data,'ffe','value'), prior: sumSection(prior,'ffe','value') },
+    { label:'Commercial RE', cur: sumSection(data,'commercialRealEstate','value'), prior: sumSection(prior,'commercialRealEstate','value') },
+    { label:'Intangibles', cur: sumSection(data,'intangibles','value'), prior: sumSection(prior,'intangibles','value') },
+    { label:'A/P', cur: agingTotal(data,'accountsPayable'), prior: agingTotal(prior,'accountsPayable') },
+    { label:'Accrued', cur: sumSection(data,'accruedExpenses'), prior: sumSection(prior,'accruedExpenses') },
+    { label:'Line of Credit', cur: sumSection(data,'lineOfCredit','balance'), prior: sumSection(prior,'lineOfCredit','balance') },
+    { label:'Term Debt', cur: sumSection(data,'termDebtCommercial','balance'), prior: sumSection(prior,'termDebtCommercial','balance') },
+    { label:'Equity', cur: n(data.commonStock)+n(data.preferredStock)+n(data.paidInCapital)+n(data.retainedEarningsPrior)+n(data.ytdNetIncome)-n(data.distributionsYtd),
+                       prior: n(prior.commonStock)+n(prior.preferredStock)+n(prior.paidInCapital)+n(prior.retainedEarningsPrior)+n(prior.ytdNetIncome)-n(prior.distributionsYtd) },
+  ] : [];
+
+  return (
+    <div style={{padding:'18px 22px',maxWidth:960,margin:'0 auto'}}>
+      <div style={{fontSize:'1.15rem',fontWeight:800,color:'#2d5a8e',marginBottom:4}}>📑 Commercial Reconciliation</div>
+      <div style={{fontSize:'.78rem',color:'#555',marginBottom:14}}>
+        Period-over-period line swings for the commercial balance sheet. Large positive deltas on assets (growth) or liabilities (more leverage) are worth walking through with the client.
+      </div>
+      {loading && <div style={{color:'#555',fontStyle:'italic'}}>Loading prior sheet…</div>}
+      {!loading && !priorSheet && (
+        <div style={{background:'#fef3c7',border:'1px solid #fcd34d',padding:'10px 14px',borderRadius:6,color:'#78350f',fontSize:'.8rem'}}>
+          No prior commercial sheet found for this client — nothing to reconcile against yet.
+        </div>
+      )}
+      {priorSheet && (
+        <table style={{width:'100%',borderCollapse:'collapse',background:'white',borderRadius:8,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
+          <thead>
+            <tr style={{background:'#f0f6ff'}}>
+              <th style={{textAlign:'left',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e'}}>Line</th>
+              <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e',width:130}}>{priorSheet.asOfDate}</th>
+              <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e',width:130}}>{data.asOfDate}</th>
+              <th style={{textAlign:'right',padding:'8px 12px',fontSize:'.72rem',color:'#2d5a8e',borderBottom:'2px solid #2d5a8e',width:130}}>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => {
+              const d = l.cur - l.prior;
+              return (
+                <tr key={i} style={{borderBottom:'1px solid #f0f0f0'}}>
+                  <td style={{padding:'6px 12px',fontSize:'.82rem'}}>{l.label}</td>
+                  <td style={{padding:'6px 12px',textAlign:'right',fontSize:'.8rem',color:'#888'}}>{fmtMoney(l.prior)}</td>
+                  <td style={{padding:'6px 12px',textAlign:'right',fontSize:'.85rem',fontWeight:600}}>{fmtMoney(l.cur)}</td>
+                  <td style={{padding:'6px 12px',textAlign:'right',fontWeight:600,color: d===0?'#888':(d>0?'#15803d':'#991b1b')}}>
+                    {d===0 ? '—' : (d > 0 ? '+' : '') + fmtMoney(d)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function AccrualReconTab({ data, setData, savedSheets, budgetTotalIncome, budgetTotalExpenses, sheetTotals }) {
   const [priorSheet, setPriorSheet] = React.useState(null);
   const [priorLoading, setPriorLoading] = React.useState(true);
