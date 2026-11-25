@@ -1111,8 +1111,54 @@ function deriveCollateral(d) {
   };
 }
 
+// Commercial-balance-sheet data shape. Mirrors the ag shape's conventions
+// (one array per section, each row is an object of string fields) so every
+// piece of app infrastructure (folder tree, autosave, linked entities, CA
+// access, print, YoY snapshots, feature flags) works unchanged — only the
+// wizard steps and section labels differ. Everything in here is Phase-1
+// scaffolding; Phase-2 wires the actual wizard UI onto these fields.
+function emptyCommercialData() {
+  return {
+    sheetType: 'commercial',
+    clientName:"", asOfDate: new Date().toISOString().slice(0,10),
+    // Entity profile
+    einNumber:"", entityType:"", naicsCode:"", yearEstablished:"",
+    // Current assets
+    cashGlacier:"", cashOther:[{institution:"",amount:""}],
+    accountsReceivable:[{customer:"",current:"",d30:"",d60:"",d90:"",d90plus:""}],
+    inventoryRaw:[{description:"",value:""}],
+    inventoryWip:[{description:"",value:""}],
+    inventoryFinished:[{description:"",value:""}],
+    prepaidExpenses:[{description:"",amount:""}],
+    otherCurrentAssets:[{description:"",amount:""}],
+    // Fixed / long-term assets
+    ffe:[{description:"",purchaseDate:"",cost:"",depreciation:"",value:""}],
+    commercialVehicles:[{year:"",make:"",vin:"",condition:"",value:""}],
+    commercialRealEstate:[{address:"",description:"",value:""}],
+    leaseholdImprovements:[{description:"",value:""}],
+    intangibles:[{description:"",type:"",value:""}],
+    // Current liabilities
+    accountsPayable:[{vendor:"",current:"",d30:"",d60:"",d90:"",d90plus:""}],
+    accruedExpenses:[{description:"",amount:""}],
+    lineOfCredit:[{lender:"",limit:"",balance:"",rate:"",maturityDate:"",advanceRate:""}],
+    currentPortionLTD:"",
+    otherCurrentLiabilitiesComm:[{description:"",amount:""}],
+    // Long-term
+    termDebtCommercial:[{lender:"",originalAmount:"",balance:"",annualPmt:"",rate:"",maturityDate:"",sbaGuaranty:false,guarantyPct:""}],
+    capitalLeases:[{lessor:"",asset:"",monthlyPmt:"",remainingTerm:"",balance:""}],
+    subordinatedDebt:[{holder:"",balance:"",rate:"",maturityDate:""}],
+    // Equity
+    commonStock:"", preferredStock:"", paidInCapital:"",
+    retainedEarningsPrior:"", ytdNetIncome:"", distributionsYtd:"",
+    // Shared concepts (linked entities etc.) that span both types
+    linkedEntities:[], linkedEntitySnapshots:{}, linkedEntityNWSnapshot:{},
+    folderPath:[],
+  };
+}
+
 function emptyData() {
   return {
+    sheetType: 'ag',
     clientName:"", asOfDate: new Date().toISOString().slice(0,10),
     cashGlacier:"", cashOther:[{institution:"",amount:""}],
     receivables:[{description:"",amount:""}], receivablesSecured:"",
@@ -7849,6 +7895,15 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                             style={{background:u.features?.accrualRecon?'#dcfce7':'#f3f4f6',color:u.features?.accrualRecon?'#15803d':'#6b7280',border:'1px solid '+(u.features?.accrualRecon?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
                             {u.features?.accrualRecon ? '✓ Year Reconciliations' : 'Year Reconciliations'}
                           </button>
+                          <button
+                            onClick={()=>{
+                              const current = u.features || {};
+                              handleUpdateRole(u.id, { features: { ...current, commercialBS: !current.commercialBS } });
+                            }}
+                            title="Commercial Balance Sheet — adds an ag-vs-commercial picker when creating a new sheet, with commercial-oriented sections (A/R aging, inventory, line of credit, SBA term debt, covenant ratios)"
+                            style={{background:u.features?.commercialBS?'#dcfce7':'#f3f4f6',color:u.features?.commercialBS?'#15803d':'#6b7280',border:'1px solid '+(u.features?.commercialBS?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                            {u.features?.commercialBS ? '✓ Commercial BS' : 'Commercial BS'}
+                          </button>
                         </div>
                       )}
                       {u.role === 'ca' && (
@@ -9171,6 +9226,10 @@ export default function BalanceSheet() {
   const [vehPriceCheck, setVehPriceCheck] = useState({});
   const [vehPriceCheckLoading, setVehPriceCheckLoading] = useState(false);
   const [showAdminScreen, setShowAdminScreen] = useState(false);
+  // Sheet-type picker for new-sheet flow — only shows when the user's
+  // profile.features.commercialBS is on. If the flag is off the user
+  // never sees the picker and ag is used (back-compat default).
+  const [showSheetTypePicker, setShowSheetTypePicker] = useState(false);
   const [dashboardClient, setDashboardClient] = useState(null); // client name to show dashboard for, null = normal home
 
   // ── Browser back-button → in-app navigation ────────────────────────────────
@@ -10520,7 +10579,29 @@ Question: ${q}`,
         setPreferredOwnerUid(lenders[0].id);
       }
     }
+    // If the Commercial BS feature flag is on for this user, open the
+    // ag-vs-commercial picker first. Otherwise behave exactly as before
+    // (ag sheet, no picker). This keeps every existing lender's workflow
+    // untouched until an admin flips the flag.
+    if (profile?.features?.commercialBS) {
+      setShowSheetTypePicker(true);
+      return;
+    }
     setData(emptyData()); setOriginalKey(null); setStep(0); setScreen("wizard");
+  };
+
+  // Called from the picker modal (or directly in flag-off mode) to
+  // actually seed a blank sheet of the chosen type and jump to the
+  // wizard. Phase-2 will branch the wizard's STEPS array on
+  // data.sheetType; for now both paths route through the same wizard
+  // shell and the ag steps render on commercial sheets until Phase 2.
+  const startNewOfType = (sheetType) => {
+    setShowSheetTypePicker(false);
+    const seed = sheetType === 'commercial' ? emptyCommercialData() : emptyData();
+    setData(seed);
+    setOriginalKey(null);
+    setStep(0);
+    setScreen("wizard");
   };
 
   // ── Import helpers ─────────────────────────────────────────────────────────
@@ -16854,6 +16935,45 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
           )}
 
+          {/* ── Sheet type picker (ag vs commercial) ── */}
+          {showSheetTypePicker && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+              <div style={{background:"white",borderRadius:14,padding:28,maxWidth:640,width:"100%",boxShadow:"0 10px 50px rgba(0,0,0,.25)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                  <div style={{fontSize:"1.15rem",fontWeight:800,color:"#6B0E1E"}}>New Balance Sheet</div>
+                  <button onClick={()=>setShowSheetTypePicker(false)}
+                    style={{background:"none",border:"none",fontSize:"1.3rem",cursor:"pointer",color:"#888",lineHeight:1}}>×</button>
+                </div>
+                <div style={{fontSize:".85rem",color:"#555",marginBottom:18}}>
+                  Pick the type of business this sheet is for. You can't switch types after fields are filled in.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                  <button onClick={()=>startNewOfType('ag')}
+                    style={{textAlign:"left",padding:"18px 18px",background:"#faf6ef",border:"1.5px solid #e8dcc3",borderRadius:12,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor='#6B0E1E';e.currentTarget.style.background='#fff7e8';}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8dcc3';e.currentTarget.style.background='#faf6ef';}}>
+                    <div style={{fontSize:"1.6rem",marginBottom:6}}>🌾</div>
+                    <div style={{fontWeight:800,fontSize:".95rem",color:"#6B0E1E",marginBottom:4}}>Agricultural</div>
+                    <div style={{fontSize:".78rem",color:"#555",lineHeight:1.5}}>
+                      Crops, livestock, machinery, real estate, FSA packets, equipment appraisals, and the Ag Inspection + Year Reconciliations tabs.
+                    </div>
+                  </button>
+                  <button onClick={()=>startNewOfType('commercial')}
+                    style={{textAlign:"left",padding:"18px 18px",background:"#f0f6fb",border:"1.5px solid #c8dcef",borderRadius:12,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor='#2d5a8e';e.currentTarget.style.background='#e6f1fb';}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor='#c8dcef';e.currentTarget.style.background='#f0f6fb';}}>
+                    <div style={{fontSize:"1.6rem",marginBottom:6}}>🏢</div>
+                    <div style={{fontWeight:800,fontSize:".95rem",color:"#2d5a8e",marginBottom:4}}>Commercial</div>
+                    <div style={{fontSize:".78rem",color:"#555",lineHeight:1.5}}>
+                      A/R + aging, inventory (raw / WIP / finished), FF&amp;E, line of credit with borrowing-base, term debt + SBA, covenant ratios.
+                    </div>
+                    <div style={{marginTop:8,fontSize:".68rem",color:"#92400e",fontStyle:"italic"}}>Phase 1 — data shape only; full wizard steps land in Phase 2.</div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Import Modal ── */}
           {showImport && (
             <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -18512,6 +18632,19 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             )
           )}
           {data.clientName && <span style={{opacity:.8,fontSize:".85rem"}}>{data.clientName}</span>}
+          {/* Sheet-type badge — only renders when the feature flag is on
+              so existing ag-only lenders see no change in the header. */}
+          {profile?.features?.commercialBS && data.sheetType && (
+            <span title={data.sheetType === 'commercial' ? 'Commercial balance sheet' : 'Agricultural balance sheet'}
+              style={{
+                marginLeft:4,
+                background: data.sheetType === 'commercial' ? 'rgba(45,90,142,.25)' : 'rgba(255,255,255,.18)',
+                border: '1px solid rgba(255,255,255,.3)',
+                padding:'1px 8px',borderRadius:999,fontSize:10,fontWeight:700,letterSpacing:'.03em',
+              }}>
+              {data.sheetType === 'commercial' ? '🏢 COMMERCIAL' : '🌾 AG'}
+            </span>
+          )}
           {session?.user?.email && <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
           {(pendingReviews.length + pendingCAEdits.length) > 0 && (
             <button onClick={()=>setScreen("home")}
