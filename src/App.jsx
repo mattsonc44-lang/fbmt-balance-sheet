@@ -867,15 +867,33 @@ function ExpenseDropdown({ value, onChange, expenseList, placeholder }) {
   );
 }
 
-const STEPS = [
+const STEPS_AG = [
   "intro","cash_glacier","cash_other","receivables","federal_payments",
   "livestock_market","farm_products","crop_investment","supplies","other_current",
   "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets",
   "liab_intro","operating_notes","accounts_due","intermediate_debt","re_debt",
   "taxes_due","other_current_liab","other_liabilities","collateral","summary"
 ];
+// Commercial step set — same intro / summary as ag, but swaps the whole
+// middle for commercial-oriented sections.
+const STEPS_COMMERCIAL = [
+  "intro_comm","cash_glacier","cash_other",
+  "ar_aging","inv_raw","inv_wip","inv_finished","prepaid_exp","other_current_assets_comm",
+  "ffe","commercial_vehicles","commercial_real_estate","leasehold_imp","intangibles",
+  "liab_intro",
+  "ap_aging","accrued_exp","line_of_credit","current_portion_ltd","other_current_liab_comm",
+  "term_debt_comm","capital_leases","sub_debt",
+  "equity",
+  "collateral","summary"
+];
+// Default STEPS (ag) — kept for back-compat with any old references.
+const STEPS = STEPS_AG;
+// Which array runs is chosen by `data.sheetType` inside the wizard shell.
+const stepsForType = t => (t === 'commercial' ? STEPS_COMMERCIAL : STEPS_AG);
+
 const STEP_LABELS = {
-  intro:"Client Info", cash_glacier:"Glacier Bank", cash_other:"Other Banks",
+  intro:"Client Info", intro_comm:"Business Info",
+  cash_glacier:"Glacier Bank", cash_other:"Other Banks",
   receivables:"Receivables", federal_payments:"Federal Payments",
   livestock_market:"Market Livestock", farm_products:"Farm Products",
   crop_investment:"Crop Investment", supplies:"Supplies", other_current:"Other Current",
@@ -884,13 +902,31 @@ const STEP_LABELS = {
   liab_intro:"Liabilities", operating_notes:"Operating Notes", accounts_due:"Accounts Due",
   intermediate_debt:"Term Debt", re_debt:"Real Estate Debt", taxes_due:"Taxes Due",
   other_current_liab:"Other Curr. Liab",
-  other_liabilities:"Other Liabilities", collateral:"Collateral", summary:"Summary"
+  other_liabilities:"Other Liabilities", collateral:"Collateral", summary:"Summary",
+  // Commercial labels
+  ar_aging:"A/R + Aging",
+  inv_raw:"Inventory (Raw)", inv_wip:"Inventory (WIP)", inv_finished:"Inventory (Finished)",
+  prepaid_exp:"Prepaid Expenses", other_current_assets_comm:"Other Current Assets",
+  ffe:"FF&E / Equipment", commercial_vehicles:"Vehicles",
+  commercial_real_estate:"Real Estate", leasehold_imp:"Leasehold Improvements",
+  intangibles:"Intangibles / Goodwill",
+  ap_aging:"A/P + Aging", accrued_exp:"Accrued Expenses",
+  line_of_credit:"Line of Credit", current_portion_ltd:"Current Portion LTD",
+  other_current_liab_comm:"Other Current Liab",
+  term_debt_comm:"Term Debt / SBA", capital_leases:"Capital Leases", sub_debt:"Subordinated Debt",
+  equity:"Equity",
 };
 const ASSET_STEPS = ["cash_glacier","cash_other","receivables","federal_payments",
   "livestock_market","farm_products","crop_investment","supplies","other_current",
-  "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets"];
+  "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets",
+  // commercial assets
+  "ar_aging","inv_raw","inv_wip","inv_finished","prepaid_exp","other_current_assets_comm",
+  "ffe","commercial_vehicles","commercial_real_estate","leasehold_imp","intangibles"];
 const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_debt",
-  "taxes_due","other_current_liab","other_liabilities"];
+  "taxes_due","other_current_liab","other_liabilities",
+  // commercial liabilities
+  "ap_aging","accrued_exp","line_of_credit","current_portion_ltd","other_current_liab_comm",
+  "term_debt_comm","capital_leases","sub_debt","equity"];
 const ANALYSIS_STEPS = ["collateral"];
 
 // ── Collateral valuation defaults ──────────────────────────────────────────
@@ -14627,6 +14663,10 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
       W.document.close();
     }
   };
+  // Pick the right step set for this sheet's type. Shadows the module-
+  // level STEPS inside the wizard component only — every STEPS reference
+  // below is now type-aware.
+  const STEPS = stepsForType(data.sheetType);
   const currentStepId = STEPS[step];
   const progressPct = Math.round((step / (STEPS.length - 1)) * 100);
   const next = () => {
@@ -14752,6 +14792,347 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           <div className="input-group">
             <label>As of Date</label>
             <input type="date" className="text-input" value={data.asOfDate} onChange={e=>set("asOfDate",e.target.value)} />
+          </div>
+        </div>
+      );
+      // ─────────────────────────────────────────────────────────────
+      // Commercial-balance-sheet steps (Phase 2). Mirrors the ag
+      // pattern: SecHdr + array of rows + add/remove buttons. Totals
+      // and print-layout for these come in Phase 3.
+      // ─────────────────────────────────────────────────────────────
+      case "intro_comm": return (
+        <div className="step-content">
+          <SecHdr icon="🏢" title="Commercial Balance Sheet" subtitle="First Bank of Montana — Commercial Loan Package" />
+          <p className="intro-text">Enter the business profile. Everything after this is organized around a commercial operation, not an ag one.</p>
+          <TxtInp label="Business Name" value={data.clientName} onChange={v=>set("clientName",v)} placeholder="Legal entity name" />
+          <div className="input-group">
+            <label>As of Date</label>
+            <input type="date" className="text-input" value={data.asOfDate} onChange={e=>set("asOfDate",e.target.value)} />
+          </div>
+          <TxtInp label="EIN" value={data.einNumber||''} onChange={v=>set("einNumber",v)} placeholder="XX-XXXXXXX" />
+          <div className="input-group">
+            <label>Entity Type</label>
+            <select className="text-input" value={data.entityType||''} onChange={e=>set("entityType",e.target.value)}
+              style={{fontFamily:'inherit'}}>
+              <option value="">— Select —</option>
+              <option value="sole_prop">Sole proprietorship</option>
+              <option value="partnership">Partnership</option>
+              <option value="llc">LLC</option>
+              <option value="s_corp">S-Corp</option>
+              <option value="c_corp">C-Corp</option>
+              <option value="nonprofit">Nonprofit</option>
+            </select>
+          </div>
+          <TxtInp label="NAICS Code" value={data.naicsCode||''} onChange={v=>set("naicsCode",v)} placeholder="e.g. 236220 (commercial construction)" />
+          <TxtInp label="Year Established" value={data.yearEstablished||''} onChange={v=>set("yearEstablished",v)} placeholder="YYYY" />
+        </div>
+      );
+      case "ar_aging": return (
+        <div className="step-content">
+          <SecHdr icon="📑" title="Accounts Receivable &amp; Aging" subtitle="Trade receivables owed by customers, broken into aging buckets for borrowing-base margining." color="#2d5a8e" />
+          {(data.accountsReceivable||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`accountsReceivable-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Customer" value={r.customer} onChange={v=>setArr("accountsReceivable",i,"customer",v)} placeholder="Customer name" />
+              <Inp label="Current" prefix="$" value={r.current} onChange={v=>setArr("accountsReceivable",i,"current",v)} />
+              <Inp label="31-60" prefix="$" value={r.d30} onChange={v=>setArr("accountsReceivable",i,"d30",v)} />
+              <Inp label="61-90" prefix="$" value={r.d60} onChange={v=>setArr("accountsReceivable",i,"d60",v)} />
+              <Inp label="90+" prefix="$" value={r.d90plus} onChange={v=>setArr("accountsReceivable",i,"d90plus",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("accountsReceivable",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("accountsReceivable",{customer:"",current:"",d30:"",d60:"",d90:"",d90plus:""})}>+ Add Customer</button>
+        </div>
+      );
+      case "inv_raw": return (
+        <div className="step-content">
+          <SecHdr icon="📦" title="Inventory — Raw Materials" subtitle="Unprocessed inputs on hand" color="#2d5a8e" />
+          {(data.inventoryRaw||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`inventoryRaw-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("inventoryRaw",i,"description",v)} />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("inventoryRaw",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("inventoryRaw",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("inventoryRaw",{description:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "inv_wip": return (
+        <div className="step-content">
+          <SecHdr icon="🛠" title="Inventory — Work in Process" subtitle="Partially-completed goods" color="#2d5a8e" />
+          {(data.inventoryWip||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`inventoryWip-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("inventoryWip",i,"description",v)} />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("inventoryWip",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("inventoryWip",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("inventoryWip",{description:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "inv_finished": return (
+        <div className="step-content">
+          <SecHdr icon="✅" title="Inventory — Finished Goods" subtitle="Saleable inventory ready to ship" color="#2d5a8e" />
+          {(data.inventoryFinished||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`inventoryFinished-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("inventoryFinished",i,"description",v)} />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("inventoryFinished",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("inventoryFinished",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("inventoryFinished",{description:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "prepaid_exp": return (
+        <div className="step-content">
+          <SecHdr icon="📄" title="Prepaid Expenses" subtitle="Rent, insurance, subscriptions, deposits paid ahead" color="#2d5a8e" />
+          {(data.prepaidExpenses||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`prepaidExpenses-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("prepaidExpenses",i,"description",v)} />
+              <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("prepaidExpenses",i,"amount",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("prepaidExpenses",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("prepaidExpenses",{description:"",amount:""})}>+ Add</button>
+        </div>
+      );
+      case "other_current_assets_comm": return (
+        <div className="step-content">
+          <SecHdr icon="📁" title="Other Current Assets" subtitle="Anything else convertible to cash within 12 months" color="#2d5a8e" />
+          {(data.otherCurrentAssets||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`otherCurrentAssets-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("otherCurrentAssets",i,"description",v)} />
+              <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("otherCurrentAssets",i,"amount",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("otherCurrentAssets",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("otherCurrentAssets",{description:"",amount:""})}>+ Add</button>
+        </div>
+      );
+      case "ffe": return (
+        <div className="step-content">
+          <SecHdr icon="🖥" title="Furniture, Fixtures &amp; Equipment" subtitle="Office equipment, computers, production machinery, tooling" color="#2d5a8e" />
+          {(data.ffe||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`ffe-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("ffe",i,"description",v)} />
+              <TxtInp label="Purchase Date" value={r.purchaseDate} onChange={v=>setArr("ffe",i,"purchaseDate",v)} placeholder="mm/yyyy" />
+              <Inp label="Cost" prefix="$" value={r.cost} onChange={v=>setArr("ffe",i,"cost",v)} />
+              <Inp label="Depreciation" prefix="$" value={r.depreciation} onChange={v=>setArr("ffe",i,"depreciation",v)} />
+              <Inp label="Book Value" prefix="$" value={r.value} onChange={v=>setArr("ffe",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("ffe",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("ffe",{description:"",purchaseDate:"",cost:"",depreciation:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "commercial_vehicles": return (
+        <div className="step-content">
+          <SecHdr icon="🚚" title="Commercial Vehicles" subtitle="Fleet vehicles, trucks, trailers titled in the business" color="#2d5a8e" />
+          {(data.commercialVehicles||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`commercialVehicles-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Year" value={r.year} onChange={v=>setArr("commercialVehicles",i,"year",v)} />
+              <TxtInp label="Make/Model" value={r.make} onChange={v=>setArr("commercialVehicles",i,"make",v)} />
+              <TxtInp label="VIN" value={r.vin} onChange={v=>setArr("commercialVehicles",i,"vin",v)} />
+              <TxtInp label="Condition" value={r.condition} onChange={v=>setArr("commercialVehicles",i,"condition",v)} />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("commercialVehicles",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("commercialVehicles",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("commercialVehicles",{year:"",make:"",vin:"",condition:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "commercial_real_estate": return (
+        <div className="step-content">
+          <SecHdr icon="🏢" title="Commercial Real Estate" subtitle="Buildings, land, and improvements owned by the business" color="#2d5a8e" />
+          {(data.commercialRealEstate||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`commercialRealEstate-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Address" value={r.address} onChange={v=>setArr("commercialRealEstate",i,"address",v)} />
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("commercialRealEstate",i,"description",v)} placeholder="Warehouse / office / retail" />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("commercialRealEstate",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("commercialRealEstate",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("commercialRealEstate",{address:"",description:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "leasehold_imp": return (
+        <div className="step-content">
+          <SecHdr icon="🔧" title="Leasehold Improvements" subtitle="Build-outs and improvements to leased space" color="#2d5a8e" />
+          {(data.leaseholdImprovements||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`leaseholdImprovements-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("leaseholdImprovements",i,"description",v)} />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("leaseholdImprovements",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("leaseholdImprovements",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("leaseholdImprovements",{description:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "intangibles": return (
+        <div className="step-content">
+          <SecHdr icon="📜" title="Intangibles &amp; Goodwill" subtitle="Patents, trademarks, licenses, goodwill from acquisitions" color="#2d5a8e" />
+          {(data.intangibles||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`intangibles-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("intangibles",i,"description",v)} />
+              <TxtInp label="Type" value={r.type} onChange={v=>setArr("intangibles",i,"type",v)} placeholder="Patent / trademark / goodwill" />
+              <Inp label="Value" prefix="$" value={r.value} onChange={v=>setArr("intangibles",i,"value",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("intangibles",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("intangibles",{description:"",type:"",value:""})}>+ Add</button>
+        </div>
+      );
+      case "ap_aging": return (
+        <div className="step-content">
+          <SecHdr icon="🧾" title="Accounts Payable &amp; Aging" subtitle="Trade vendors the business owes, aged by bucket" color="#4a0810" />
+          {(data.accountsPayable||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`accountsPayable-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Vendor" value={r.vendor} onChange={v=>setArr("accountsPayable",i,"vendor",v)} />
+              <Inp label="Current" prefix="$" value={r.current} onChange={v=>setArr("accountsPayable",i,"current",v)} />
+              <Inp label="31-60" prefix="$" value={r.d30} onChange={v=>setArr("accountsPayable",i,"d30",v)} />
+              <Inp label="61-90" prefix="$" value={r.d60} onChange={v=>setArr("accountsPayable",i,"d60",v)} />
+              <Inp label="90+" prefix="$" value={r.d90plus} onChange={v=>setArr("accountsPayable",i,"d90plus",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("accountsPayable",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("accountsPayable",{vendor:"",current:"",d30:"",d60:"",d90:"",d90plus:""})}>+ Add Vendor</button>
+        </div>
+      );
+      case "accrued_exp": return (
+        <div className="step-content">
+          <SecHdr icon="💼" title="Accrued Expenses" subtitle="Payroll, PTO, interest, taxes accrued but unpaid" color="#4a0810" />
+          {(data.accruedExpenses||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`accruedExpenses-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("accruedExpenses",i,"description",v)} />
+              <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("accruedExpenses",i,"amount",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("accruedExpenses",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("accruedExpenses",{description:"",amount:""})}>+ Add</button>
+        </div>
+      );
+      case "line_of_credit": return (
+        <div className="step-content">
+          <SecHdr icon="💳" title="Line of Credit" subtitle="Revolving credit facilities — track limit, balance, advance rate for borrowing-base math" color="#4a0810" />
+          {(data.lineOfCredit||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`lineOfCredit-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Lender" value={r.lender} onChange={v=>setArr("lineOfCredit",i,"lender",v)} />
+              <Inp label="Limit" prefix="$" value={r.limit} onChange={v=>setArr("lineOfCredit",i,"limit",v)} />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("lineOfCredit",i,"balance",v)} />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("lineOfCredit",i,"rate",v)} />
+              <TxtInp label="Maturity" value={r.maturityDate} onChange={v=>setArr("lineOfCredit",i,"maturityDate",v)} placeholder="mm/dd/yy" />
+              <Inp label="Advance Rate" prefix="%" value={r.advanceRate} onChange={v=>setArr("lineOfCredit",i,"advanceRate",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("lineOfCredit",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("lineOfCredit",{lender:"",limit:"",balance:"",rate:"",maturityDate:"",advanceRate:""})}>+ Add LOC</button>
+        </div>
+      );
+      case "current_portion_ltd": return (
+        <div className="step-content">
+          <SecHdr icon="📅" title="Current Portion of Long-Term Debt" subtitle="Principal on term debt + capital leases due within 12 months" color="#4a0810" />
+          <Inp label="Current portion LTD" prefix="$" value={data.currentPortionLTD||''} onChange={v=>set("currentPortionLTD",v)} />
+        </div>
+      );
+      case "other_current_liab_comm": return (
+        <div className="step-content">
+          <SecHdr icon="📋" title="Other Current Liabilities" subtitle="Deferred revenue, customer deposits, income taxes payable, etc." color="#4a0810" />
+          {(data.otherCurrentLiabilitiesComm||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`otherCurrentLiabilitiesComm-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("otherCurrentLiabilitiesComm",i,"description",v)} />
+              <Inp label="Amount" prefix="$" value={r.amount} onChange={v=>setArr("otherCurrentLiabilitiesComm",i,"amount",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("otherCurrentLiabilitiesComm",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("otherCurrentLiabilitiesComm",{description:"",amount:""})}>+ Add</button>
+        </div>
+      );
+      case "term_debt_comm": return (
+        <div className="step-content">
+          <SecHdr icon="🏦" title="Term Debt &amp; SBA Loans" subtitle="Amortizing term notes, SBA 7(a) / 504 loans, including any government guaranty" color="#4a0810" />
+          {(data.termDebtCommercial||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`termDebtCommercial-${i}`} style={{alignItems:'flex-end',flexWrap:'wrap'}}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Lender" value={r.lender} onChange={v=>setArr("termDebtCommercial",i,"lender",v)} />
+              <Inp label="Original" prefix="$" value={r.originalAmount} onChange={v=>setArr("termDebtCommercial",i,"originalAmount",v)} />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("termDebtCommercial",i,"balance",v)} />
+              <Inp label="Annual Pmt" prefix="$" value={r.annualPmt} onChange={v=>setArr("termDebtCommercial",i,"annualPmt",v)} />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("termDebtCommercial",i,"rate",v)} />
+              <TxtInp label="Maturity" value={r.maturityDate} onChange={v=>setArr("termDebtCommercial",i,"maturityDate",v)} placeholder="mm/dd/yy" />
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:'.78rem',color:'#444',cursor:'pointer'}}>
+                <input type="checkbox" checked={!!r.sbaGuaranty} onChange={e=>setArr("termDebtCommercial",i,"sbaGuaranty",e.target.checked)} />
+                SBA
+              </label>
+              {r.sbaGuaranty && (
+                <Inp label="Gty %" prefix="%" value={r.guarantyPct} onChange={v=>setArr("termDebtCommercial",i,"guarantyPct",v)} />
+              )}
+              <button className="remove-btn" onClick={()=>removeRow("termDebtCommercial",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("termDebtCommercial",{lender:"",originalAmount:"",balance:"",annualPmt:"",rate:"",maturityDate:"",sbaGuaranty:false,guarantyPct:""})}>+ Add Loan</button>
+        </div>
+      );
+      case "capital_leases": return (
+        <div className="step-content">
+          <SecHdr icon="📑" title="Capital Leases" subtitle="Equipment / vehicle leases that capitalize to the balance sheet" color="#4a0810" />
+          {(data.capitalLeases||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`capitalLeases-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Lessor" value={r.lessor} onChange={v=>setArr("capitalLeases",i,"lessor",v)} />
+              <TxtInp label="Asset" value={r.asset} onChange={v=>setArr("capitalLeases",i,"asset",v)} />
+              <Inp label="Monthly Pmt" prefix="$" value={r.monthlyPmt} onChange={v=>setArr("capitalLeases",i,"monthlyPmt",v)} />
+              <TxtInp label="Term Left" value={r.remainingTerm} onChange={v=>setArr("capitalLeases",i,"remainingTerm",v)} placeholder="e.g. 18mo" />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("capitalLeases",i,"balance",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("capitalLeases",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("capitalLeases",{lessor:"",asset:"",monthlyPmt:"",remainingTerm:"",balance:""})}>+ Add Lease</button>
+        </div>
+      );
+      case "sub_debt": return (
+        <div className="step-content">
+          <SecHdr icon="🔒" title="Subordinated Debt" subtitle="Owner notes, seller financing, mezzanine debt subordinate to senior lenders" color="#4a0810" />
+          {(data.subordinatedDebt||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`subordinatedDebt-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Holder" value={r.holder} onChange={v=>setArr("subordinatedDebt",i,"holder",v)} />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("subordinatedDebt",i,"balance",v)} />
+              <Inp label="Rate" prefix="%" value={r.rate} onChange={v=>setArr("subordinatedDebt",i,"rate",v)} />
+              <TxtInp label="Maturity" value={r.maturityDate} onChange={v=>setArr("subordinatedDebt",i,"maturityDate",v)} placeholder="mm/dd/yy" />
+              <button className="remove-btn" onClick={()=>removeRow("subordinatedDebt",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("subordinatedDebt",{holder:"",balance:"",rate:"",maturityDate:""})}>+ Add</button>
+        </div>
+      );
+      case "equity": return (
+        <div className="step-content">
+          <SecHdr icon="👥" title="Equity" subtitle="Owner equity, capital contributions, retained earnings roll-forward" color="#6B0E1E" />
+          <Inp label="Common Stock" prefix="$" value={data.commonStock||''} onChange={v=>set("commonStock",v)} />
+          <Inp label="Preferred Stock" prefix="$" value={data.preferredStock||''} onChange={v=>set("preferredStock",v)} />
+          <Inp label="Paid-In Capital" prefix="$" value={data.paidInCapital||''} onChange={v=>set("paidInCapital",v)} />
+          <Inp label="Retained Earnings (prior year end)" prefix="$" value={data.retainedEarningsPrior||''} onChange={v=>set("retainedEarningsPrior",v)} />
+          <Inp label="YTD Net Income" prefix="$" value={data.ytdNetIncome||''} onChange={v=>set("ytdNetIncome",v)} />
+          <Inp label="Distributions YTD" prefix="$" value={data.distributionsYtd||''} onChange={v=>set("distributionsYtd",v)} />
+          <div style={{marginTop:14,padding:'10px 12px',background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:6,fontSize:'.78rem',color:'#2d5a8e'}}>
+            Total equity = Common + Preferred + Paid-In + (Retained + YTD NI − Distributions) = <strong>{fmt(
+              numVal(data.commonStock) + numVal(data.preferredStock) + numVal(data.paidInCapital)
+              + numVal(data.retainedEarningsPrior) + numVal(data.ytdNetIncome) - numVal(data.distributionsYtd)
+            )}</strong>
           </div>
         </div>
       );
@@ -16967,7 +17348,6 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                     <div style={{fontSize:".78rem",color:"#555",lineHeight:1.5}}>
                       A/R + aging, inventory (raw / WIP / finished), FF&amp;E, line of credit with borrowing-base, term debt + SBA, covenant ratios.
                     </div>
-                    <div style={{marginTop:8,fontSize:".68rem",color:"#92400e",fontStyle:"italic"}}>Phase 1 — data shape only; full wizard steps land in Phase 2.</div>
                   </button>
                 </div>
               </div>
