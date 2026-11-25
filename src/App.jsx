@@ -1189,6 +1189,23 @@ function emptyCommercialData() {
     // Shared concepts (linked entities etc.) that span both types
     linkedEntities:[], linkedEntitySnapshots:{}, linkedEntityNWSnapshot:{},
     folderPath:[],
+    // Shared budget / ancillary fields — included as empty structures so
+    // the top-level render math (budget totals, collateral, etc.) doesn't
+    // crash on undefined. Commercial-specific budget UI comes in Phase 3.
+    budgetCrops:[], budgetLivestock:[], budgetMisc:[],
+    budgetExpenses:[{description:"",amount:"",prepaid:false}],
+    budgetOperatingExpenses:[], budgetProposedDebt:[],
+    budgetInsuranceEnabled:false, budgetIncluded:true,
+    // Ag-shape placeholders kept as empty arrays so any shared component
+    // (collateral, debt totals, print) that iterates these doesn't blow up
+    // on a commercial sheet. They stay empty on commercial sheets.
+    receivables:[], federalPayments:[], livestockMarket:[], farmProducts:[],
+    cropInvestment:[], supplies:[], otherCurrent:[], breedingStock:[],
+    realEstate:[], reContracts:[], vehicles:[], machinery:[], otherAssets:[],
+    operatingNotes:[], accountsDue:[], intermediatDebt:[], reCurrent:[],
+    reDebt:[], reMortgages:[], otherCurrentLiab:[], otherLiabilities:[],
+    taxesDue:"",
+    collateral:{}, inspection:{},
   };
 }
 
