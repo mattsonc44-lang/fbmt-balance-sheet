@@ -874,22 +874,22 @@ const STEPS_AG = [
   "liab_intro","operating_notes","accounts_due","intermediate_debt","re_debt",
   "taxes_due","other_current_liab","other_liabilities","collateral","summary"
 ];
-// Commercial step set — same intro / summary as ag, but swaps the whole
-// middle for commercial-oriented sections.
-const STEPS_COMMERCIAL = [
-  "intro_comm","cash_glacier","cash_other",
-  "ar_aging","inv_raw","inv_wip","inv_finished","prepaid_exp","other_current_assets_comm",
-  "ffe","commercial_vehicles","commercial_real_estate","leasehold_imp","intangibles",
-  "liab_intro",
-  "ap_aging","accrued_exp","line_of_credit","current_portion_ltd","other_current_liab_comm",
-  "term_debt_comm","capital_leases","sub_debt",
-  "equity",
-  "summary_comm"
+// PFS (Personal Financial Statement) step set — matches the Glacier Bank
+// PFS form section-for-section.
+const STEPS_PFS = [
+  "pfs_applicants",
+  "pfs_sch1_cash","pfs_sch2_securities","pfs_sch3_life_insurance",
+  "pfs_sch4_receivables","pfs_sch5_real_estate",
+  "pfs_sch6_short_term_notes","pfs_sch7_credit_accounts",
+  "pfs_other_assets_liabs",
+  "pfs_income",
+  "pfs_disclosures",
+  "pfs_summary"
 ];
 // Default STEPS (ag) — kept for back-compat with any old references.
 const STEPS = STEPS_AG;
 // Which array runs is chosen by `data.sheetType` inside the wizard shell.
-const stepsForType = t => (t === 'commercial' ? STEPS_COMMERCIAL : STEPS_AG);
+const stepsForType = t => (t === 'pfs' ? STEPS_PFS : STEPS_AG);
 
 const STEP_LABELS = {
   intro:"Client Info", intro_comm:"Business Info",
@@ -903,31 +903,31 @@ const STEP_LABELS = {
   intermediate_debt:"Term Debt", re_debt:"Real Estate Debt", taxes_due:"Taxes Due",
   other_current_liab:"Other Curr. Liab",
   other_liabilities:"Other Liabilities", collateral:"Collateral", summary:"Summary",
-  // Commercial labels
-  summary_comm:"Summary",
-  ar_aging:"A/R + Aging",
-  inv_raw:"Inventory (Raw)", inv_wip:"Inventory (WIP)", inv_finished:"Inventory (Finished)",
-  prepaid_exp:"Prepaid Expenses", other_current_assets_comm:"Other Current Assets",
-  ffe:"FF&E / Equipment", commercial_vehicles:"Vehicles",
-  commercial_real_estate:"Real Estate", leasehold_imp:"Leasehold Improvements",
-  intangibles:"Intangibles / Goodwill",
-  ap_aging:"A/P + Aging", accrued_exp:"Accrued Expenses",
-  line_of_credit:"Line of Credit", current_portion_ltd:"Current Portion LTD",
-  other_current_liab_comm:"Other Current Liab",
-  term_debt_comm:"Term Debt / SBA", capital_leases:"Capital Leases", sub_debt:"Subordinated Debt",
-  equity:"Equity",
+  // PFS labels
+  pfs_applicants:"Applicants",
+  pfs_sch1_cash:"Sched 1 · Cash",
+  pfs_sch2_securities:"Sched 2 · Securities",
+  pfs_sch3_life_insurance:"Sched 3 · Life Ins.",
+  pfs_sch4_receivables:"Sched 4 · Receivables",
+  pfs_sch5_real_estate:"Sched 5 · Real Estate",
+  pfs_sch6_short_term_notes:"Sched 6 · ST Notes",
+  pfs_sch7_credit_accounts:"Sched 7 · Credit",
+  pfs_other_assets_liabs:"Other Assets / Liab",
+  pfs_income:"Annual Income",
+  pfs_disclosures:"Disclosures",
+  pfs_summary:"Summary",
 };
 const ASSET_STEPS = ["cash_glacier","cash_other","receivables","federal_payments",
   "livestock_market","farm_products","crop_investment","supplies","other_current",
-  "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets",
-  // commercial assets
-  "ar_aging","inv_raw","inv_wip","inv_finished","prepaid_exp","other_current_assets_comm",
-  "ffe","commercial_vehicles","commercial_real_estate","leasehold_imp","intangibles"];
+  "breeding_stock","real_estate","re_contracts","vehicles","machinery","other_assets"];
 const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_debt",
-  "taxes_due","other_current_liab","other_liabilities",
-  // commercial liabilities
-  "ap_aging","accrued_exp","line_of_credit","current_portion_ltd","other_current_liab_comm",
-  "term_debt_comm","capital_leases","sub_debt","equity"];
+  "taxes_due","other_current_liab","other_liabilities"];
+// PFS wizard uses a flat section order rather than the Assets/Liabilities
+// split, so the sidebar for PFS reads straight off STEPS_PFS.
+const PFS_SIDEBAR_SETUP   = ["pfs_applicants"];
+const PFS_SIDEBAR_SCHEDS  = ["pfs_sch1_cash","pfs_sch2_securities","pfs_sch3_life_insurance","pfs_sch4_receivables","pfs_sch5_real_estate","pfs_sch6_short_term_notes","pfs_sch7_credit_accounts"];
+const PFS_SIDEBAR_OTHER   = ["pfs_other_assets_liabs","pfs_income","pfs_disclosures"];
+const PFS_SIDEBAR_FINISH  = ["pfs_summary"];
 const ANALYSIS_STEPS = ["collateral"];
 
 // ── Collateral valuation defaults ──────────────────────────────────────────
@@ -1148,58 +1148,56 @@ function deriveCollateral(d) {
   };
 }
 
-// Commercial-balance-sheet data shape. Mirrors the ag shape's conventions
-// (one array per section, each row is an object of string fields) so every
-// piece of app infrastructure (folder tree, autosave, linked entities, CA
-// access, print, YoY snapshots, feature flags) works unchanged — only the
-// wizard steps and section labels differ. Everything in here is Phase-1
-// scaffolding; Phase-2 wires the actual wizard UI onto these fields.
-function emptyCommercialData() {
+// Personal Financial Statement (PFS) data shape — modeled on Glacier Bank's
+// standard PFS used alongside a business loan application. Two applicants
+// (owner + co-applicant), high-level asset/liability totals, annual income
+// block, Yes/No disclosures, and seven detail schedules. Business-level
+// balance sheets live in the client's accounting system (QuickBooks, etc.),
+// so this sheet exists specifically for the lender to capture the owner's
+// personal picture.
+function emptyPfsData() {
+  const blankApplicant = () => ({
+    name:"", address:"", city:"", state:"", zip:"",
+    dob:"", ssn:"", phone:"", cell:"",
+    employer:"", howLong:"", title:"", dependents:"",
+    maritalStatus:"",
+    // Annual income
+    incSalary:"", incBonus:"", incDividendsInt:"", incRentalNet:"", incAlimony:"", incOther:"",
+    // Yes/No disclosures
+    discGuarantor:"", discDefendant:"", discBankruptcy:"", discWill:"", discTrustAssets:"",
+  });
   return {
-    sheetType: 'commercial',
+    sheetType: 'pfs',
     clientName:"", asOfDate: new Date().toISOString().slice(0,10),
-    // Entity profile
-    einNumber:"", entityType:"", naicsCode:"", yearEstablished:"",
-    // Current assets
-    cashGlacier:"", cashOther:[{institution:"",amount:""}],
-    accountsReceivable:[{customer:"",current:"",d30:"",d60:"",d90:"",d90plus:""}],
-    inventoryRaw:[{description:"",value:""}],
-    inventoryWip:[{description:"",value:""}],
-    inventoryFinished:[{description:"",value:""}],
-    prepaidExpenses:[{description:"",amount:""}],
-    otherCurrentAssets:[{description:"",amount:""}],
-    // Fixed / long-term assets
-    ffe:[{description:"",purchaseDate:"",cost:"",depreciation:"",value:""}],
-    commercialVehicles:[{year:"",make:"",vin:"",condition:"",value:""}],
-    commercialRealEstate:[{address:"",description:"",value:""}],
-    leaseholdImprovements:[{description:"",value:""}],
-    intangibles:[{description:"",type:"",value:""}],
-    // Current liabilities
-    accountsPayable:[{vendor:"",current:"",d30:"",d60:"",d90:"",d90plus:""}],
-    accruedExpenses:[{description:"",amount:""}],
-    lineOfCredit:[{lender:"",limit:"",balance:"",rate:"",maturityDate:"",advanceRate:""}],
-    currentPortionLTD:"",
-    otherCurrentLiabilitiesComm:[{description:"",amount:""}],
-    // Long-term
-    termDebtCommercial:[{lender:"",originalAmount:"",balance:"",annualPmt:"",rate:"",maturityDate:"",sbaGuaranty:false,guarantyPct:""}],
-    capitalLeases:[{lessor:"",asset:"",monthlyPmt:"",remainingTerm:"",balance:""}],
-    subordinatedDebt:[{holder:"",balance:"",rate:"",maturityDate:""}],
-    // Equity
-    commonStock:"", preferredStock:"", paidInCapital:"",
-    retainedEarningsPrior:"", ytdNetIncome:"", distributionsYtd:"",
-    // Shared concepts (linked entities etc.) that span both types
+    // Two applicants (A/B). PFS is designed for joint applications; a
+    // single-applicant filing just leaves B blank.
+    applicantA: blankApplicant(),
+    applicantB: blankApplicant(),
+    // Summary asset / liability lines (schedule totals roll up here;
+    // standalone lines like taxes / autos / personal property typed here).
+    assetAutos:"", assetPersonalProperty:"", assetProfitSharing:"",
+    assetPensionIRA:"", assetOther1Desc:"", assetOther1Amt:"",
+    assetOther2Desc:"", assetOther2Amt:"",
+    liabTaxes:"", liabOther1Desc:"", liabOther1Amt:"",
+    liabOther2Desc:"", liabOther2Amt:"",
+    // Schedules 1-7
+    pfsCash:[{institution:"",accountType:"",balance:""}],              // Schedule 1
+    pfsSecurities:[{shares:"",description:"",registeredTo:"",listed:"",marketValue:""}], // Schedule 2
+    pfsLifeInsurance:[{company:"",insured:"",beneficiary:"",faceValue:"",cashValue:"",loans:""}], // Schedule 3
+    pfsReceivables:[{debtor:"",description:"",lienPosition:"",maturity:"",repayAmt:"",repayPer:"",marketValue:""}], // Schedule 4
+    pfsRealEstate:[{description:"",isPrimary:false,mortgageCompany:"",yearAcquired:"",purchasePrice:"",insuredValue:"",mortgageBalance:"",maturity:"",repayAmt:"",repayPer:"",marketValue:""}], // Schedule 5
+    pfsShortTermNotes:[{creditor:"",collateral:"",maturity:"",repayAmt:"",repayPer:"",balance:""}], // Schedule 6
+    pfsCreditAccounts:[{company:"",repayAmt:"",repayPer:"",balance:""}], // Schedule 7
+    // Shared concepts across all sheet types
     linkedEntities:[], linkedEntitySnapshots:{}, linkedEntityNWSnapshot:{},
     folderPath:[],
-    // Shared budget / ancillary fields — included as empty structures so
-    // the top-level render math (budget totals, collateral, etc.) doesn't
-    // crash on undefined. Commercial-specific budget UI comes in Phase 3.
+    // Minimal ag-shape placeholders kept as empty arrays so any shared
+    // top-level render math doesn't blow up on undefined access.
+    cashGlacier:"", cashOther:[],
     budgetCrops:[], budgetLivestock:[], budgetMisc:[],
     budgetExpenses:[{description:"",amount:"",prepaid:false}],
     budgetOperatingExpenses:[], budgetProposedDebt:[],
-    budgetInsuranceEnabled:false, budgetIncluded:true,
-    // Ag-shape placeholders kept as empty arrays so any shared component
-    // (collateral, debt totals, print) that iterates these doesn't blow up
-    // on a commercial sheet. They stay empty on commercial sheets.
+    budgetInsuranceEnabled:false, budgetIncluded:false,
     receivables:[], federalPayments:[], livestockMarket:[], farmProducts:[],
     cropInvestment:[], supplies:[], otherCurrent:[], breedingStock:[],
     realEstate:[], reContracts:[], vehicles:[], machinery:[], otherAssets:[],
@@ -1209,6 +1207,8 @@ function emptyCommercialData() {
     collateral:{}, inspection:{},
   };
 }
+// Back-compat alias — the picker and startNewOfType path still call this.
+function emptyCommercialData() { return emptyPfsData(); }
 
 function emptyData() {
   return {
@@ -7954,9 +7954,9 @@ function AdminScreen({ session, profile, onSignOut, onClose, onOpenPriceList, on
                               const current = u.features || {};
                               handleUpdateRole(u.id, { features: { ...current, commercialBS: !current.commercialBS } });
                             }}
-                            title="Commercial Balance Sheet — adds an ag-vs-commercial picker when creating a new sheet, with commercial-oriented sections (A/R aging, inventory, line of credit, SBA term debt, covenant ratios)"
+                            title="Personal Financial Statement — adds an Ag vs PFS picker when creating a new sheet, with Glacier-style PFS form (two applicants, seven schedules, income, disclosures)"
                             style={{background:u.features?.commercialBS?'#dcfce7':'#f3f4f6',color:u.features?.commercialBS?'#15803d':'#6b7280',border:'1px solid '+(u.features?.commercialBS?'#86efac':'#d1d5db'),borderRadius:999,padding:'2px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
-                            {u.features?.commercialBS ? '✓ Commercial BS' : 'Commercial BS'}
+                            {u.features?.commercialBS ? '✓ PFS' : 'PFS'}
                           </button>
                         </div>
                       )}
@@ -10651,7 +10651,7 @@ Question: ${q}`,
   // shell and the ag steps render on commercial sheets until Phase 2.
   const startNewOfType = (sheetType) => {
     setShowSheetTypePicker(false);
-    const seed = sheetType === 'commercial' ? emptyCommercialData() : emptyData();
+    const seed = sheetType === 'pfs' ? emptyPfsData() : emptyData();
     setData(seed);
     setOriginalKey(null);
     setStep(0);
@@ -11840,23 +11840,19 @@ Question: ${q}`,
   // For commercial sheets, override totals with the commercial-field
   // sums so the sidebar RunningTotal (Assets / Liabilities / Net Worth)
   // reflects the commercial data entry, not ag arrays that are empty.
-  const _commAssets = (data.sheetType === 'commercial') ? (
-      n(data.cashGlacier)
-    + (data.cashOther||[]).reduce((s,r)=>s+n(r.amount),0)
-    + (data.accountsReceivable||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0)
-    + (data.inventoryRaw||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.inventoryWip||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.inventoryFinished||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.prepaidExpenses||[]).reduce((s,r)=>s+n(r.amount),0)
-    + (data.otherCurrentAssets||[]).reduce((s,r)=>s+n(r.amount),0)
-    + (data.ffe||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.commercialVehicles||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.commercialRealEstate||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.leaseholdImprovements||[]).reduce((s,r)=>s+n(r.value),0)
-    + (data.intangibles||[]).reduce((s,r)=>s+n(r.value),0)
+  // PFS asset total — rolls up schedule totals + the summary lines.
+  const _pfsAssets = (data.sheetType === 'pfs') ? (
+      (data.pfsCash||[]).reduce((s,r)=>s+n(r.balance),0)
+    + (data.pfsSecurities||[]).reduce((s,r)=>s+n(r.marketValue),0)
+    + (data.pfsLifeInsurance||[]).reduce((s,r)=>s+n(r.cashValue),0)
+    + (data.pfsReceivables||[]).reduce((s,r)=>s+n(r.marketValue),0)
+    + (data.pfsRealEstate||[]).reduce((s,r)=>s+n(r.marketValue),0)
+    + n(data.assetProfitSharing) + n(data.assetPensionIRA)
+    + n(data.assetAutos) + n(data.assetPersonalProperty)
+    + n(data.assetOther1Amt) + n(data.assetOther2Amt)
     + linkedEntityVal
   ) : null;
-  const totalAssets = _commAssets !== null ? _commAssets : (totalCurrentAssets + totalLTAssets + linkedEntityVal);
+  const totalAssets = _pfsAssets !== null ? _pfsAssets : (totalCurrentAssets + totalLTAssets + linkedEntityVal);
   const opNotesTotal = data.operatingNotes.reduce((s,r)=>s+n(r.balance),0);
   const acctsDueTotal = data.accountsDue.reduce((s,r)=>s+n(r.amount),0);
   const intermedCurrentPortion = data.intermediatDebt.reduce((s,r)=>s+n(r.annualPmt),0);
@@ -11878,18 +11874,16 @@ Question: ${q}`,
   const totalCurrentLiab = opNotesTotal+acctsDueTotal+intermedCurrentPortion+reCurrentTotal+taxesDueVal+otherCLTotal;
   const reMortTotal = data.reMortgages.reduce((s,r)=>s+n(r.principal),0) + reDebtLTPortion;
   const otherLiabTotal = data.otherLiabilities.reduce((s,r)=>s+n(r.balance),0);
-  // Commercial liabilities override — mirrors the asset override above.
-  const _commLiab = (data.sheetType === 'commercial') ? (
-      (data.accountsPayable||[]).reduce((s,r)=>s+n(r.current)+n(r.d30)+n(r.d60)+n(r.d90)+n(r.d90plus),0)
-    + (data.accruedExpenses||[]).reduce((s,r)=>s+n(r.amount),0)
-    + (data.lineOfCredit||[]).reduce((s,r)=>s+n(r.balance),0)
-    + n(data.currentPortionLTD)
-    + (data.otherCurrentLiabilitiesComm||[]).reduce((s,r)=>s+n(r.amount),0)
-    + (data.termDebtCommercial||[]).reduce((s,r)=>s+n(r.balance),0)
-    + (data.capitalLeases||[]).reduce((s,r)=>s+n(r.balance),0)
-    + (data.subordinatedDebt||[]).reduce((s,r)=>s+n(r.balance),0)
+  // PFS liability total — short-term notes, credit accounts, life-insurance
+  // loans, mortgages on real estate (incl. primary residence), taxes, other.
+  const _pfsLiab = (data.sheetType === 'pfs') ? (
+      (data.pfsShortTermNotes||[]).reduce((s,r)=>s+n(r.balance),0)
+    + (data.pfsCreditAccounts||[]).reduce((s,r)=>s+n(r.balance),0)
+    + (data.pfsLifeInsurance||[]).reduce((s,r)=>s+n(r.loans),0)
+    + (data.pfsRealEstate||[]).reduce((s,r)=>s+n(r.mortgageBalance),0)
+    + n(data.liabTaxes) + n(data.liabOther1Amt) + n(data.liabOther2Amt)
   ) : null;
-  const totalLiabilities = _commLiab !== null ? _commLiab : (totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal);
+  const totalLiabilities = _pfsLiab !== null ? _pfsLiab : (totalCurrentLiab + intermedLTPortion + reMortTotal + otherLiabTotal);
   const netWorth = totalAssets - totalLiabilities;
   const workingCapital = totalCurrentAssets - totalCurrentLiab;
 
@@ -14140,9 +14134,168 @@ ${extraPages}
     return html;
   };
 
+  // PFS print — Glacier-style layout. Two-column applicants, asset /
+  // liability summary, annual income block, Yes/No disclosures, seven
+  // schedules, signature lines. Self-contained HTML.
+  const handlePrintPfs = (d, tAssets, tLiab) => {
+    const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+    const money = v => (!v || n(v) === 0) ? '' : '$' + Math.abs(Math.round(n(v))).toLocaleString();
+    const A = d.applicantA || {}, B = d.applicantB || {};
+    const row = (label, valA, valB, right=false) =>
+      `<tr><td class="lbl">${label}</td><td class="${right?'num':''}">${valA||''}</td><td class="lbl">${label}</td><td class="${right?'num':''}">${valB||''}</td></tr>`;
+    const yn = v => v === 'yes' ? '☑ Yes  ☐ No' : v === 'no' ? '☐ Yes  ☑ No' : '☐ Yes  ☐ No';
+    const schRows = (arr, cols) => arr.filter(r => cols.some(c => r[c.key])).map(r => `<tr>${cols.map(c => `<td class="${c.align==='right'?'num':''}">${c.fmt ? c.fmt(r) : (r[c.key]||'')}</td>`).join('')}</tr>`).join('');
+    const sch = (title, arr, cols, totalCol) => {
+      const rows = schRows(arr||[], cols);
+      if (!rows) return '';
+      const total = totalCol ? (arr||[]).reduce((s,r)=>s+n(r[totalCol]),0) : null;
+      return `<h3>${title}</h3>
+        <table class="sch"><thead><tr>${cols.map(c=>`<th class="${c.align==='right'?'num':''}">${c.label}</th>`).join('')}</tr></thead>
+        <tbody>${rows}${total !== null ? `<tr class="tot"><td colspan="${cols.length-1}">Total</td><td class="num">${money(total)}</td></tr>` : ''}</tbody></table>`;
+    };
+
+    const W = window.open('','_blank','width=850,height=1100');
+    if (!W) { alert('Please allow popups to print.'); return; }
+    W.document.write(`<!doctype html><html><head><title>PFS — ${d.clientName||A.name||''}</title>
+      <style>
+        @page { size: letter; margin: 0.5in; }
+        body { font-family: Arial, sans-serif; font-size: 10.5px; color: #111; }
+        h1 { font-size: 18px; margin: 0; text-align: center; letter-spacing: .05em; }
+        .bank { text-align: center; font-size: 11px; margin-bottom: 10px; color: #333; }
+        h2 { font-size: 12px; margin: 14px 0 4px; background: #111; color: white; padding: 4px 8px; letter-spacing: .05em; text-align: center; }
+        h3 { font-size: 11px; margin: 10px 0 3px; font-weight: 700; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 4px; font-size: 10px; }
+        table.ind td { border: 0.5px solid #333; padding: 3px 5px; vertical-align: top; }
+        table.ind td.lbl { font-size: 9px; color: #555; width: 15%; font-weight: 600; }
+        table.al td { border: 0.5px solid #333; padding: 3px 5px; }
+        table.al td.lbl { width: 35%; }
+        table.al td.num { text-align: right; width: 15%; }
+        table.sch th { background: #f0f0f0; border: 0.5px solid #333; padding: 3px 5px; text-align: left; font-size: 9.5px; }
+        table.sch td { border: 0.5px solid #ccc; padding: 2px 5px; }
+        table.sch td.num, table.sch th.num { text-align: right; }
+        table.sch tr.tot td { font-weight: 700; background: #f7f7f7; border-top: 1.5px solid #333; }
+        .sig { margin-top: 20px; display: flex; gap: 30px; font-size: 10px; }
+        .sig .line { flex: 1; border-top: 1px solid #333; padding-top: 3px; }
+        .round { font-size: 9px; color: #555; margin: 4px 0 8px; }
+      </style></head><body>
+      <h1>PERSONAL FINANCIAL STATEMENT</h1>
+      <div class="bank">First Bank of Montana &nbsp;·&nbsp; As of ${d.asOfDate||''}</div>
+      <div class="round">Please round all amounts to the nearest $100.</div>
+
+      <h2>INDIVIDUAL &nbsp; · &nbsp; INDIVIDUAL</h2>
+      <table class="ind"><tbody>
+        ${row('Name', A.name, B.name)}
+        ${row('Address', A.address, B.address)}
+        ${row('City / State / Zip', [A.city,A.state,A.zip].filter(Boolean).join(', '), [B.city,B.state,B.zip].filter(Boolean).join(', '))}
+        ${row('Date of Birth', A.dob, B.dob)}
+        ${row('SSN', A.ssn, B.ssn)}
+        ${row('Phone / Cell', [A.phone,A.cell].filter(Boolean).join(' / '), [B.phone,B.cell].filter(Boolean).join(' / '))}
+        ${row('Employer / How Long', [A.employer,A.howLong].filter(Boolean).join(' · '), [B.employer,B.howLong].filter(Boolean).join(' · '))}
+        ${row('Position / Title', A.title, B.title)}
+        ${row('Dependents', A.dependents, B.dependents)}
+        ${row('Marital Status', A.maritalStatus, B.maritalStatus)}
+      </tbody></table>
+
+      <h2>ASSETS &nbsp; · &nbsp; LIABILITIES</h2>
+      <table class="al"><tbody>
+        <tr><td class="lbl">Cash (Schedule 1)</td><td class="num">${money((d.pfsCash||[]).reduce((s,r)=>s+n(r.balance),0))}</td>
+            <td class="lbl">Short Term Notes &amp; Loans (Schedule 6)</td><td class="num">${money((d.pfsShortTermNotes||[]).reduce((s,r)=>s+n(r.balance),0))}</td></tr>
+        <tr><td class="lbl">Securities (Schedule 2)</td><td class="num">${money((d.pfsSecurities||[]).reduce((s,r)=>s+n(r.marketValue),0))}</td>
+            <td class="lbl">Credit Accounts &amp; Bills (Schedule 7)</td><td class="num">${money((d.pfsCreditAccounts||[]).reduce((s,r)=>s+n(r.balance),0))}</td></tr>
+        <tr><td class="lbl">Life Insurance Cash Value (Schedule 3)</td><td class="num">${money((d.pfsLifeInsurance||[]).reduce((s,r)=>s+n(r.cashValue),0))}</td>
+            <td class="lbl">Life Insurance Loans (Schedule 3)</td><td class="num">${money((d.pfsLifeInsurance||[]).reduce((s,r)=>s+n(r.loans),0))}</td></tr>
+        <tr><td class="lbl">Mortgages &amp; Contracts Held (Schedule 4)</td><td class="num">${money((d.pfsReceivables||[]).reduce((s,r)=>s+n(r.marketValue),0))}</td>
+            <td class="lbl">Mortgages on Primary Residence (Schedule 5)</td><td class="num">${money((d.pfsRealEstate||[]).filter(r=>r.isPrimary).reduce((s,r)=>s+n(r.mortgageBalance),0))}</td></tr>
+        <tr><td class="lbl">Primary Residence (Schedule 5)</td><td class="num">${money((d.pfsRealEstate||[]).filter(r=>r.isPrimary).reduce((s,r)=>s+n(r.marketValue),0))}</td>
+            <td class="lbl">Mortgages on Other Real Estate (Schedule 5)</td><td class="num">${money((d.pfsRealEstate||[]).filter(r=>!r.isPrimary).reduce((s,r)=>s+n(r.mortgageBalance),0))}</td></tr>
+        <tr><td class="lbl">Other Real Estate (Schedule 5)</td><td class="num">${money((d.pfsRealEstate||[]).filter(r=>!r.isPrimary).reduce((s,r)=>s+n(r.marketValue),0))}</td>
+            <td class="lbl">Taxes</td><td class="num">${money(d.liabTaxes)}</td></tr>
+        <tr><td class="lbl">Profit Sharing (net of loans)</td><td class="num">${money(d.assetProfitSharing)}</td>
+            <td class="lbl">${d.liabOther1Desc||'Other Liabilities'}</td><td class="num">${money(d.liabOther1Amt)}</td></tr>
+        <tr><td class="lbl">Pension / Retirement / IRA</td><td class="num">${money(d.assetPensionIRA)}</td>
+            <td class="lbl">${d.liabOther2Desc||'Other Liabilities'}</td><td class="num">${money(d.liabOther2Amt)}</td></tr>
+        <tr><td class="lbl">Automobiles</td><td class="num">${money(d.assetAutos)}</td><td></td><td></td></tr>
+        <tr><td class="lbl">Personal Property</td><td class="num">${money(d.assetPersonalProperty)}</td><td></td><td></td></tr>
+        <tr><td class="lbl">${d.assetOther1Desc||'Other Assets'}</td><td class="num">${money(d.assetOther1Amt)}</td>
+            <td class="lbl"><strong>Total Liabilities</strong></td><td class="num"><strong>${money(tLiab)}</strong></td></tr>
+        <tr><td class="lbl"><strong>Total Assets</strong></td><td class="num"><strong>${money(tAssets)}</strong></td>
+            <td class="lbl"><strong>Net Worth</strong></td><td class="num"><strong>${money(tAssets - tLiab)}</strong></td></tr>
+      </tbody></table>
+
+      <h2>ANNUAL INCOME &nbsp; · &nbsp; DISCLOSURES</h2>
+      <table class="al"><thead><tr><th class="lbl">Income</th><th class="num">Applicant A</th><th class="num">Applicant B</th><th class="lbl">Question</th><th>A</th><th>B</th></tr></thead><tbody>
+        <tr><td class="lbl">Salary</td><td class="num">${money(A.incSalary)}</td><td class="num">${money(B.incSalary)}</td>
+            <td class="lbl">Co-maker / endorser / guarantor on another's debt?</td><td>${yn(A.discGuarantor)}</td><td>${yn(B.discGuarantor)}</td></tr>
+        <tr><td class="lbl">Bonuses / Commissions</td><td class="num">${money(A.incBonus)}</td><td class="num">${money(B.incBonus)}</td>
+            <td class="lbl">Defendant in any suit or legal action?</td><td>${yn(A.discDefendant)}</td><td>${yn(B.discDefendant)}</td></tr>
+        <tr><td class="lbl">Dividends / Interest</td><td class="num">${money(A.incDividendsInt)}</td><td class="num">${money(B.incDividendsInt)}</td>
+            <td class="lbl">Ever through bankruptcy or had a judgment?</td><td>${yn(A.discBankruptcy)}</td><td>${yn(B.discBankruptcy)}</td></tr>
+        <tr><td class="lbl">Net Real Estate Rent</td><td class="num">${money(A.incRentalNet)}</td><td class="num">${money(B.incRentalNet)}</td>
+            <td class="lbl">Made a will?</td><td>${yn(A.discWill)}</td><td>${yn(B.discWill)}</td></tr>
+        <tr><td class="lbl">Alimony / Child Support</td><td class="num">${money(A.incAlimony)}</td><td class="num">${money(B.incAlimony)}</td>
+            <td class="lbl">Any assets held in a trust?</td><td>${yn(A.discTrustAssets)}</td><td>${yn(B.discTrustAssets)}</td></tr>
+        <tr><td class="lbl">Other</td><td class="num">${money(A.incOther)}</td><td class="num">${money(B.incOther)}</td><td></td><td></td><td></td></tr>
+        <tr class="tot"><td class="lbl"><strong>Total</strong></td>
+            <td class="num"><strong>${money(n(A.incSalary)+n(A.incBonus)+n(A.incDividendsInt)+n(A.incRentalNet)+n(A.incAlimony)+n(A.incOther))}</strong></td>
+            <td class="num"><strong>${money(n(B.incSalary)+n(B.incBonus)+n(B.incDividendsInt)+n(B.incRentalNet)+n(B.incAlimony)+n(B.incOther))}</strong></td><td></td><td></td><td></td></tr>
+      </tbody></table>
+
+      ${sch('Schedule 1 — Cash on Hand &amp; in Banks', d.pfsCash, [
+        {label:'Institution',key:'institution'},{label:'Type',key:'accountType'},{label:'Balance',key:'balance',align:'right',fmt:r=>money(r.balance)}
+      ], 'balance')}
+      ${sch('Schedule 2 — Securities Owned', d.pfsSecurities, [
+        {label:'Shares',key:'shares'},{label:'Description',key:'description'},{label:'Registered To',key:'registeredTo'},{label:'Listed',key:'listed'},{label:'Market Value',key:'marketValue',align:'right',fmt:r=>money(r.marketValue)}
+      ], 'marketValue')}
+      ${sch('Schedule 3 — Life Insurance', d.pfsLifeInsurance, [
+        {label:'Company',key:'company'},{label:'Insured',key:'insured'},{label:'Beneficiary',key:'beneficiary'},
+        {label:'Face',key:'faceValue',align:'right',fmt:r=>money(r.faceValue)},
+        {label:'Cash Value',key:'cashValue',align:'right',fmt:r=>money(r.cashValue)},
+        {label:'Loans',key:'loans',align:'right',fmt:r=>money(r.loans)}
+      ], 'cashValue')}
+      ${sch('Schedule 4 — Receivables (Mortgages / Contracts Held)', d.pfsReceivables, [
+        {label:'Debtor',key:'debtor'},{label:'Property',key:'description'},{label:'Lien',key:'lienPosition'},{label:'Maturity',key:'maturity'},
+        {label:'Repay',key:'repayAmt',align:'right',fmt:r=>(r.repayAmt?money(r.repayAmt)+(r.repayPer?' / '+r.repayPer:''):'')},
+        {label:'Market Value',key:'marketValue',align:'right',fmt:r=>money(r.marketValue)}
+      ], 'marketValue')}
+      ${sch('Schedule 5 — Real Estate Owned', d.pfsRealEstate, [
+        {label:'Property',key:'description',fmt:r=>(r.isPrimary?'★ ':'')+(r.description||'')},
+        {label:'Mortgage Co.',key:'mortgageCompany'},
+        {label:'Yr',key:'yearAcquired'},
+        {label:'Purchase',key:'purchasePrice',align:'right',fmt:r=>money(r.purchasePrice)},
+        {label:'Mortgage Bal.',key:'mortgageBalance',align:'right',fmt:r=>money(r.mortgageBalance)},
+        {label:'Repay',key:'repayAmt',align:'right',fmt:r=>(r.repayAmt?money(r.repayAmt)+(r.repayPer?' / '+r.repayPer:''):'')},
+        {label:'Market Value',key:'marketValue',align:'right',fmt:r=>money(r.marketValue)}
+      ], 'marketValue')}
+      ${sch('Schedule 6 — Short Term Notes &amp; Loans Due', d.pfsShortTermNotes, [
+        {label:'Creditor',key:'creditor'},{label:'Collateral',key:'collateral'},{label:'Maturity',key:'maturity'},
+        {label:'Repay',key:'repayAmt',align:'right',fmt:r=>(r.repayAmt?money(r.repayAmt)+(r.repayPer?' / '+r.repayPer:''):'')},
+        {label:'Balance',key:'balance',align:'right',fmt:r=>money(r.balance)}
+      ], 'balance')}
+      ${sch('Schedule 7 — Credit Accounts &amp; Bills Due', d.pfsCreditAccounts, [
+        {label:'Company',key:'company'},
+        {label:'Repay',key:'repayAmt',align:'right',fmt:r=>(r.repayAmt?money(r.repayAmt)+(r.repayPer?' / '+r.repayPer:''):'')},
+        {label:'Balance',key:'balance',align:'right',fmt:r=>money(r.balance)}
+      ], 'balance')}
+
+      <p style="font-size:9.5px;color:#333;margin-top:12px;line-height:1.5;">
+        We hereby certify that the information provided in this statement is true and correct. So long as we owe any sums to the bank, we agree to give the bank prompt written notice of any material change in our financial condition. The Bank is authorized to retain this personal financial statement whether or not credit is approved and is further authorized to verify our credit and employment history or any other information in this statement. This statement does not obligate the bank to make any loan even if we meet the normal standards the bank considers in determining whether to approve or deny the application.
+      </p>
+      <div class="sig">
+        <div class="line">Individual Signature &nbsp;&nbsp; Date</div>
+        <div class="line">Individual Signature &nbsp;&nbsp; Date</div>
+      </div>
+      <script>window.onload=function(){window.print();}</script>
+      </body></html>`);
+    W.document.close();
+  };
+
+  // Legacy alias kept so any stray reference still compiles — the PFS
+  // print is what the picker and final step now call.
+  const handlePrintCommercial = handlePrintPfs;
+
   // Commercial balance sheet print — self-contained HTML. No ag fields
   // appear; sections match the commercial wizard one-for-one.
-  const handlePrintCommercial = (d, tAssets, tLiab) => {
+  const handlePrintCommercialOld = (d, tAssets, tLiab) => {
     const n = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
     const money = v => (v === 0 ? '$0' : (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString());
     const agingRow = (r,nameField) => {
@@ -14818,11 +14971,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
   // to ag — none exist today but this guards for Phase 3).
   useEffect(() => {
     const agOnlyTabs = ['budget','whatif','inspection','accrual'];
-    const commOnlyTabs = ['covenants','comm_budget','comm_recon'];
-    if (data.sheetType === 'commercial' && agOnlyTabs.includes(activeTab)) {
-      setActiveTab('balance');
-    }
-    if (data.sheetType !== 'commercial' && commOnlyTabs.includes(activeTab)) {
+    if (data.sheetType === 'pfs' && agOnlyTabs.includes(activeTab)) {
       setActiveTab('balance');
     }
   }, [data.sheetType]); // eslint-disable-line
@@ -14955,9 +15104,10 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         </div>
       );
       // ─────────────────────────────────────────────────────────────
-      // Commercial-balance-sheet steps (Phase 2). Mirrors the ag
-      // pattern: SecHdr + array of rows + add/remove buttons. Totals
-      // and print-layout for these come in Phase 3.
+      // Personal Financial Statement steps (replaces former commercial
+      // steps). Matches Glacier Bank's standard PFS form: two applicants,
+      // seven schedules, summary other-asset/liability lines, annual
+      // income block, Yes/No disclosures, and a summary step.
       // ─────────────────────────────────────────────────────────────
       case "intro_comm": return (
         <div className="step-content">
@@ -15295,11 +15445,305 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           </div>
         </div>
       );
-      case "summary_comm": return (
+      case "summary_comm": return null;
+      // ─────────────────────────────────────────────────────────────
+      // PFS step cases (active)
+      // ─────────────────────────────────────────────────────────────
+      case "pfs_applicants": {
+        const App = ({ letter }) => {
+          const field = letter === 'A' ? 'applicantA' : 'applicantB';
+          const a = data[field] || {};
+          const u = (k, v) => setData({...data, [field]: {...a, [k]: v}});
+          return (
+            <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+              <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant {letter}{letter==='B'?' (Co-Applicant)':''}</div>
+              <TxtInp label="Name" value={a.name||''} onChange={v=>u('name',v)} />
+              <TxtInp label="Address" value={a.address||''} onChange={v=>u('address',v)} />
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="City" value={a.city||''} onChange={v=>u('city',v)} />
+                <TxtInp label="State" value={a.state||''} onChange={v=>u('state',v)} />
+                <TxtInp label="Zip" value={a.zip||''} onChange={v=>u('zip',v)} />
+              </div>
+              <TxtInp label="Date of Birth" value={a.dob||''} onChange={v=>u('dob',v)} placeholder="mm/dd/yyyy" />
+              <TxtInp label="SSN" value={a.ssn||''} onChange={v=>u('ssn',v)} placeholder="XXX-XX-XXXX" />
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="Phone" value={a.phone||''} onChange={v=>u('phone',v)} />
+                <TxtInp label="Cell" value={a.cell||''} onChange={v=>u('cell',v)} />
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="Employer" value={a.employer||''} onChange={v=>u('employer',v)} />
+                <TxtInp label="How Long" value={a.howLong||''} onChange={v=>u('howLong',v)} />
+              </div>
+              <TxtInp label="Position / Title" value={a.title||''} onChange={v=>u('title',v)} />
+              <TxtInp label="Dependents (incl. self)" value={a.dependents||''} onChange={v=>u('dependents',v)} />
+              <div className="input-group">
+                <label>Marital Status</label>
+                <select className="text-input" value={a.maritalStatus||''} onChange={e=>u('maritalStatus',e.target.value)}
+                  style={{fontFamily:'inherit'}}>
+                  <option value="">— Select —</option>
+                  <option value="unmarried">Unmarried</option>
+                  <option value="married">Married</option>
+                  <option value="separated">Separated</option>
+                </select>
+              </div>
+            </div>
+          );
+        };
+        return (
+          <div className="step-content">
+            <SecHdr icon="👤" title="Personal Financial Statement" subtitle="Glacier Bank — PFS for business loan applicants" color="#2d5a8e" />
+            <p className="intro-text">Enter one or two applicants. Leave Applicant B blank if this is an individual filing.</p>
+            <TxtInp label="File this PFS under (client folder name)" value={data.clientName} onChange={v=>set("clientName",v)} placeholder="e.g. Smith, John" />
+            <div className="input-group">
+              <label>As of Date</label>
+              <input type="date" className="text-input" value={data.asOfDate} onChange={e=>set("asOfDate",e.target.value)} />
+            </div>
+            <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:14}}>
+              <App letter="A" />
+              <App letter="B" />
+            </div>
+          </div>
+        );
+      }
+      case "pfs_sch1_cash": return (
         <div className="step-content">
-          <SecHdr icon="✅" title="Summary" subtitle="Commercial balance sheet complete — save to persist, print when ready." color="#2d5a8e" />
+          <SecHdr icon="💵" title="Schedule 1 — Cash on Hand &amp; in Banks" subtitle="Checking, savings, money markets, CDs" color="#2d5a8e" />
+          {(data.pfsCash||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsCash-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Institution" value={r.institution} onChange={v=>setArr("pfsCash",i,"institution",v)} />
+              <TxtInp label="Account Type" value={r.accountType} onChange={v=>setArr("pfsCash",i,"accountType",v)} placeholder="Checking / Savings / CD" />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("pfsCash",i,"balance",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsCash",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsCash",{institution:"",accountType:"",balance:""})}>+ Add</button>
+        </div>
+      );
+      case "pfs_sch2_securities": return (
+        <div className="step-content">
+          <SecHdr icon="📈" title="Schedule 2 — Securities Owned" subtitle="Stocks, bonds, mutual funds held outside retirement accounts" color="#2d5a8e" />
+          {(data.pfsSecurities||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsSecurities-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Shares" value={r.shares} onChange={v=>setArr("pfsSecurities",i,"shares",v)} />
+              <TxtInp label="Description" value={r.description} onChange={v=>setArr("pfsSecurities",i,"description",v)} />
+              <TxtInp label="Registered To" value={r.registeredTo} onChange={v=>setArr("pfsSecurities",i,"registeredTo",v)} />
+              <TxtInp label="Listed / Unlisted" value={r.listed} onChange={v=>setArr("pfsSecurities",i,"listed",v)} />
+              <Inp label="Market Value" prefix="$" value={r.marketValue} onChange={v=>setArr("pfsSecurities",i,"marketValue",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsSecurities",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsSecurities",{shares:"",description:"",registeredTo:"",listed:"",marketValue:""})}>+ Add</button>
+        </div>
+      );
+      case "pfs_sch3_life_insurance": return (
+        <div className="step-content">
+          <SecHdr icon="🛡" title="Schedule 3 — Life Insurance" subtitle="Face value, cash value, and any loans against policies" color="#2d5a8e" />
+          {(data.pfsLifeInsurance||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsLifeInsurance-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Company" value={r.company} onChange={v=>setArr("pfsLifeInsurance",i,"company",v)} />
+              <TxtInp label="Insured" value={r.insured} onChange={v=>setArr("pfsLifeInsurance",i,"insured",v)} />
+              <TxtInp label="Beneficiary" value={r.beneficiary} onChange={v=>setArr("pfsLifeInsurance",i,"beneficiary",v)} />
+              <Inp label="Face Value" prefix="$" value={r.faceValue} onChange={v=>setArr("pfsLifeInsurance",i,"faceValue",v)} />
+              <Inp label="Cash Value" prefix="$" value={r.cashValue} onChange={v=>setArr("pfsLifeInsurance",i,"cashValue",v)} />
+              <Inp label="Loans" prefix="$" value={r.loans} onChange={v=>setArr("pfsLifeInsurance",i,"loans",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsLifeInsurance",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsLifeInsurance",{company:"",insured:"",beneficiary:"",faceValue:"",cashValue:"",loans:""})}>+ Add Policy</button>
+        </div>
+      );
+      case "pfs_sch4_receivables": return (
+        <div className="step-content">
+          <SecHdr icon="📑" title="Schedule 4 — Receivables Due to Me" subtitle="Mortgages and contracts owned by the applicant where others owe payments" color="#2d5a8e" />
+          {(data.pfsReceivables||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsReceivables-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Debtor" value={r.debtor} onChange={v=>setArr("pfsReceivables",i,"debtor",v)} />
+              <TxtInp label="Property" value={r.description} onChange={v=>setArr("pfsReceivables",i,"description",v)} />
+              <TxtInp label="Lien" value={r.lienPosition} onChange={v=>setArr("pfsReceivables",i,"lienPosition",v)} placeholder="1st / 2nd" />
+              <TxtInp label="Maturity" value={r.maturity} onChange={v=>setArr("pfsReceivables",i,"maturity",v)} placeholder="mm/dd/yy" />
+              <Inp label="Repay Amt" prefix="$" value={r.repayAmt} onChange={v=>setArr("pfsReceivables",i,"repayAmt",v)} />
+              <TxtInp label="Per" value={r.repayPer} onChange={v=>setArr("pfsReceivables",i,"repayPer",v)} placeholder="month / year" />
+              <Inp label="Market Value" prefix="$" value={r.marketValue} onChange={v=>setArr("pfsReceivables",i,"marketValue",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsReceivables",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsReceivables",{debtor:"",description:"",lienPosition:"",maturity:"",repayAmt:"",repayPer:"",marketValue:""})}>+ Add</button>
+        </div>
+      );
+      case "pfs_sch5_real_estate": return (
+        <div className="step-content">
+          <SecHdr icon="🏠" title="Schedule 5 — Real Estate Owned" subtitle="Primary residence + all other real estate. Mortgage balance rolls into liabilities." color="#2d5a8e" />
+          {(data.pfsRealEstate||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsRealEstate-${i}`} style={{flexWrap:'wrap',alignItems:'flex-end'}}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Property Description" value={r.description} onChange={v=>setArr("pfsRealEstate",i,"description",v)} />
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:'.78rem',color:'#444',cursor:'pointer'}}>
+                <input type="checkbox" checked={!!r.isPrimary} onChange={e=>setArr("pfsRealEstate",i,"isPrimary",e.target.checked)} />
+                Primary residence
+              </label>
+              <TxtInp label="Mortgage Company" value={r.mortgageCompany} onChange={v=>setArr("pfsRealEstate",i,"mortgageCompany",v)} />
+              <TxtInp label="Year Acquired" value={r.yearAcquired} onChange={v=>setArr("pfsRealEstate",i,"yearAcquired",v)} />
+              <Inp label="Purchase Price" prefix="$" value={r.purchasePrice} onChange={v=>setArr("pfsRealEstate",i,"purchasePrice",v)} />
+              <Inp label="Insured Value" prefix="$" value={r.insuredValue} onChange={v=>setArr("pfsRealEstate",i,"insuredValue",v)} />
+              <Inp label="Mortgage Balance" prefix="$" value={r.mortgageBalance} onChange={v=>setArr("pfsRealEstate",i,"mortgageBalance",v)} />
+              <TxtInp label="Maturity" value={r.maturity} onChange={v=>setArr("pfsRealEstate",i,"maturity",v)} placeholder="mm/dd/yy" />
+              <Inp label="Repay Amt" prefix="$" value={r.repayAmt} onChange={v=>setArr("pfsRealEstate",i,"repayAmt",v)} />
+              <TxtInp label="Per" value={r.repayPer} onChange={v=>setArr("pfsRealEstate",i,"repayPer",v)} placeholder="month / year" />
+              <Inp label="Market Value" prefix="$" value={r.marketValue} onChange={v=>setArr("pfsRealEstate",i,"marketValue",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsRealEstate",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsRealEstate",{description:"",isPrimary:false,mortgageCompany:"",yearAcquired:"",purchasePrice:"",insuredValue:"",mortgageBalance:"",maturity:"",repayAmt:"",repayPer:"",marketValue:""})}>+ Add Property</button>
+        </div>
+      );
+      case "pfs_sch6_short_term_notes": return (
+        <div className="step-content">
+          <SecHdr icon="📒" title="Schedule 6 — Short Term Notes &amp; Loans Due" subtitle="Personal loans, signature notes, auto loans" color="#2d5a8e" />
+          {(data.pfsShortTermNotes||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsShortTermNotes-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Creditor" value={r.creditor} onChange={v=>setArr("pfsShortTermNotes",i,"creditor",v)} />
+              <TxtInp label="Collateral" value={r.collateral} onChange={v=>setArr("pfsShortTermNotes",i,"collateral",v)} />
+              <TxtInp label="Maturity" value={r.maturity} onChange={v=>setArr("pfsShortTermNotes",i,"maturity",v)} placeholder="mm/dd/yy" />
+              <Inp label="Repay Amt" prefix="$" value={r.repayAmt} onChange={v=>setArr("pfsShortTermNotes",i,"repayAmt",v)} />
+              <TxtInp label="Per" value={r.repayPer} onChange={v=>setArr("pfsShortTermNotes",i,"repayPer",v)} placeholder="month / year" />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("pfsShortTermNotes",i,"balance",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsShortTermNotes",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsShortTermNotes",{creditor:"",collateral:"",maturity:"",repayAmt:"",repayPer:"",balance:""})}>+ Add</button>
+        </div>
+      );
+      case "pfs_sch7_credit_accounts": return (
+        <div className="step-content">
+          <SecHdr icon="💳" title="Schedule 7 — Credit Accounts &amp; Bills Due" subtitle="Credit cards, store accounts, open bills" color="#2d5a8e" />
+          {(data.pfsCreditAccounts||[]).map((r,i) => (
+            <div key={i} className="row-entry" data-rowkey={`pfsCreditAccounts-${i}`}>
+              <span className="row-num">{i+1}</span>
+              <TxtInp label="Company" value={r.company} onChange={v=>setArr("pfsCreditAccounts",i,"company",v)} />
+              <Inp label="Repay Amt" prefix="$" value={r.repayAmt} onChange={v=>setArr("pfsCreditAccounts",i,"repayAmt",v)} />
+              <TxtInp label="Per" value={r.repayPer} onChange={v=>setArr("pfsCreditAccounts",i,"repayPer",v)} placeholder="month" />
+              <Inp label="Balance" prefix="$" value={r.balance} onChange={v=>setArr("pfsCreditAccounts",i,"balance",v)} />
+              <button className="remove-btn" onClick={()=>removeRow("pfsCreditAccounts",i)}>x</button>
+            </div>
+          ))}
+          <button className="add-btn" onClick={()=>addRow("pfsCreditAccounts",{company:"",repayAmt:"",repayPer:"",balance:""})}>+ Add</button>
+        </div>
+      );
+      case "pfs_other_assets_liabs": return (
+        <div className="step-content">
+          <SecHdr icon="📁" title="Other Assets &amp; Liabilities" subtitle="Summary lines that don't live in a schedule — autos, personal property, retirement, taxes" color="#2d5a8e" />
+          <div style={{display:'flex',gap:14,flexWrap:'wrap'}}>
+            <div style={{flex:'1 1 300px',minWidth:260,padding:'10px 12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8}}>
+              <div style={{fontWeight:700,color:'#15803d',marginBottom:8}}>Other Assets</div>
+              <Inp label="Profit Sharing (net of loans)" prefix="$" value={data.assetProfitSharing||''} onChange={v=>set("assetProfitSharing",v)} />
+              <Inp label="Pension / Retirement / IRA" prefix="$" value={data.assetPensionIRA||''} onChange={v=>set("assetPensionIRA",v)} />
+              <Inp label="Automobiles" prefix="$" value={data.assetAutos||''} onChange={v=>set("assetAutos",v)} />
+              <Inp label="Personal Property" prefix="$" value={data.assetPersonalProperty||''} onChange={v=>set("assetPersonalProperty",v)} />
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="Other Asset 1 — describe" value={data.assetOther1Desc||''} onChange={v=>set("assetOther1Desc",v)} />
+                <Inp label="Amount" prefix="$" value={data.assetOther1Amt||''} onChange={v=>set("assetOther1Amt",v)} />
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="Other Asset 2 — describe" value={data.assetOther2Desc||''} onChange={v=>set("assetOther2Desc",v)} />
+                <Inp label="Amount" prefix="$" value={data.assetOther2Amt||''} onChange={v=>set("assetOther2Amt",v)} />
+              </div>
+            </div>
+            <div style={{flex:'1 1 300px',minWidth:260,padding:'10px 12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8}}>
+              <div style={{fontWeight:700,color:'#991b1b',marginBottom:8}}>Other Liabilities</div>
+              <Inp label="Taxes" prefix="$" value={data.liabTaxes||''} onChange={v=>set("liabTaxes",v)} />
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="Other Liability 1 — describe" value={data.liabOther1Desc||''} onChange={v=>set("liabOther1Desc",v)} />
+                <Inp label="Amount" prefix="$" value={data.liabOther1Amt||''} onChange={v=>set("liabOther1Amt",v)} />
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <TxtInp label="Other Liability 2 — describe" value={data.liabOther2Desc||''} onChange={v=>set("liabOther2Desc",v)} />
+                <Inp label="Amount" prefix="$" value={data.liabOther2Amt||''} onChange={v=>set("liabOther2Amt",v)} />
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+      case "pfs_income": {
+        const IncomeCol = ({ letter }) => {
+          const field = letter === 'A' ? 'applicantA' : 'applicantB';
+          const a = data[field] || {};
+          const u = (k, v) => setData({...data, [field]: {...a, [k]: v}});
+          const total = numVal(a.incSalary) + numVal(a.incBonus) + numVal(a.incDividendsInt) + numVal(a.incRentalNet) + numVal(a.incAlimony) + numVal(a.incOther);
+          return (
+            <div style={{flex:'1 1 280px',minWidth:260,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+              <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant {letter}{' — '}{a.name||'(unnamed)'}</div>
+              <Inp label="Salary" prefix="$" value={a.incSalary||''} onChange={v=>u('incSalary',v)} />
+              <Inp label="Bonuses / Commissions" prefix="$" value={a.incBonus||''} onChange={v=>u('incBonus',v)} />
+              <Inp label="Dividends / Interest" prefix="$" value={a.incDividendsInt||''} onChange={v=>u('incDividendsInt',v)} />
+              <Inp label="Net Real Estate Rent" prefix="$" value={a.incRentalNet||''} onChange={v=>u('incRentalNet',v)} />
+              <Inp label="Alimony / Child Support (optional)" prefix="$" value={a.incAlimony||''} onChange={v=>u('incAlimony',v)} />
+              <Inp label="Other (list)" prefix="$" value={a.incOther||''} onChange={v=>u('incOther',v)} />
+              <div style={{marginTop:8,padding:'6px 10px',background:'#eff6ff',borderRadius:5,display:'flex',justifyContent:'space-between',fontWeight:700,color:'#1e40af'}}>
+                <span>Annual Total</span><span>{fmt(total)}</span>
+              </div>
+            </div>
+          );
+        };
+        return (
+          <div className="step-content">
+            <SecHdr icon="💰" title="Annual Income" subtitle="Each applicant's income breakdown. Alimony/child support only required if relied on for repayment." color="#2d5a8e" />
+            <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+              <IncomeCol letter="A" />
+              <IncomeCol letter="B" />
+            </div>
+          </div>
+        );
+      }
+      case "pfs_disclosures": {
+        const yesNo = (letter, field, label) => {
+          const applicantField = letter === 'A' ? 'applicantA' : 'applicantB';
+          const a = data[applicantField] || {};
+          const u = v => setData({...data, [applicantField]: {...a, [field]: v}});
+          return (
+            <div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 0'}}>
+              <span style={{flex:1,fontSize:'.82rem'}}>{label}</span>
+              <label style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:'.78rem',cursor:'pointer'}}>
+                <input type="radio" name={`${applicantField}_${field}`} checked={a[field]==='yes'} onChange={()=>u('yes')} /> Yes
+              </label>
+              <label style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:'.78rem',cursor:'pointer'}}>
+                <input type="radio" name={`${applicantField}_${field}`} checked={a[field]==='no'} onChange={()=>u('no')} /> No
+              </label>
+            </div>
+          );
+        };
+        const DiscCol = ({ letter }) => {
+          const a = data[letter === 'A' ? 'applicantA' : 'applicantB'] || {};
+          return (
+            <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+              <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant {letter}{' — '}{a.name||'(unnamed)'}</div>
+              {yesNo(letter,'discGuarantor',"Co-maker, endorser, or guarantor on another person's debt?")}
+              {yesNo(letter,'discDefendant','Defendant in any suit or legal action?')}
+              {yesNo(letter,'discBankruptcy','Ever been through bankruptcy or had a judgment against you?')}
+              {yesNo(letter,'discWill','Have you made a will?')}
+              {yesNo(letter,'discTrustAssets','Any assets held in a trust?')}
+            </div>
+          );
+        };
+        return (
+          <div className="step-content">
+            <SecHdr icon="❓" title="Disclosures" subtitle="Yes/No questions required by the PFS form" color="#2d5a8e" />
+            <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+              <DiscCol letter="A" />
+              <DiscCol letter="B" />
+            </div>
+          </div>
+        );
+      }
+      case "pfs_summary": return (
+        <div className="step-content">
+          <SecHdr icon="✅" title="Summary" subtitle="PFS complete — save to persist, print when ready." color="#2d5a8e" />
           <div style={{padding:'14px 16px',background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:8,fontSize:'.85rem',color:'#2d5a8e',lineHeight:1.6}}>
-            You've walked through every commercial section. Click <strong>Save</strong> in the header to file this sheet. The commercial-specific Print, Budget, Covenant Ratios, and Reconciliation tabs land in Phase 3 — until then, Balance Sheet and Year Comparison are the two tabs available to a commercial sheet.
+            You've walked through every PFS section. Click <strong>Save</strong> in the header to file this PFS, or <strong>🖨 Print PFS</strong> below to produce the Glacier-style form for signature.
           </div>
         </div>
       );
@@ -17506,14 +17950,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                       Crops, livestock, machinery, real estate, FSA packets, equipment appraisals, and the Ag Inspection + Year Reconciliations tabs.
                     </div>
                   </button>
-                  <button onClick={()=>startNewOfType('commercial')}
+                  <button onClick={()=>startNewOfType('pfs')}
                     style={{textAlign:"left",padding:"18px 18px",background:"#f0f6fb",border:"1.5px solid #c8dcef",borderRadius:12,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}
                     onMouseEnter={e=>{e.currentTarget.style.borderColor='#2d5a8e';e.currentTarget.style.background='#e6f1fb';}}
                     onMouseLeave={e=>{e.currentTarget.style.borderColor='#c8dcef';e.currentTarget.style.background='#f0f6fb';}}>
-                    <div style={{fontSize:"1.6rem",marginBottom:6}}>🏢</div>
-                    <div style={{fontWeight:800,fontSize:".95rem",color:"#2d5a8e",marginBottom:4}}>Commercial</div>
+                    <div style={{fontSize:"1.6rem",marginBottom:6}}>👤</div>
+                    <div style={{fontWeight:800,fontSize:".95rem",color:"#2d5a8e",marginBottom:4}}>Personal Financial Statement</div>
                     <div style={{fontSize:".78rem",color:"#555",lineHeight:1.5}}>
-                      A/R + aging, inventory (raw / WIP / finished), FF&amp;E, line of credit with borrowing-base, term debt + SBA, covenant ratios.
+                      Glacier-style PFS for business loan applicants — two applicants, asset/liability summary, annual income, Yes/No disclosures, seven detail schedules.
                     </div>
                   </button>
                 </div>
@@ -19182,14 +19626,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           {/* Sheet-type badge — only renders when the feature flag is on
               so existing ag-only lenders see no change in the header. */}
           {profile?.features?.commercialBS && data.sheetType && (
-            <span title={data.sheetType === 'commercial' ? 'Commercial balance sheet' : 'Agricultural balance sheet'}
+            <span title={data.sheetType === 'pfs' ? 'Personal Financial Statement' : 'Agricultural balance sheet'}
               style={{
                 marginLeft:4,
-                background: data.sheetType === 'commercial' ? 'rgba(45,90,142,.25)' : 'rgba(255,255,255,.18)',
+                background: data.sheetType === 'pfs' ? 'rgba(45,90,142,.25)' : 'rgba(255,255,255,.18)',
                 border: '1px solid rgba(255,255,255,.3)',
                 padding:'1px 8px',borderRadius:999,fontSize:10,fontWeight:700,letterSpacing:'.03em',
               }}>
-              {data.sheetType === 'commercial' ? '🏢 COMMERCIAL' : '🌾 AG'}
+              {data.sheetType === 'pfs' ? '👤 PFS' : '🌾 AG'}
             </span>
           )}
           {session?.user?.email && <span style={{fontSize:".78rem",color:"rgba(255,255,255,.65)"}}>{profile?.full_name||session.user.email}{profile?.role==="admin"&&<span style={{marginLeft:4,background:"rgba(255,255,255,.2)",padding:"1px 6px",borderRadius:999,fontSize:10,fontWeight:700}}>ADMIN</span>}</span>}
@@ -19215,14 +19659,14 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           sheets, and commercial-only tabs will land here in later phases.
           Balance Sheet + Year Comparison are shared so they always show. */}
       {(() => {
-        const isCommercial = data.sheetType === 'commercial';
+        const isPfs = data.sheetType === 'pfs';
         return (
           <div className="tab-bar">
             <button className={"tab-btn" + (activeTab === "balance" ? " tab-active" : "")}
               onClick={()=>setActiveTab("balance")}>
-              Balance Sheet
+              {isPfs ? 'PFS' : 'Balance Sheet'}
             </button>
-            {!isCommercial && (
+            {!isPfs && (
               <button className={"tab-btn" + (activeTab === "budget" ? " tab-active" : "")}
                 onClick={()=>{setActiveTab("budget");loadCorpPersonalDebt();}}>
                 Budget / Cash Flow
@@ -19232,42 +19676,22 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               onClick={()=>{setActiveTab("compare");loadComparisonSheets();}}>
               Year Comparison
             </button>
-            {!isCommercial && (
+            {!isPfs && (
               <button className={"tab-btn" + (activeTab === "whatif" ? " tab-active" : "")}
                 onClick={()=>setActiveTab("whatif")}>
                 What-if
               </button>
             )}
-            {!isCommercial && (
+            {!isPfs && (
               <button className={"tab-btn" + (activeTab === "inspection" ? " tab-active" : "")}
                 onClick={()=>setActiveTab("inspection")}>
                 🌾 Ag Inspection
               </button>
             )}
-            {/* Year reconciliation tab — per-user feature flag, ag only
-                until the commercial-flavored version lands in Phase 3. */}
-            {!isCommercial && !!profile?.features?.accrualRecon && (
+            {!isPfs && !!profile?.features?.accrualRecon && (
               <button className={"tab-btn" + (activeTab === "accrual" ? " tab-active" : "")}
                 onClick={()=>setActiveTab("accrual")}>
                 📊 Year Reconciliations
-              </button>
-            )}
-            {isCommercial && (
-              <button className={"tab-btn" + (activeTab === "covenants" ? " tab-active" : "")}
-                onClick={()=>setActiveTab("covenants")}>
-                📊 Covenant Ratios
-              </button>
-            )}
-            {isCommercial && (
-              <button className={"tab-btn" + (activeTab === "comm_budget" ? " tab-active" : "")}
-                onClick={()=>setActiveTab("comm_budget")}>
-                💵 Budget / P&amp;L
-              </button>
-            )}
-            {isCommercial && (
-              <button className={"tab-btn" + (activeTab === "comm_recon" ? " tab-active" : "")}
-                onClick={()=>setActiveTab("comm_recon")}>
-                📑 Reconciliation
               </button>
             )}
           </div>
@@ -19332,29 +19756,27 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           </div>
           <div className="main">
             <div className="sidebar">
-              {/* Sidebar sections filter to only the steps actually in the
-                  current STEPS array. On a commercial sheet, ag steps drop
-                  out of Assets / Liabilities and commercial steps take
-                  their place — no ag labels leak into the sidebar. */}
+              {/* Sidebar sections — ag uses Setup/Assets/Liabilities;
+                  PFS uses Setup/Schedules/Other/Finish. */}
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Setup</div>
-                {["intro","intro_comm"].filter(s => STEPS.indexOf(s) >= 0).map(s => {
+                {(data.sheetType === 'pfs' ? PFS_SIDEBAR_SETUP : ["intro"]).filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
               <div className="sidebar-section">
-                <div className="sidebar-section-label">Assets</div>
-                {ASSET_STEPS.filter(s => STEPS.indexOf(s) >= 0).map(s => {
+                <div className="sidebar-section-label">{data.sheetType === 'pfs' ? 'Schedules' : 'Assets'}</div>
+                {(data.sheetType === 'pfs' ? PFS_SIDEBAR_SCHEDS : ASSET_STEPS).filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
                 })}
               </div>
               <div className="sidebar-section">
-                <div className="sidebar-section-label">Liabilities{data.sheetType === 'commercial' ? ' & Equity' : ''}</div>
-                {["liab_intro",...LIAB_STEPS].filter(s => STEPS.indexOf(s) >= 0).map(s => {
+                <div className="sidebar-section-label">{data.sheetType === 'pfs' ? 'Income & Disclosures' : 'Liabilities'}</div>
+                {(data.sheetType === 'pfs' ? PFS_SIDEBAR_OTHER : ["liab_intro",...LIAB_STEPS]).filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
@@ -19375,7 +19797,7 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               )}
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Finish</div>
-                {["summary","summary_comm"].filter(s => STEPS.indexOf(s) >= 0).map(s => {
+                {["summary","pfs_summary"].filter(s => STEPS.indexOf(s) >= 0).map(s => {
                   const idx = STEPS.indexOf(s);
                   const cls = "sidebar-item" + (currentStepId === s ? " active" : idx < step ? " done" : "");
                   return <div key={s} className={cls} onClick={()=>setStep(idx)} tabIndex={-1}>{STEP_LABELS[s]}</div>;
@@ -19503,9 +19925,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
                   <span className="step-info">{step+1} / {STEPS.length}</span>
                   {step < STEPS.length - 1
                     ? <button ref={nextBtnRef} className="btn btn-primary" onClick={next} tabIndex={0}>Next</button>
-                    : data.sheetType === 'commercial'
+                    : data.sheetType === 'pfs'
                       ? <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
-                          <button className="btn btn-success" onClick={()=>handlePrintCommercial(data, totalAssets, totalLiabilities)} tabIndex={0}>🖨 Print Commercial BS</button>
+                          <button className="btn btn-success" onClick={()=>handlePrintPfs(data, totalAssets, totalLiabilities)} tabIndex={0}>🖨 Print PFS</button>
                         </div>
                       : <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
                           <button className="btn btn-secondary" onClick={()=>setShowSplitter(true)} style={{background:'#374151',color:'white'}} tabIndex={0}>✂️ Split</button>
@@ -19893,21 +20315,6 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           )}
           <InspectionView data={data} setData={setData} />
         </div>
-      )}
-
-      {/* ───────── Commercial: Covenant Ratios ───────── */}
-      {activeTab === "covenants" && data.sheetType === 'commercial' && (
-        <CovenantRatiosTab data={data} setData={setData} totalAssets={totalAssets} totalLiabilities={totalLiabilities} />
-      )}
-
-      {/* ───────── Commercial: Budget / P&L ───────── */}
-      {activeTab === "comm_budget" && data.sheetType === 'commercial' && (
-        <CommercialBudgetTab data={data} setData={setData} />
-      )}
-
-      {/* ───────── Commercial: Reconciliation ───────── */}
-      {activeTab === "comm_recon" && data.sheetType === 'commercial' && (
-        <CommercialReconTab data={data} setData={setData} savedSheets={savedSheets} totalAssets={totalAssets} totalLiabilities={totalLiabilities} />
       )}
 
       {activeTab === "accrual" && !!profile?.features?.accrualRecon && (
