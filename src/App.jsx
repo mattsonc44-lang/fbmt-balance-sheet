@@ -15450,45 +15450,15 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
       // PFS step cases (active)
       // ─────────────────────────────────────────────────────────────
       case "pfs_applicants": {
-        const App = ({ letter }) => {
-          const field = letter === 'A' ? 'applicantA' : 'applicantB';
-          const a = data[field] || {};
-          const u = (k, v) => setData({...data, [field]: {...a, [k]: v}});
-          return (
-            <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
-              <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant {letter}{letter==='B'?' (Co-Applicant)':''}</div>
-              <TxtInp label="Name" value={a.name||''} onChange={v=>u('name',v)} />
-              <TxtInp label="Address" value={a.address||''} onChange={v=>u('address',v)} />
-              <div style={{display:'flex',gap:6}}>
-                <TxtInp label="City" value={a.city||''} onChange={v=>u('city',v)} />
-                <TxtInp label="State" value={a.state||''} onChange={v=>u('state',v)} />
-                <TxtInp label="Zip" value={a.zip||''} onChange={v=>u('zip',v)} />
-              </div>
-              <TxtInp label="Date of Birth" value={a.dob||''} onChange={v=>u('dob',v)} placeholder="mm/dd/yyyy" />
-              <TxtInp label="SSN" value={a.ssn||''} onChange={v=>u('ssn',v)} placeholder="XXX-XX-XXXX" />
-              <div style={{display:'flex',gap:6}}>
-                <TxtInp label="Phone" value={a.phone||''} onChange={v=>u('phone',v)} />
-                <TxtInp label="Cell" value={a.cell||''} onChange={v=>u('cell',v)} />
-              </div>
-              <div style={{display:'flex',gap:6}}>
-                <TxtInp label="Employer" value={a.employer||''} onChange={v=>u('employer',v)} />
-                <TxtInp label="How Long" value={a.howLong||''} onChange={v=>u('howLong',v)} />
-              </div>
-              <TxtInp label="Position / Title" value={a.title||''} onChange={v=>u('title',v)} />
-              <TxtInp label="Dependents (incl. self)" value={a.dependents||''} onChange={v=>u('dependents',v)} />
-              <div className="input-group">
-                <label>Marital Status</label>
-                <select className="text-input" value={a.maritalStatus||''} onChange={e=>u('maritalStatus',e.target.value)}
-                  style={{fontFamily:'inherit'}}>
-                  <option value="">— Select —</option>
-                  <option value="unmarried">Unmarried</option>
-                  <option value="married">Married</option>
-                  <option value="separated">Separated</option>
-                </select>
-              </div>
-            </div>
-          );
-        };
+        // IMPORTANT: inline the JSX for each applicant card instead of
+        // defining a component inside the case. A nested component is a
+        // new function reference on every render, so React unmounts +
+        // remounts the inputs on each keystroke, killing focus and
+        // making the fields effectively unfillable.
+        const aA = data.applicantA || {};
+        const aB = data.applicantB || {};
+        const updA = (k, v) => setData({...data, applicantA: {...aA, [k]: v}});
+        const updB = (k, v) => setData({...data, applicantB: {...aB, [k]: v}});
         return (
           <div className="step-content">
             <SecHdr icon="👤" title="Personal Financial Statement" subtitle="Glacier Bank — PFS for business loan applicants" color="#2d5a8e" />
@@ -15499,8 +15469,70 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
               <input type="date" className="text-input" value={data.asOfDate} onChange={e=>set("asOfDate",e.target.value)} />
             </div>
             <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:14}}>
-              <App letter="A" />
-              <App letter="B" />
+              <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+                <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant A</div>
+                <TxtInp label="Name" value={aA.name||''} onChange={v=>updA('name',v)} />
+                <TxtInp label="Address" value={aA.address||''} onChange={v=>updA('address',v)} />
+                <div style={{display:'flex',gap:6}}>
+                  <TxtInp label="City" value={aA.city||''} onChange={v=>updA('city',v)} />
+                  <TxtInp label="State" value={aA.state||''} onChange={v=>updA('state',v)} />
+                  <TxtInp label="Zip" value={aA.zip||''} onChange={v=>updA('zip',v)} />
+                </div>
+                <TxtInp label="Date of Birth" value={aA.dob||''} onChange={v=>updA('dob',v)} placeholder="mm/dd/yyyy" />
+                <TxtInp label="SSN" value={aA.ssn||''} onChange={v=>updA('ssn',v)} placeholder="XXX-XX-XXXX" />
+                <div style={{display:'flex',gap:6}}>
+                  <TxtInp label="Phone" value={aA.phone||''} onChange={v=>updA('phone',v)} />
+                  <TxtInp label="Cell" value={aA.cell||''} onChange={v=>updA('cell',v)} />
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <TxtInp label="Employer" value={aA.employer||''} onChange={v=>updA('employer',v)} />
+                  <TxtInp label="How Long" value={aA.howLong||''} onChange={v=>updA('howLong',v)} />
+                </div>
+                <TxtInp label="Position / Title" value={aA.title||''} onChange={v=>updA('title',v)} />
+                <TxtInp label="Dependents (incl. self)" value={aA.dependents||''} onChange={v=>updA('dependents',v)} />
+                <div className="input-group">
+                  <label>Marital Status</label>
+                  <select className="text-input" value={aA.maritalStatus||''} onChange={e=>updA('maritalStatus',e.target.value)}
+                    style={{fontFamily:'inherit'}}>
+                    <option value="">— Select —</option>
+                    <option value="unmarried">Unmarried</option>
+                    <option value="married">Married</option>
+                    <option value="separated">Separated</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+                <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant B (Co-Applicant)</div>
+                <TxtInp label="Name" value={aB.name||''} onChange={v=>updB('name',v)} />
+                <TxtInp label="Address" value={aB.address||''} onChange={v=>updB('address',v)} />
+                <div style={{display:'flex',gap:6}}>
+                  <TxtInp label="City" value={aB.city||''} onChange={v=>updB('city',v)} />
+                  <TxtInp label="State" value={aB.state||''} onChange={v=>updB('state',v)} />
+                  <TxtInp label="Zip" value={aB.zip||''} onChange={v=>updB('zip',v)} />
+                </div>
+                <TxtInp label="Date of Birth" value={aB.dob||''} onChange={v=>updB('dob',v)} placeholder="mm/dd/yyyy" />
+                <TxtInp label="SSN" value={aB.ssn||''} onChange={v=>updB('ssn',v)} placeholder="XXX-XX-XXXX" />
+                <div style={{display:'flex',gap:6}}>
+                  <TxtInp label="Phone" value={aB.phone||''} onChange={v=>updB('phone',v)} />
+                  <TxtInp label="Cell" value={aB.cell||''} onChange={v=>updB('cell',v)} />
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <TxtInp label="Employer" value={aB.employer||''} onChange={v=>updB('employer',v)} />
+                  <TxtInp label="How Long" value={aB.howLong||''} onChange={v=>updB('howLong',v)} />
+                </div>
+                <TxtInp label="Position / Title" value={aB.title||''} onChange={v=>updB('title',v)} />
+                <TxtInp label="Dependents (incl. self)" value={aB.dependents||''} onChange={v=>updB('dependents',v)} />
+                <div className="input-group">
+                  <label>Marital Status</label>
+                  <select className="text-input" value={aB.maritalStatus||''} onChange={e=>updB('maritalStatus',e.target.value)}
+                    style={{fontFamily:'inherit'}}>
+                    <option value="">— Select —</option>
+                    <option value="unmarried">Unmarried</option>
+                    <option value="married">Married</option>
+                    <option value="separated">Separated</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         );
@@ -15669,72 +15701,79 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
         </div>
       );
       case "pfs_income": {
-        const IncomeCol = ({ letter }) => {
-          const field = letter === 'A' ? 'applicantA' : 'applicantB';
-          const a = data[field] || {};
-          const u = (k, v) => setData({...data, [field]: {...a, [k]: v}});
-          const total = numVal(a.incSalary) + numVal(a.incBonus) + numVal(a.incDividendsInt) + numVal(a.incRentalNet) + numVal(a.incAlimony) + numVal(a.incOther);
-          return (
-            <div style={{flex:'1 1 280px',minWidth:260,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
-              <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant {letter}{' — '}{a.name||'(unnamed)'}</div>
-              <Inp label="Salary" prefix="$" value={a.incSalary||''} onChange={v=>u('incSalary',v)} />
-              <Inp label="Bonuses / Commissions" prefix="$" value={a.incBonus||''} onChange={v=>u('incBonus',v)} />
-              <Inp label="Dividends / Interest" prefix="$" value={a.incDividendsInt||''} onChange={v=>u('incDividendsInt',v)} />
-              <Inp label="Net Real Estate Rent" prefix="$" value={a.incRentalNet||''} onChange={v=>u('incRentalNet',v)} />
-              <Inp label="Alimony / Child Support (optional)" prefix="$" value={a.incAlimony||''} onChange={v=>u('incAlimony',v)} />
-              <Inp label="Other (list)" prefix="$" value={a.incOther||''} onChange={v=>u('incOther',v)} />
-              <div style={{marginTop:8,padding:'6px 10px',background:'#eff6ff',borderRadius:5,display:'flex',justifyContent:'space-between',fontWeight:700,color:'#1e40af'}}>
-                <span>Annual Total</span><span>{fmt(total)}</span>
-              </div>
-            </div>
-          );
-        };
+        const aA = data.applicantA || {};
+        const aB = data.applicantB || {};
+        const updA = (k, v) => setData({...data, applicantA: {...aA, [k]: v}});
+        const updB = (k, v) => setData({...data, applicantB: {...aB, [k]: v}});
+        const totA = numVal(aA.incSalary)+numVal(aA.incBonus)+numVal(aA.incDividendsInt)+numVal(aA.incRentalNet)+numVal(aA.incAlimony)+numVal(aA.incOther);
+        const totB = numVal(aB.incSalary)+numVal(aB.incBonus)+numVal(aB.incDividendsInt)+numVal(aB.incRentalNet)+numVal(aB.incAlimony)+numVal(aB.incOther);
         return (
           <div className="step-content">
             <SecHdr icon="💰" title="Annual Income" subtitle="Each applicant's income breakdown. Alimony/child support only required if relied on for repayment." color="#2d5a8e" />
             <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-              <IncomeCol letter="A" />
-              <IncomeCol letter="B" />
+              <div style={{flex:'1 1 280px',minWidth:260,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+                <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant A — {aA.name||'(unnamed)'}</div>
+                <Inp label="Salary" prefix="$" value={aA.incSalary||''} onChange={v=>updA('incSalary',v)} />
+                <Inp label="Bonuses / Commissions" prefix="$" value={aA.incBonus||''} onChange={v=>updA('incBonus',v)} />
+                <Inp label="Dividends / Interest" prefix="$" value={aA.incDividendsInt||''} onChange={v=>updA('incDividendsInt',v)} />
+                <Inp label="Net Real Estate Rent" prefix="$" value={aA.incRentalNet||''} onChange={v=>updA('incRentalNet',v)} />
+                <Inp label="Alimony / Child Support (optional)" prefix="$" value={aA.incAlimony||''} onChange={v=>updA('incAlimony',v)} />
+                <Inp label="Other (list)" prefix="$" value={aA.incOther||''} onChange={v=>updA('incOther',v)} />
+                <div style={{marginTop:8,padding:'6px 10px',background:'#eff6ff',borderRadius:5,display:'flex',justifyContent:'space-between',fontWeight:700,color:'#1e40af'}}>
+                  <span>Annual Total</span><span>{fmt(totA)}</span>
+                </div>
+              </div>
+              <div style={{flex:'1 1 280px',minWidth:260,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+                <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant B — {aB.name||'(unnamed)'}</div>
+                <Inp label="Salary" prefix="$" value={aB.incSalary||''} onChange={v=>updB('incSalary',v)} />
+                <Inp label="Bonuses / Commissions" prefix="$" value={aB.incBonus||''} onChange={v=>updB('incBonus',v)} />
+                <Inp label="Dividends / Interest" prefix="$" value={aB.incDividendsInt||''} onChange={v=>updB('incDividendsInt',v)} />
+                <Inp label="Net Real Estate Rent" prefix="$" value={aB.incRentalNet||''} onChange={v=>updB('incRentalNet',v)} />
+                <Inp label="Alimony / Child Support (optional)" prefix="$" value={aB.incAlimony||''} onChange={v=>updB('incAlimony',v)} />
+                <Inp label="Other (list)" prefix="$" value={aB.incOther||''} onChange={v=>updB('incOther',v)} />
+                <div style={{marginTop:8,padding:'6px 10px',background:'#eff6ff',borderRadius:5,display:'flex',justifyContent:'space-between',fontWeight:700,color:'#1e40af'}}>
+                  <span>Annual Total</span><span>{fmt(totB)}</span>
+                </div>
+              </div>
             </div>
           </div>
         );
       }
       case "pfs_disclosures": {
-        const yesNo = (letter, field, label) => {
-          const applicantField = letter === 'A' ? 'applicantA' : 'applicantB';
-          const a = data[applicantField] || {};
-          const u = v => setData({...data, [applicantField]: {...a, [field]: v}});
-          return (
-            <div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 0'}}>
-              <span style={{flex:1,fontSize:'.82rem'}}>{label}</span>
-              <label style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:'.78rem',cursor:'pointer'}}>
-                <input type="radio" name={`${applicantField}_${field}`} checked={a[field]==='yes'} onChange={()=>u('yes')} /> Yes
-              </label>
-              <label style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:'.78rem',cursor:'pointer'}}>
-                <input type="radio" name={`${applicantField}_${field}`} checked={a[field]==='no'} onChange={()=>u('no')} /> No
-              </label>
-            </div>
-          );
-        };
-        const DiscCol = ({ letter }) => {
-          const a = data[letter === 'A' ? 'applicantA' : 'applicantB'] || {};
-          return (
-            <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
-              <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant {letter}{' — '}{a.name||'(unnamed)'}</div>
-              {yesNo(letter,'discGuarantor',"Co-maker, endorser, or guarantor on another person's debt?")}
-              {yesNo(letter,'discDefendant','Defendant in any suit or legal action?')}
-              {yesNo(letter,'discBankruptcy','Ever been through bankruptcy or had a judgment against you?')}
-              {yesNo(letter,'discWill','Have you made a will?')}
-              {yesNo(letter,'discTrustAssets','Any assets held in a trust?')}
-            </div>
-          );
-        };
+        const aA = data.applicantA || {};
+        const aB = data.applicantB || {};
+        const updA = (k, v) => setData({...data, applicantA: {...aA, [k]: v}});
+        const updB = (k, v) => setData({...data, applicantB: {...aB, [k]: v}});
+        const questions = [
+          ['discGuarantor',"Co-maker, endorser, or guarantor on another person's debt?"],
+          ['discDefendant','Defendant in any suit or legal action?'],
+          ['discBankruptcy','Ever been through bankruptcy or had a judgment against you?'],
+          ['discWill','Have you made a will?'],
+          ['discTrustAssets','Any assets held in a trust?'],
+        ];
+        const renderYesNo = (letter, a, upd, field, label) => (
+          <div key={field} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 0'}}>
+            <span style={{flex:1,fontSize:'.82rem'}}>{label}</span>
+            <label style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:'.78rem',cursor:'pointer'}}>
+              <input type="radio" name={`applicant${letter}_${field}`} checked={a[field]==='yes'} onChange={()=>upd(field,'yes')} /> Yes
+            </label>
+            <label style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:'.78rem',cursor:'pointer'}}>
+              <input type="radio" name={`applicant${letter}_${field}`} checked={a[field]==='no'} onChange={()=>upd(field,'no')} /> No
+            </label>
+          </div>
+        );
         return (
           <div className="step-content">
             <SecHdr icon="❓" title="Disclosures" subtitle="Yes/No questions required by the PFS form" color="#2d5a8e" />
             <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-              <DiscCol letter="A" />
-              <DiscCol letter="B" />
+              <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+                <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant A — {aA.name||'(unnamed)'}</div>
+                {questions.map(([f,l]) => renderYesNo('A', aA, updA, f, l))}
+              </div>
+              <div style={{flex:'1 1 320px',minWidth:280,padding:'12px 14px',background:'#f7fbfe',border:'1px solid #c8dcef',borderRadius:8}}>
+                <div style={{fontWeight:800,color:'#2d5a8e',marginBottom:10,fontSize:'.9rem'}}>Applicant B — {aB.name||'(unnamed)'}</div>
+                {questions.map(([f,l]) => renderYesNo('B', aB, updB, f, l))}
+              </div>
             </div>
           </div>
         );
