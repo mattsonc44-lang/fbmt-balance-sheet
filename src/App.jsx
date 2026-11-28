@@ -882,6 +882,7 @@ const STEPS_PFS = [
   "pfs_sch4_receivables","pfs_sch5_real_estate",
   "pfs_sch6_short_term_notes","pfs_sch7_credit_accounts",
   "pfs_other_assets_liabs",
+  "pfs_linked_business",
   "pfs_income",
   "pfs_disclosures",
   "pfs_summary"
@@ -913,6 +914,7 @@ const STEP_LABELS = {
   pfs_sch6_short_term_notes:"Sched 6 · ST Notes",
   pfs_sch7_credit_accounts:"Sched 7 · Credit",
   pfs_other_assets_liabs:"Other Assets / Liab",
+  pfs_linked_business:"Linked Business BS",
   pfs_income:"Annual Income",
   pfs_disclosures:"Disclosures",
   pfs_summary:"Summary",
@@ -926,7 +928,7 @@ const LIAB_STEPS = ["operating_notes","accounts_due","intermediate_debt","re_deb
 // split, so the sidebar for PFS reads straight off STEPS_PFS.
 const PFS_SIDEBAR_SETUP   = ["pfs_applicants"];
 const PFS_SIDEBAR_SCHEDS  = ["pfs_sch1_cash","pfs_sch2_securities","pfs_sch3_life_insurance","pfs_sch4_receivables","pfs_sch5_real_estate","pfs_sch6_short_term_notes","pfs_sch7_credit_accounts"];
-const PFS_SIDEBAR_OTHER   = ["pfs_other_assets_liabs","pfs_income","pfs_disclosures"];
+const PFS_SIDEBAR_OTHER   = ["pfs_other_assets_liabs","pfs_linked_business","pfs_income","pfs_disclosures"];
 const PFS_SIDEBAR_FINISH  = ["pfs_summary"];
 const ANALYSIS_STEPS = ["collateral"];
 
@@ -1188,6 +1190,9 @@ function emptyPfsData() {
     pfsRealEstate:[{description:"",isPrimary:false,mortgageCompany:"",yearAcquired:"",purchasePrice:"",insuredValue:"",mortgageBalance:"",maturity:"",repayAmt:"",repayPer:"",marketValue:""}], // Schedule 5
     pfsShortTermNotes:[{creditor:"",collateral:"",maturity:"",repayAmt:"",repayPer:"",balance:""}], // Schedule 6
     pfsCreditAccounts:[{company:"",repayAmt:"",repayPer:"",balance:""}], // Schedule 7
+    // Linked business entities — one entry per QuickBooks balance sheet
+    // the owner carries. Populated by the "Link Business BS" uploader.
+    pfsLinkedBusinesses:[],
     // Shared concepts across all sheet types
     linkedEntities:[], linkedEntitySnapshots:{}, linkedEntityNWSnapshot:{},
     folderPath:[],
@@ -1427,6 +1432,229 @@ function CalcRow({ label, value, style }) {
     </div>
   );
 }
+// ─── LinkedBusinessStep ───────────────────────────────────────────────────
+// PFS wizard step for attaching the owner's business balance sheets (QB
+// exports). The user drops a PDF; the extraction service pulls the key
+// lines + an AI-generated commentary; results append to
+// data.pfsLinkedBusinesses. Re-renders inline so the lender sees the full
+// summary before moving on to Income/Disclosures.
+function LinkedBusinessStep({ data, setData }) {
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadErr, setUploadErr] = React.useState('');
+  const businesses = Array.isArray(data.pfsLinkedBusinesses) ? data.pfsLinkedBusinesses : [];
+  const fmtMoney = v => (v === 0 || v == null || v === '') ? '$0' : (Number(v) < 0 ? '-$' : '$') + Math.abs(Math.round(Number(v))).toLocaleString();
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setUploading(true); setUploadErr('');
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error('PDF larger than 10MB — split it first.');
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const b64 = String(dataUrl).split(',')[1] || '';
+      // Two-call pattern: extract the structured BS first (so the summary
+      // call can reference exact numbers), then generate the commentary.
+      const extractResp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET||'' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 2000,
+          system: 'You extract balance sheet data from PDFs. Return ONLY valid JSON with these keys: businessName (string), asOfDate (YYYY-MM-DD), totalAssets, totalCurrentAssets, cash, receivables, inventory, totalFixedAssets, totalLiabilities, totalCurrentLiab, accountsPayable, lineOfCredit, termDebt, totalEquity, ytdNetIncome, retainedEarnings, ownerDraws, notes (array of {account, amount, note} for anything unusual). Use positive numbers for assets and liabilities, negative for draws/losses. Omit fields you cannot determine.',
+          messages: [{ role:'user', content: [
+            { type:'document', source:{ type:'base64', media_type:'application/pdf', data: b64 } },
+            { type:'text', text:'Extract the balance sheet data as JSON.' },
+          ]}],
+        }),
+      });
+      if (!extractResp.ok) throw new Error('Extraction service returned ' + extractResp.status);
+      const extractJson = await extractResp.json();
+      const rawText = (extractJson.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').replace(/```json|```/g,'').trim();
+      let parsed = {};
+      try { parsed = JSON.parse(rawText); } catch { throw new Error('Extraction returned non-JSON — PDF may be too complex or not a balance sheet.'); }
+
+      // Round-two call for the narrative summary.
+      const summaryResp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET||'' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          system: 'You are a senior commercial credit officer. Given a business balance sheet, produce a concise lender summary with these sections (markdown headers, no preamble): ### Headline, ### Liquidity, ### Leverage, ### Profitability, ### Points to walk through. Cite specific numbers. Call out anything unusual (negative cash, aging, draws exceeding income, concentration, intangibles). Keep under 400 words.',
+          messages: [{ role:'user', content: [
+            { type:'document', source:{ type:'base64', media_type:'application/pdf', data: b64 } },
+            { type:'text', text:'Write the summary for the attached balance sheet. Owner context: this business is linked to a personal financial statement for ' + (data.applicantA?.name || 'the applicant') + (data.applicantB?.name ? ' and ' + data.applicantB.name : '') + '.' },
+          ]}],
+        }),
+      });
+      if (!summaryResp.ok) throw new Error('Summary service returned ' + summaryResp.status);
+      const sumJson = await summaryResp.json();
+      const summary = (sumJson.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('') || 'Summary could not be generated.';
+
+      const entry = {
+        id: Math.random().toString(36).slice(2,10),
+        businessName: parsed.businessName || file.name.replace(/\.pdf$/i,''),
+        asOfDate: parsed.asOfDate || '',
+        uploadedAt: new Date().toISOString(),
+        fileName: file.name,
+        extract: parsed,
+        summary,
+        pdfBase64: b64,          // kept so the PFS print can bundle the PDF in later
+      };
+      setData({ ...data, pfsLinkedBusinesses: [...businesses, entry] });
+    } catch (e) {
+      setUploadErr(String(e.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = (id) => {
+    if (!window.confirm('Remove this linked business and its summary from the PFS?')) return;
+    setData({ ...data, pfsLinkedBusinesses: businesses.filter(b => b.id !== id) });
+  };
+
+  const regenerateSummary = async (entry) => {
+    // Quick re-run if the first summary wasn't ideal. Keeps the extract,
+    // just asks Claude to redo the narrative.
+    try {
+      setUploading(true); setUploadErr('');
+      const resp = await fetch('/.netlify/functions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'x-fbmt-secret': window.FBMT_FUNCTION_SECRET||'' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          system: 'You are a senior commercial credit officer. Given a business balance sheet, produce a concise lender summary with these sections (markdown headers, no preamble): ### Headline, ### Liquidity, ### Leverage, ### Profitability, ### Points to walk through. Cite specific numbers. Keep under 400 words.',
+          messages: [{ role:'user', content: [
+            { type:'document', source:{ type:'base64', media_type:'application/pdf', data: entry.pdfBase64 } },
+            { type:'text', text:'Regenerate the summary.' },
+          ]}],
+        }),
+      });
+      if (!resp.ok) throw new Error('Service returned ' + resp.status);
+      const j = await resp.json();
+      const summary = (j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('') || entry.summary;
+      setData({ ...data, pfsLinkedBusinesses: businesses.map(b => b.id === entry.id ? {...b, summary, regeneratedAt: new Date().toISOString()} : b) });
+    } catch (e) {
+      setUploadErr(String(e.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Render each business card — totals grid at the top, then the AI summary.
+  const renderSummary = (text) => {
+    // Lightweight markdown rendering: convert ### headings and preserve
+    // paragraphs + list bullets. No full markdown library needed.
+    const lines = (text||'').split(/\r?\n/);
+    return lines.map((line, i) => {
+      if (/^###\s+/.test(line)) return <div key={i} style={{fontWeight:800,color:'#2d5a8e',marginTop:10,marginBottom:4,fontSize:'.85rem'}}>{line.replace(/^###\s+/, '')}</div>;
+      if (/^-\s+/.test(line))   return <div key={i} style={{paddingLeft:14,marginBottom:3,fontSize:'.78rem'}}>• {line.replace(/^-\s+/,'')}</div>;
+      if (/^\*\s+/.test(line))  return <div key={i} style={{paddingLeft:14,marginBottom:3,fontSize:'.78rem'}}>• {line.replace(/^\*\s+/,'')}</div>;
+      if (!line.trim()) return <div key={i} style={{height:4}} />;
+      return <div key={i} style={{marginBottom:3,fontSize:'.78rem',lineHeight:1.5}}>{line}</div>;
+    });
+  };
+
+  return (
+    <div className="step-content">
+      <SecHdr icon="🏢" title="Linked Business Balance Sheets" subtitle="Drop a QuickBooks PDF (or any business BS). AI extracts the key figures and writes a credit-officer summary — linked to this PFS so the whole picture travels together." color="#2d5a8e" />
+
+      <label style={{display:'block',padding:'14px 18px',border:'2px dashed #2d5a8e',borderRadius:10,background:'#f0f6ff',textAlign:'center',cursor:uploading?'wait':'pointer',marginBottom:14}}>
+        <input type="file" accept="application/pdf,.pdf" disabled={uploading}
+          onChange={e => { const f = e.target.files?.[0]; e.target.value=''; if (f) handleFile(f); }}
+          style={{display:'none'}} />
+        {uploading ? (
+          <div style={{color:'#2d5a8e',fontWeight:700}}>Extracting and summarizing… this takes 10-20 seconds.</div>
+        ) : (
+          <>
+            <div style={{fontSize:'1.4rem',marginBottom:4}}>📄</div>
+            <div style={{color:'#2d5a8e',fontWeight:700}}>Click to upload a business balance sheet PDF</div>
+            <div style={{fontSize:'.72rem',color:'#555',marginTop:4}}>QuickBooks exports, bank-formatted BS, or any PDF balance sheet up to 10 MB</div>
+          </>
+        )}
+      </label>
+      {uploadErr && (
+        <div style={{background:'#fef2f2',border:'1px solid #fecaca',color:'#991b1b',padding:'8px 12px',borderRadius:6,fontSize:'.78rem',marginBottom:12}}>
+          ⚠ {uploadErr}
+        </div>
+      )}
+
+      {businesses.length === 0 && !uploading && (
+        <div style={{color:'#888',fontStyle:'italic',fontSize:'.82rem',padding:'10px 0'}}>
+          No business balance sheets linked yet. The owner's business picture lives separately in their accounting system — this step brings a point-in-time snapshot into the PFS.
+        </div>
+      )}
+
+      {businesses.map(b => {
+        const e = b.extract || {};
+        return (
+          <div key={b.id} style={{marginBottom:16,background:'white',border:'1px solid #c8dcef',borderRadius:10,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.06)'}}>
+            <div style={{padding:'10px 14px',background:'#f0f6ff',borderBottom:'1px solid #c8dcef',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+              <div>
+                <div style={{fontWeight:800,color:'#2d5a8e',fontSize:'.95rem'}}>{b.businessName}</div>
+                <div style={{fontSize:'.7rem',color:'#555'}}>
+                  {b.asOfDate ? `As of ${b.asOfDate} · ` : ''}uploaded {new Date(b.uploadedAt).toLocaleDateString()}
+                </div>
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <button onClick={()=>regenerateSummary(b)} disabled={uploading}
+                  style={{background:'transparent',color:'#2d5a8e',border:'1px solid #2d5a8e',borderRadius:5,padding:'3px 10px',fontSize:'.7rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                  🔄 Regenerate summary
+                </button>
+                <button onClick={()=>remove(b.id)}
+                  style={{background:'transparent',color:'#991b1b',border:'1px solid #991b1b',borderRadius:5,padding:'3px 10px',fontSize:'.7rem',fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                  Remove
+                </button>
+              </div>
+            </div>
+            <div style={{padding:'12px 14px'}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))',gap:8,marginBottom:12}}>
+                {[
+                  ['Total Assets', e.totalAssets],
+                  ['Total Liabilities', e.totalLiabilities],
+                  ['Total Equity', e.totalEquity],
+                  ['Cash', e.cash],
+                  ['A/R', e.receivables],
+                  ['Inventory', e.inventory],
+                  ['A/P', e.accountsPayable],
+                  ['Term Debt', e.termDebt],
+                  ['YTD Net Income', e.ytdNetIncome],
+                ].filter(([_,v]) => v != null && v !== '').map(([label,v], i) => (
+                  <div key={i} style={{background:'#fafafa',padding:'6px 10px',borderRadius:6,border:'1px solid #eee'}}>
+                    <div style={{fontSize:'.65rem',color:'#555',textTransform:'uppercase',letterSpacing:'.03em'}}>{label}</div>
+                    <div style={{fontSize:'.9rem',fontWeight:700,color: Number(v)<0?'#991b1b':'#111'}}>{fmtMoney(v)}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{borderTop:'1px solid #e5e7eb',paddingTop:10}}>
+                {renderSummary(b.summary)}
+              </div>
+              {Array.isArray(e.notes) && e.notes.length > 0 && (
+                <details style={{marginTop:10}}>
+                  <summary style={{cursor:'pointer',fontSize:'.72rem',color:'#2d5a8e',fontWeight:600}}>Detail: {e.notes.length} unusual account{e.notes.length===1?'':'s'}</summary>
+                  <div style={{marginTop:6,fontSize:'.72rem',color:'#555'}}>
+                    {e.notes.map((nn, i) => (
+                      <div key={i} style={{padding:'3px 0',borderBottom:'0.5px solid #eee'}}>
+                        <strong>{nn.account}</strong>: {fmtMoney(nn.amount)} — {nn.note}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RunningTotal({ assets, liabilities }) {
   const nw = assets - liabilities;
   return (
@@ -14277,6 +14505,32 @@ ${extraPages}
         {label:'Balance',key:'balance',align:'right',fmt:r=>money(r.balance)}
       ], 'balance')}
 
+      ${(d.pfsLinkedBusinesses||[]).length > 0 ? `
+        <h2>LINKED BUSINESS BALANCE SHEETS</h2>
+        ${(d.pfsLinkedBusinesses||[]).map(b => {
+          const e = b.extract || {};
+          const keyRows = [
+            ['Total Assets', e.totalAssets],['Total Liabilities', e.totalLiabilities],['Total Equity', e.totalEquity],
+            ['Cash', e.cash],['A/R', e.receivables],['Inventory', e.inventory],
+            ['A/P', e.accountsPayable],['Term Debt', e.termDebt],['YTD Net Income', e.ytdNetIncome],
+          ].filter(([_,v])=>v!=null && v!=='');
+          // Strip markdown ### headers for print; preserve line breaks.
+          const summaryHtml = String(b.summary||'').split(/\r?\n/).map(l => {
+            if (/^###\s+/.test(l)) return `<div style="font-weight:700;margin-top:6px;">${l.replace(/^###\s+/, '')}</div>`;
+            if (/^[-*]\s+/.test(l)) return `<div style="padding-left:12px;">• ${l.replace(/^[-*]\s+/, '')}</div>`;
+            if (!l.trim()) return '<div style="height:3px"></div>';
+            return `<div>${l}</div>`;
+          }).join('');
+          return `
+            <h3>${b.businessName}${b.asOfDate ? ' — as of ' + b.asOfDate : ''}</h3>
+            <table class="sch" style="margin-bottom:6px;"><tbody>
+              ${keyRows.map(([lbl,v]) => `<tr><td style="width:40%;">${lbl}</td><td class="num">${money(v)}</td></tr>`).join('')}
+            </tbody></table>
+            <div style="font-size:10px;line-height:1.5;padding:6px 10px;border:0.5px solid #c8dcef;background:#f7fbfe;border-radius:4px;">${summaryHtml}</div>
+          `;
+        }).join('')}
+      ` : ''}
+
       <p style="font-size:9.5px;color:#333;margin-top:12px;line-height:1.5;">
         We hereby certify that the information provided in this statement is true and correct. So long as we owe any sums to the bank, we agree to give the bank prompt written notice of any material change in our financial condition. The Bank is authorized to retain this personal financial statement whether or not credit is approved and is further authorized to verify our credit and employment history or any other information in this statement. This statement does not obligate the bank to make any loan even if we meet the normal standards the bank considers in determining whether to approve or deny the application.
       </p>
@@ -15699,6 +15953,9 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
             </div>
           </div>
         </div>
+      );
+      case "pfs_linked_business": return (
+        <LinkedBusinessStep data={data} setData={setData} />
       );
       case "pfs_income": {
         const aA = data.applicantA || {};
