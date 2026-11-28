@@ -16035,14 +16035,143 @@ ${anyDepr ? '<div class="foot">Net = stated Value × (1 − lender Depreciation 
           </div>
         );
       }
-      case "pfs_summary": return (
-        <div className="step-content">
-          <SecHdr icon="✅" title="Summary" subtitle="PFS complete — save to persist, print when ready." color="#2d5a8e" />
-          <div style={{padding:'14px 16px',background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:8,fontSize:'.85rem',color:'#2d5a8e',lineHeight:1.6}}>
-            You've walked through every PFS section. Click <strong>Save</strong> in the header to file this PFS, or <strong>🖨 Print PFS</strong> below to produce the Glacier-style form for signature.
+      case "pfs_summary": {
+        // At-a-glance PFS summary — mirrors the ag summary layout so the
+        // lender gets the same two-column recap on both sheet types.
+        const nn = v => Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
+        const sumSched = (section, field) => (data[section]||[]).reduce((s,r)=>s+nn(r[field]),0);
+        const sch1 = sumSched('pfsCash','balance');
+        const sch2 = sumSched('pfsSecurities','marketValue');
+        const sch3Cash = sumSched('pfsLifeInsurance','cashValue');
+        const sch3Loans = sumSched('pfsLifeInsurance','loans');
+        const sch4 = sumSched('pfsReceivables','marketValue');
+        const reAll = data.pfsRealEstate || [];
+        const sch5Primary = reAll.filter(r=>r.isPrimary).reduce((s,r)=>s+nn(r.marketValue),0);
+        const sch5Other   = reAll.filter(r=>!r.isPrimary).reduce((s,r)=>s+nn(r.marketValue),0);
+        const sch5MortPri = reAll.filter(r=>r.isPrimary).reduce((s,r)=>s+nn(r.mortgageBalance),0);
+        const sch5MortOth = reAll.filter(r=>!r.isPrimary).reduce((s,r)=>s+nn(r.mortgageBalance),0);
+        const sch6 = sumSched('pfsShortTermNotes','balance');
+        const sch7 = sumSched('pfsCreditAccounts','balance');
+        const assetOtherTot = nn(data.assetProfitSharing)+nn(data.assetPensionIRA)+nn(data.assetAutos)+nn(data.assetPersonalProperty)+nn(data.assetOther1Amt)+nn(data.assetOther2Amt);
+        const liabOtherTot  = nn(data.liabTaxes)+nn(data.liabOther1Amt)+nn(data.liabOther2Amt);
+        const assetSum = sch1+sch2+sch3Cash+sch4+sch5Primary+sch5Other+assetOtherTot;
+        const liabSum  = sch6+sch7+sch3Loans+sch5MortPri+sch5MortOth+liabOtherTot;
+        const nw = assetSum - liabSum;
+        // Linked business roll-up
+        const biz = data.pfsLinkedBusinesses || [];
+        const bizAssets = biz.reduce((s,b)=>s+nn(b.extract?.totalAssets),0);
+        const bizLiabs  = biz.reduce((s,b)=>s+nn(b.extract?.totalLiabilities),0);
+        const bizEquity = biz.reduce((s,b)=>s+nn(b.extract?.totalEquity),0);
+        const aA = data.applicantA || {};
+        const aB = data.applicantB || {};
+        const annualIncA = numVal(aA.incSalary)+numVal(aA.incBonus)+numVal(aA.incDividendsInt)+numVal(aA.incRentalNet)+numVal(aA.incAlimony)+numVal(aA.incOther);
+        const annualIncB = numVal(aB.incSalary)+numVal(aB.incBonus)+numVal(aB.incDividendsInt)+numVal(aB.incRentalNet)+numVal(aB.incAlimony)+numVal(aB.incOther);
+        const annualTot  = annualIncA + annualIncB;
+        const name = (aA.name || data.clientName) + (aB.name ? ' & ' + aB.name : '');
+        return (
+          <div className="step-content">
+            <SecHdr icon="📊" title="PFS Complete — At a Glance" subtitle={name + " — as of " + data.asOfDate} color="#2d5a8e" />
+            <div className="summary-grid">
+              <div>
+                <h3 className="col-head assets-head">ASSETS</h3>
+                <div className="summary-section">
+                  <div className="ss-label">Schedules</div>
+                  {sch1 > 0 && <div className="ss-row"><span>Cash (Sched 1)</span><span>{fmt(sch1)}</span></div>}
+                  {sch2 > 0 && <div className="ss-row"><span>Securities (Sched 2)</span><span>{fmt(sch2)}</span></div>}
+                  {sch3Cash > 0 && <div className="ss-row"><span>Life Insurance CV (Sched 3)</span><span>{fmt(sch3Cash)}</span></div>}
+                  {sch4 > 0 && <div className="ss-row"><span>Receivables / Contracts (Sched 4)</span><span>{fmt(sch4)}</span></div>}
+                  {sch5Primary > 0 && <div className="ss-row"><span>Primary Residence (Sched 5)</span><span>{fmt(sch5Primary)}</span></div>}
+                  {sch5Other > 0 && <div className="ss-row"><span>Other Real Estate (Sched 5)</span><span>{fmt(sch5Other)}</span></div>}
+                </div>
+                {assetOtherTot > 0 && (
+                  <div className="summary-section">
+                    <div className="ss-label">Other Assets</div>
+                    {nn(data.assetProfitSharing) > 0 && <div className="ss-row"><span>Profit Sharing</span><span>{fmt(data.assetProfitSharing)}</span></div>}
+                    {nn(data.assetPensionIRA) > 0 && <div className="ss-row"><span>Pension / IRA</span><span>{fmt(data.assetPensionIRA)}</span></div>}
+                    {nn(data.assetAutos) > 0 && <div className="ss-row"><span>Automobiles</span><span>{fmt(data.assetAutos)}</span></div>}
+                    {nn(data.assetPersonalProperty) > 0 && <div className="ss-row"><span>Personal Property</span><span>{fmt(data.assetPersonalProperty)}</span></div>}
+                    {nn(data.assetOther1Amt) > 0 && <div className="ss-row"><span>{data.assetOther1Desc || 'Other'}</span><span>{fmt(data.assetOther1Amt)}</span></div>}
+                    {nn(data.assetOther2Amt) > 0 && <div className="ss-row"><span>{data.assetOther2Desc || 'Other'}</span><span>{fmt(data.assetOther2Amt)}</span></div>}
+                  </div>
+                )}
+                <div className="ss-total green-total"><span>TOTAL ASSETS</span><span>{fmt(assetSum)}</span></div>
+              </div>
+              <div>
+                <h3 className="col-head liab-head">LIABILITIES</h3>
+                <div className="summary-section">
+                  <div className="ss-label">Schedules</div>
+                  {sch6 > 0 && <div className="ss-row"><span>Short Term Notes (Sched 6)</span><span>{fmt(sch6)}</span></div>}
+                  {sch7 > 0 && <div className="ss-row"><span>Credit Accounts (Sched 7)</span><span>{fmt(sch7)}</span></div>}
+                  {sch3Loans > 0 && <div className="ss-row"><span>Life Insurance Loans (Sched 3)</span><span>{fmt(sch3Loans)}</span></div>}
+                  {sch5MortPri > 0 && <div className="ss-row"><span>Mortgage — Primary Residence</span><span>{fmt(sch5MortPri)}</span></div>}
+                  {sch5MortOth > 0 && <div className="ss-row"><span>Mortgages — Other RE</span><span>{fmt(sch5MortOth)}</span></div>}
+                </div>
+                {liabOtherTot > 0 && (
+                  <div className="summary-section">
+                    <div className="ss-label">Other Liabilities</div>
+                    {nn(data.liabTaxes) > 0 && <div className="ss-row"><span>Taxes</span><span>{fmt(data.liabTaxes)}</span></div>}
+                    {nn(data.liabOther1Amt) > 0 && <div className="ss-row"><span>{data.liabOther1Desc || 'Other'}</span><span>{fmt(data.liabOther1Amt)}</span></div>}
+                    {nn(data.liabOther2Amt) > 0 && <div className="ss-row"><span>{data.liabOther2Desc || 'Other'}</span><span>{fmt(data.liabOther2Amt)}</span></div>}
+                  </div>
+                )}
+                <div className="ss-total red-total"><span>TOTAL LIABILITIES</span><span>{fmt(liabSum)}</span></div>
+                <div className="net-section">
+                  <div className="net-row nw"><span>NET WORTH</span><span className={nw >= 0 ? "green" : "red"}>{fmt(nw)}</span></div>
+                  <div className="net-row"><span>Debt-to-Asset Ratio</span><span>{assetSum > 0 ? ((liabSum/assetSum)*100).toFixed(1)+"%" : "—"}</span></div>
+                  {annualTot > 0 && (
+                    <div className="net-row"><span>Combined Annual Income</span><span>{fmt(annualTot)}</span></div>
+                  )}
+                  {liabSum > 0 && annualTot > 0 && (
+                    <div className="net-row"><span>Debt-to-Income</span><span>{((liabSum/annualTot)).toFixed(2) + 'x'}</span></div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Linked business entities summary panel */}
+            {biz.length > 0 && (
+              <div style={{background:"#f0f6ff",border:"1px solid #c0d8f0",borderRadius:10,padding:16,marginTop:14}}>
+                <div style={{fontWeight:700,fontSize:".88rem",color:"#2d5a8e",marginBottom:10}}>
+                  Linked Business Balance Sheets
+                  <span style={{fontWeight:400,fontSize:".78rem",color:"#888",marginLeft:8}}>
+                    {biz.length} business{biz.length===1?'':'es'} attached — figures NOT rolled into personal totals above
+                  </span>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))',gap:10}}>
+                  {biz.map(b => {
+                    const e = b.extract || {};
+                    const bNw = nn(e.totalEquity);
+                    return (
+                      <div key={b.id} style={{background:'white',border:'1px solid #c0d8f0',borderRadius:8,padding:'10px 12px'}}>
+                        <div style={{fontWeight:700,color:'#2d5a8e',fontSize:'.82rem',marginBottom:4}}>🏢 {b.businessName}</div>
+                        <div style={{fontSize:'.68rem',color:'#666',marginBottom:6}}>as of {b.asOfDate || '—'}</div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:'.76rem'}}><span>Assets</span><strong>{fmt(e.totalAssets)}</strong></div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:'.76rem'}}><span>Liabilities</span><strong style={{color:'#991b1b'}}>{fmt(e.totalLiabilities)}</strong></div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:'.78rem',paddingTop:3,borderTop:'0.5px solid #c0d8f0',marginTop:3,fontWeight:700}}>
+                          <span>Equity</span><span style={{color: bNw>=0?'#15803d':'#991b1b'}}>{fmt(e.totalEquity)}</span>
+                        </div>
+                        {nn(e.ytdNetIncome) !== 0 && (
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:'.7rem',color:'#555',marginTop:3}}>
+                            <span>YTD NI</span><span>{fmt(e.ytdNetIncome)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{marginTop:10,padding:'6px 10px',background:'white',borderRadius:6,display:'flex',justifyContent:'space-between',fontSize:'.8rem',fontWeight:700}}>
+                  <span style={{color:'#2d5a8e'}}>Business roll-up (owner's view)</span>
+                  <span>Assets {fmt(bizAssets)} · Liab {fmt(bizLiabs)} · <span style={{color:bizEquity>=0?'#15803d':'#991b1b'}}>Equity {fmt(bizEquity)}</span></span>
+                </div>
+              </div>
+            )}
+
+            <div style={{padding:'10px 14px',background:'#f0f6ff',border:'1px solid #c8dcef',borderRadius:8,fontSize:'.78rem',color:'#2d5a8e',lineHeight:1.5,marginTop:14}}>
+              Click <strong>Save</strong> in the header to file this PFS, or <strong>🖨 Print PFS</strong> below to produce the Glacier-style form with linked business summaries attached.
+            </div>
           </div>
-        </div>
-      );
+        );
+      }
       case "cash_glacier": return (
         <div className="step-content">
           <SecHdr icon="💰" title="Cash — Glacier Bank" subtitle="How much does the client have on deposit at Glacier Bank / First Bank of Montana?" />
